@@ -1649,33 +1649,14 @@ impl Converter {
             // of `\B`/lookaround so fancy-regex stays on its linear path;
             // the boundary condition is applied in code instead.
             let re1 = self.re(r"#([A-Za-z])#").clone();
-            self.delim_replace(line_ref, &re1, non_boundary(b'#'), &ltag);
+            self.delim_replace(line_ref, &re1, non_boundary('#'), &ltag);
             // special treatment of # for the #num case and the #link case
             if line_ref.contains('#') {
-                // The original pattern's `(?![^#]*(?:<li>|<LI>|<P>|<p>))`
-                // is checked in code. It only ever inspects the match's own
-                // interior: every character between the brackets is `[^#]`,
-                // so the `[^#]*` inside the assertion cannot reach past the
-                // closing `#` -- it starts one character in (after the
-                // group's leading `[^#]`) and stops at that `#`. In the
-                // regex this lookahead wrapped a lazy scan, and a
-                // half-megabyte bold run sent fancy-regex's backtracking VM
-                // over it; see `delim_replace`.
-                //
-                // The search is byte-wise on purpose. The tags are ASCII and
-                // no UTF-8 continuation byte can be part of one, so this is
-                // exactly equivalent -- and unlike slicing a `str` it cannot
-                // panic when `from` is not a character boundary, which it
-                // need not be in a paragraph of 8-bit characters.
-                let no_tag = |t: &str, s: usize, e: usize| {
-                    none_of(t.as_bytes(), s + 2, e - 1, &[b"<li>", b"<LI>", b"<P>", b"<p>"])
-                };
+                let re2 = self.re(r"#([^\d#][^#]*[^# \t\n])#").clone();
                 if !line_ref.contains("<a") && !line_ref.contains("<A") {
-                    let re2 = self.re(r"#([^\d#][^#]*[^# \t\n])#").clone();
-                    self.delim_replace(line_ref, &re2, no_tag, &ltag);
+                    self.delim_replace(line_ref, &re2, no_list_or_para_tag, &ltag);
                 } else {
-                    let re2 = self.re(r"#([^\d#][^#]*[^# \t\n])#").clone();
-                    *line_ref = self.delim_loop(line_ref, &re2, no_tag, tag);
+                    *line_ref = self.delim_loop(line_ref, &re2, no_list_or_para_tag, tag);
                 }
             }
         } else if delim == "^" {
@@ -1689,26 +1670,22 @@ impl Converter {
                     });
             }
             let re2 = self.re(r"\^([A-Za-z])\^").clone();
-            self.delim_replace(line_ref, &re2, non_boundary(b'^'), &ltag);
+            self.delim_replace(line_ref, &re2, non_boundary('^'), &ltag);
         } else if delim == "_" {
             let re1 = self.re(r"_([A-Za-z])_").clone();
-            let r1m = self.delim_replace(line_ref, &re1, non_boundary(b'_'), &ltag);
-            // `(?<![_A-Za-z0-9])` in code, for the same reason as above.
-            let not_word = |t: &str, s: usize, _e: usize| {
-                s == 0 || !(t.as_bytes()[s - 1] == b'_' || t.as_bytes()[s - 1].is_ascii_alphanumeric())
-            };
+            let r1m = self.delim_replace(line_ref, &re1, non_boundary('_'), &ltag);
             if r1m {
                 let re2 = self.re(r#"_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#).clone();
-                self.delim_replace(line_ref, &re2, not_word, &ltag);
+                self.delim_replace(line_ref, &re2, not_preceded_by_word_or_underscore, &ltag);
             } else if line_ref.contains('_') {
                 let re2 = self.re(r#"_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#).clone();
-                *line_ref = self.delim_loop(line_ref, &re2, not_word, tag);
+                *line_ref = self.delim_loop(line_ref, &re2, not_preceded_by_word_or_underscore, tag);
             }
         } else if delim.chars().count() == 1 {
             let db = class_body(delim);
             let dch = delim.chars().next().unwrap();
             let re1 = self.re(&format!(r"[{db}]([A-Za-z])[{db}]")).clone();
-            self.delim_replace(line_ref, &re1, non_boundary(dch as u8), &ltag);
+            self.delim_replace(line_ref, &re1, non_boundary(dch), &ltag);
             // `delim ... delim` where the content is one or more non-delimiter
             // characters ending in a "word/punctuation" character. The Perl
             // pattern's leading `(?<!delim)` is applied in code (`accept`)
@@ -1716,12 +1693,7 @@ impl Converter {
             let re2 = self.re(&format!(
                 r"[{db}]([^{db}]+?[A-Za-z0-9!-/:-@\[-`{{-~&<>])[{db}]"
             )).clone();
-            self.delim_replace(
-                line_ref,
-                &re2,
-                move |t, s, _| s == 0 || t.as_bytes()[s - 1] != dch as u8,
-                &ltag,
-            );
+            self.delim_replace(line_ref, &re2, not_preceded_by(dch), &ltag);
         } else {
             // Perl interpolates `${delim}` straight into these patterns, so a
             // delimiter holding a regex metacharacter (`**` being the
@@ -1743,15 +1715,7 @@ impl Converter {
                 ))
                 .clone();
             if line_ref.contains(delim) {
-                let dw = d.as_bytes();
-                self.delim_replace(
-                    line_ref,
-                    &re1,
-                    move |t: &str, s: usize, _e: usize| {
-                        s < dw.len() || t.as_bytes()[s - dw.len()..s] != *dw
-                    },
-                    &ltag,
-                );
+                self.delim_replace(line_ref, &re1, not_preceded_by_str(d.to_string()), &ltag);
             }
             let re2 = self.re(&format!(r"{d}\]([A-Za-z]){d}"));
             *line_ref = re2.replace_all_captures(line_ref, |c| {
@@ -2512,12 +2476,6 @@ impl Options {
     }
 }
 
-/// `\w` (word char) semantics used for the `\B` delimiter assertions:
-/// ASCII alphanumeric or underscore.
-fn is_word_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
 /// The condition the `\B` assertions in `\B delim ([A-Za-z]) delim \B`
 /// place on the characters flanking a match, expressed in code.
 ///
@@ -2526,13 +2484,78 @@ fn is_word_byte(b: u8) -> bool {
 /// character must be a word character exactly when the delimiter is; `_` is
 /// the delimiter in common use that is a word character, which is why the
 /// test asserts `_a_` is *not* turned into markup while ` #a# ` is.
-fn non_boundary(delim: u8) -> impl Fn(&str, usize, usize) -> bool {
+///
+/// The neighbours are examined a byte at a time, which is what Perl's `\b`
+/// does on the bytes it was given: every byte of a multi-byte character is
+/// `>= 0x80` and so is not a word byte. The delimiter's own word-ness has to
+/// come from the character, though -- `delim as u8` truncates `é` to `0xE9`,
+/// which is not a byte that appears in its UTF-8 encoding.
+fn non_boundary(delim: char) -> impl Fn(&str, usize, usize) -> bool {
+    let d_word = delim_is_word(delim);
     move |t: &str, s: usize, e: usize| {
-        let d_word = is_word_byte(delim);
         let left_word = s > 0 && is_word_byte(t.as_bytes()[s - 1]);
         let right_word = e < t.len() && is_word_byte(t.as_bytes()[e]);
         left_word == d_word && right_word == d_word
     }
+}
+
+/// `\w` (word char) on a **byte**, which is what Perl's `\b` sees when it is
+/// handed a byte string: ASCII alphanumeric or underscore. Every byte of a
+/// multi-byte character is `>= 0x80` and so is not a word byte, which is why
+/// this is the right test for a *neighbour* even when the text is UTF-8.
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// The same question about a delimiter, which has to be asked of the
+/// character rather than a byte: `d as u8` truncates `é` to `0xE9`, and
+/// `0xE9` is not a byte that appears in `é`'s own UTF-8 encoding. No
+/// non-ASCII character is ever a word character.
+fn delim_is_word(delim: char) -> bool {
+    delim.is_ascii() && is_word_byte(delim as u8)
+}
+
+/// `(?<![delim])` from the single-character general pattern: the delimiter
+/// must not be the character immediately before the match.
+///
+/// The check is on the preceding *character*. `delim as u8` truncates the code
+/// point -- `é` becomes `0xE9`, which is not a byte of its own UTF-8 encoding
+/// -- so a byte-wise test never rejects anything, and `ééwordé` came out
+/// marked up where Perl leaves it alone.
+fn not_preceded_by(delim: char) -> impl Fn(&str, usize, usize) -> bool {
+    move |t: &str, s: usize, _e: usize| t[..s].chars().next_back() != Some(delim)
+}
+
+/// `(?<![_A-Za-z0-9])` from the underscore pattern.
+fn not_preceded_by_word_or_underscore(t: &str, s: usize, _e: usize) -> bool {
+    s == 0 || !(t.as_bytes()[s - 1] == b'_' || is_word_byte(t.as_bytes()[s - 1]))
+}
+
+/// `(?<!delim)` from the multi-character pattern, where the delimiter is a
+/// literal string and so may be more than one byte long.
+fn not_preceded_by_str(delim: String) -> impl Fn(&str, usize, usize) -> bool {
+    let d = delim.into_bytes();
+    move |t: &str, s: usize, _e: usize| -> bool { s < d.len() || t.as_bytes()[s - d.len()..s] != *d }
+}
+
+/// The bold pattern's `(?![^#]*(?:<li>|<LI>|<P>|<p>))`, applied in code.
+///
+/// It only ever inspects the match's own interior: every character of the
+/// group is `[^#]`, so the `[^#]*` inside the assertion cannot reach past the
+/// closing `#` -- it starts one character in, after the group's leading
+/// `[^\d#]`, and stops at that `#`.
+///
+/// Byte-wise on purpose. The tags are ASCII and no UTF-8 continuation byte can
+/// be part of one, so this is exactly equivalent -- and unlike slicing a `str`
+/// it cannot panic when `s + 2` is not a character boundary, which it need not
+/// be in a paragraph of 8-bit characters.
+fn no_list_or_para_tag(t: &str, s: usize, e: usize) -> bool {
+    none_of(
+        t.as_bytes(),
+        s + 2,
+        e - 1,
+        &[b"<li>", b"<LI>", b"<P>", b"<p>"],
+    )
 }
 
 /// UTF-8 length in bytes of the character starting at `byte_pos` in `text`.
@@ -2949,7 +2972,7 @@ mod delim_linear_tests {
         out
     }
 
-    fn check_pair(c: &mut Converter, text: &str, delim: char, tag: &str) {
+    pub(crate) fn check_pair(c: &mut Converter, text: &str, delim: char, tag: &str) {
         let db = class_body(&delim.to_string());
         let ltag = |s: &str| format!("<{tag}>{s}</{tag}>");
 
@@ -2958,7 +2981,7 @@ mod delim_linear_tests {
         let re1_lin = ascii_re_cached(&format!(r"[{db}]([A-Za-z])[{db}]"));
         let expect = orig_replace(re1_orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, re1_lin, non_boundary(delim as u8), &ltag);
+        c.delim_replace(&mut got, re1_lin, non_boundary(delim), &ltag);
         assert_eq!(got, expect, "re1 mismatch for {text:?} delim={delim}");
 
         // multi-char content ending in a "word/punct" char, leading
@@ -2971,12 +2994,7 @@ mod delim_linear_tests {
         ));
         let expect = orig_replace(re2_orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(
-            &mut got,
-            re2_lin,
-            move |t, s, _| s == 0 || t.as_bytes()[s - 1] != delim as u8,
-            &ltag,
-        );
+        c.delim_replace(&mut got, re2_lin, not_preceded_by(delim), &ltag);
         assert_eq!(got, expect, "re2 mismatch for {text:?} delim={delim}");
     }
 
@@ -2989,14 +3007,35 @@ mod delim_linear_tests {
             "#a**", "#a#b#", "_a_", "x_a_", "_a_b_", "__a_", "_ab_", "_a!_",
             "^a^", "x^a^", "^a^b^", "^^a^", "^a^^", "a*b_#c^d", "*a**", "3#4#",
             "_", "#", "^", "*", "a", " a ", "1*2*3", "*a*#b#_c_^d^",
+            // A non-ASCII delimiter immediately before another one. The
+            // assertion is `(?<!é)`, and the byte the code point truncates to
+            // -- 0xE9 for `é` -- is not a byte that `é` actually contains, so
+            // a byte-wise check rejects nothing and the assertion is
+            // vacuous. `ééwordé` is the shape that came back from a customer
+            // file marked up as emphasis where Perl leaves it alone.
+            "ééwordé", "üüxü", "ééé", "üxüyü", "xééyéé", "ééwördé", "éé X üéü",
         ];
         let mut c = conv();
         for text in cases {
-            for (delim, tag) in [('*', "em"), ('#', "strong"), ('_', "u"), ('^', "em")] {
+            for &(delim, tag) in DELIMS {
                 check_pair(&mut c, text, delim, tag);
             }
         }
     }
+
+    /// The delimiters exercised everywhere below. The last two are not ASCII,
+    /// and they are here because the byte-oriented shortcut `delim as u8` is
+    /// silently wrong for them: `é` truncates to `0xE9`, which is not a byte of
+    /// its own UTF-8 encoding, so a preceding-delimiter test built on it never
+    /// rejects anything and `ééwordé` got marked up where Perl leaves it.
+    pub(crate) const DELIMS: &[(char, &str)] = &[
+        ('*', "em"),
+        ('#', "strong"),
+        ('_', "u"),
+        ('^', "em"),
+        ('é', "em"),
+        ('ü', "strong"),
+    ];
 
     /// Randomized differential: the alphabet is the union of delimiter chars
     /// and word/punct characters, so the generator keeps producing the shapes
@@ -3022,7 +3061,7 @@ mod delim_linear_tests {
             let text: String = (0..len)
                 .map(|_| alphabet[(next() as usize) % alphabet.len()])
                 .collect();
-            for (delim, tag) in [('*', "em"), ('#', "strong"), ('_', "u"), ('^', "em")] {
+            for &(delim, tag) in DELIMS {
                 check_pair(&mut c, &text, delim, tag);
             }
         }
@@ -3034,12 +3073,10 @@ mod delim_linear_tests {
 /// lookaround to `delim_replace`'s `accept` callback.
 #[cfg(test)]
 mod delim_wide_linear_tests {
+    use super::delim_linear_tests::check_pair;
     use super::*;
     use crate::links::ascii_re_cached;
     use crate::options::Options;
-
-    /// The tags the bold pattern's assertion excludes.
-    const TAGS: &[&[u8]] = &[b"<li>", b"<LI>", b"<P>", b"<p>"];
 
     fn conv() -> Converter {
         let mut opts = Options::default();
@@ -3066,9 +3103,7 @@ mod delim_wide_linear_tests {
         let ltag = |s: &str| format!("<{tag}>{s}</{tag}>");
         let orig = ascii_re_cached(r"#([^\d#](?![^#]*(?:<li>|<LI>|<P>|<p>))[^#]*[^# \t\n])#");
         let lin = ascii_re_cached(r"#([^\d#][^#]*[^# \t\n])#");
-        let no_tag = |t: &str, s: usize, e: usize| {
-            none_of(t.as_bytes(), s + 2, e - 1, TAGS)
-        };
+        let no_tag = no_list_or_para_tag;
         let expect = orig_replace(orig, text, tag);
         let mut got = text.to_string();
         c.delim_replace(&mut got, lin, no_tag, &ltag);
@@ -3080,10 +3115,7 @@ mod delim_wide_linear_tests {
         let ltag = |s: &str| format!("<{tag}>{s}</{tag}>");
         let orig = ascii_re_cached(r#"(?<![_A-Za-z0-9])_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#);
         let lin = ascii_re_cached(r#"_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#);
-        let not_word = |t: &str, s: usize, _e: usize| {
-            s == 0
-                || !(t.as_bytes()[s - 1] == b'_' || t.as_bytes()[s - 1].is_ascii_alphanumeric())
-        };
+        let not_word = not_preceded_by_word_or_underscore;
         let expect = orig_replace(orig, text, tag);
         let mut got = text.to_string();
         c.delim_replace(&mut got, lin, not_word, &ltag);
@@ -3121,15 +3153,9 @@ mod delim_wide_linear_tests {
         let lin = ascii_re_cached(&format!(
             r#"{d}((\w|["'])(\w|[-\s!-/:-@\[-`{{-~])*[^\s]){d}"#
         ));
-        let dw = d.as_bytes();
         let expect = orig_replace(orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(
-            &mut got,
-            lin,
-            move |t: &str, s: usize, _e: usize| s < dw.len() || t.as_bytes()[s - dw.len()..s] != *dw,
-            &ltag,
-        );
+        c.delim_replace(&mut got, lin, not_preceded_by_str(d.to_string()), &ltag);
         assert_eq!(got, expect, "multi mismatch for {text:?} delim={delim}");
     }
 
@@ -3161,8 +3187,7 @@ mod delim_wide_linear_tests {
             // bold path, including the in-link-context variant that selects
             // `delim_loop` in the first place
             let re = c.re(r"#([^\d#][^#]*[^# \t\n])#").clone();
-            let no_tag =
-                |t: &str, s: usize, e: usize| none_of(t.as_bytes(), s + 2, e - 1, TAGS);
+            let no_tag = no_list_or_para_tag;
             let expect = orig_replace(
                 ascii_re_cached(r"#([^\d#](?![^#]*(?:<li>|<LI>|<P>|<p>))[^#]*[^# \t\n])#"),
                 text,
@@ -3209,6 +3234,10 @@ mod delim_wide_linear_tests {
             'a', 'b', '0', ' ', '_', '#', '*', '^', 'X', 'Y', '@', '.', '\u{e4}',
             '\u{fc}', '\u{c4}', '\u{20ac}', '\u{4e2d}', '\u{2192}', '\n', '\t',
         ];
+        // a delimiter is 0xC3 0xA9, which shares its trailing byte 0xA9 with
+        // several other characters, so a byte-wise "is the previous character
+        // the delimiter" test gets the wrong answer on exactly these inputs
+        const NONASCII: &[(char, &str)] = &[('\u{e9}', "em"), ('\u{fc}', "strong")];
         let mut c = conv();
         let mut state = 0x2545_F491_4F6C_DD1Du64;
         let mut next = || {
@@ -3226,6 +3255,9 @@ mod delim_wide_linear_tests {
             check_under(&mut c, &text);
             for delim in ["XY", "@@"] {
                 check_multi(&mut c, &text, delim);
+            }
+            for (delim, tag) in NONASCII {
+                check_pair(&mut c, &text, *delim, tag);
             }
         }
     }
