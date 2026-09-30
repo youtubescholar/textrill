@@ -33,11 +33,11 @@ export MINE     := $(RELEASE_BIN)
 FUZZ_SEEDS ?= 99 424242 20260929 7 31337 555 90210 1
 FUZZ_CASES ?= 2000
 
-.PHONY: all verify build fmt fmt-check clippy test corpus fuzz gui scale clean
+.PHONY: all verify build fmt fmt-check clippy test proptest alloctest corpus fuzz gui scale clean
 
 all: verify
 
-verify: fmt-check clippy test corpus fuzz gui
+verify: fmt-check clippy test proptest alloctest corpus fuzz gui
 	@echo
 	@echo "verify: OK"
 
@@ -62,6 +62,21 @@ clippy: build
 
 test: build
 	cd $(RS) && $(CARGO) test --release
+
+# --- properties and resource bounds (P12) ------------------------------------
+
+# Guarantees the tool owes its user regardless of what the reference does: no
+# data loss, well-formed XHTML, determinism, and no panic on hostile input. The
+# reference is never invoked here, which is the point -- it is the oracle for
+# Tier 1 only, and it is broken on non-ASCII input.
+proptest: build
+	cd $(RS) && $(PYTHON) tests/proptest.py
+
+# Allocation budgets via a counting global allocator. Byte-comparison cannot see
+# a resource defect: A2 leaks while producing correct output, so the corpus passes.
+# Known-open budgets are printed, not silenced; see KNOWN_OPEN in the test.
+alloctest: build
+	cd $(RS) && $(CARGO) test --release --test alloctest -- --nocapture --test-threads=1
 
 # --- differential corpus and fuzzer ------------------------------------------
 

@@ -19,9 +19,11 @@ Companion documents: `TOOL-SURVEY.md` (feature-gap survey) and
 the end of this file. Read that before starting work.** Two of them are
 reachable with default options from ordinary input, which outranks everything
 here in urgency: A1 (any paragraph over ~500 KB panics the engine) and A3
-(`tab_width=0` panics, and the value is selectable in the GUI). A2 is the most
-damaging per byte of input but needs `--make_tables`, which is off by default, so
-it is one opt-in away rather than zero. A4 is a correction rather than a new
+(`tab_width=0` panics, and the value is selectable in the GUI). A2 needs
+`--make_tables`, which is off by default, so it is one opt-in away rather than
+zero — but P12 has since measured it and found it far smaller than first claimed
+(a bounded ~0.3 MB per process, not unbounded growth with input size; see A2).
+A3 is the next item by severity. A4 is a correction rather than a new
 item — **P4's claim that `worker.py:51` catches engine panics in the GUI is
 wrong**, because pyo3's `PanicException` inherits `BaseException`, so it does
 not.
@@ -66,10 +68,46 @@ seeds (16 000 cases), against 700 cases before.
 | A1 | **done** | `chop_trailing_cr`/`chop_leading_cr`; the ~500 KB panic and the hang behind it (A1b) |
 | A4 | **done** | `PanicException` re-export; GUI worker reports Rust panics and always completes |
 | non-ASCII delimiter predicate | **done** | `(?<!é)` was vacuous; predicates extracted so the tests exercise production code |
-| A2 | **open** | next; blocked on P12 to re-measure, and the figures above are unverified |
-| P12 | **open** | property suite; the oracle this tool currently lacks |
+| A2 | **open** | re-measured by P12: real, linear, ~3.9 KB per distinct pattern, but bounded to ~0.3 MB per process; low severity; fix next |
+| P12 | **done** | `proptest.py` (5 properties, no Perl oracle) + `alloctest.rs` (counting allocator); wired into `make verify` |
 | P13 | **open** | packaging decision, blocks the scope of Tier 3 |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
+
+### Agreed sequence, 2026-09-30
+
+Settled after the A1 diff review and the compatibility investigation, so that
+the next person does not have to re-derive the ordering:
+
+1. ~~**P12 — the property suite.**~~ **Done.** `tests/proptest.py` asserts no
+   data loss, XHTML well-formedness, determinism, reconversion, and panic
+   resistance without consulting the reference at all — the reference is the
+   oracle for Tier 1 only, and it is wrong on non-ASCII input.
+   `tests/alloctest.rs` adds a counting global allocator and the resource
+   bounds. Both are wired into `make verify`.
+2. ~~**Re-measure A2 with P12 and correct this plan.**~~ **Done**, and the
+   correction was large: retention is 3 919 B per distinct pattern and the total
+   is bounded near ~0.3 MB per process, so A2 drops from High to Low. The plan's
+   1.3 GB figure was an artefact of a direct-call benchmark. Details and
+   arithmetic under **A2** above.
+3. **A2 — the fix**, verified by `make alloctest` rather than by output, since
+   the output was always correct. Now the smallest remaining item rather than the
+   most urgent, which is the point of measuring first.
+4. **A3**, then A5–A7. E3 whenever it is convenient.
+5. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
+   above, but answer it before starting any Tier 3 work.
+
+Two lessons worth carrying to the next item, because both cost time here: a
+micro-benchmark of a helper API is not evidence about the tool's exposure to
+hostile input, and a measurement harness needs its own validation before its
+output is believed. The first produced a three-orders-of-magnitude error in
+A2's severity; the second produced a first allocator test that passed because it
+generated a document no table was ever detected in, and a second that measured
+nothing because the `thread_local` cache was already warm from the first
+measurement.
+
+Deliberately not doing yet: GitHub Actions (no remote, so it could not be run),
+and clippy `-D warnings` (the crate is not clean; the bulk fix deserves its own
+changeset and its own full verification rather than riding along with A2).
 
 ### The claim above was wrong
 
@@ -261,6 +299,32 @@ peak RSS — it is deterministic and machine-independent, and it catches both th
 leak and the recompile thrash. Keep peak RSS and `valgrind --tool=massif` as
 diagnostics, not gates.
 
+**Implemented.** All four properties, in `txt2html-rs/tests/`:
+
+- `proptest.py` — the four Perl-independent properties, plus no-panic on hostile
+  input. No new dependencies: Python 3 plus the standard library's `ElementTree`,
+  driving the built binary. Run with `make proptest`.
+- `alloctest.rs` — a counting global allocator, so retention and churn are
+  measured rather than inferred. Run with `make alloctest`.
+
+Two things the implementation settled that the sketch above did not:
+
+- **Budgets must be asserted as marginal cost, not totals.** A total-allocation
+  budget is dominated by ordinary churn — 66 MB of allocate-and-free for a
+  100 KB document, most of it the long-paragraph path — and would measure that
+  instead of the leak. Measuring the *difference* between N and N+16 distinct
+  delimiters cancels the converter's fixed overhead and isolates retention.
+- **The cache is `thread_local`, so the harness must measure on a fresh thread.**
+  Two measurements on one thread share the cache, the second run reuses the
+  first's compiled patterns, and the marginal cost reads as zero no matter how
+  badly the cache leaks. `retained_for` spawns a thread for this reason; the
+  comment in it says so.
+
+Known-open budgets are printed with the owning plan item rather than silenced, in
+the same style as `proptest.py`'s A8 handling, and `KNOWN_OPEN` in the test is
+the audit list. A *new* exceeded budget has no such record and fails the run. A
+gate that is permanently red gets ignored, which is not a gate.
+
 ### P13. Decide what "stands on its own" means for packaging
 
 Undecided, and it should be settled before more engine work rather than after.
@@ -271,12 +335,15 @@ a refactor. Tier 3 of the policy above is scoped by this answer.
 
 ### Corrections to the items above
 
-- **A2's RSS table is unverified.** The 30 000-delimiter row (142 440 KB, 13.6 s)
-  predates P12 and cannot be reproduced from real input: there are only ~90
-  printable delimiter characters, so a real document cannot generate 30 000
-  distinct patterns in one process. It appears to come from a direct-call
-  micro-benchmark. Do not treat the figures as a target, and do not close A2
-  against them — re-measure with a counting allocator first. Relatedly,
+- **A2's original RSS table was wrong, and P12 has now measured it.** The
+  30 000-delimiter row (142 440 KB, 13.6 s) cannot come from real input: a
+  document can only induce one pattern per distinct delimiter *character*, and
+  `convert.rs:2636` reduces that to ~28 reachable delimiters, so no input can
+  generate 30 000 patterns. It was a direct-call micro-benchmark. Measured
+  retention is 3 919 B per distinct pattern directly and 3 451 B per additional
+  delimiter from real input — the leak is real and linear, but total exposure is
+  bounded near ~0.3 MB per process rather than growing with file size. Severity
+  corrected High → Low; A2 is no longer the most damaging item. Relatedly,
   `fuzz.py`'s `manydelims` fixture generates at most 60 distinct delimiters
   against a cap of 128, so it cannot reach the thrash path either.
 - **P7's step 1 cannot be executed as written.** It asks for a UTF-8 fixture with
@@ -677,7 +744,7 @@ referenced from `TOOL-SURVEY.md` and must not be renumbered.
 | Addendum | Finding | Severity | Touches |
 |---|---|---|---|
 | A1 | paragraph over ~500 KB panics the engine | **done** (panic + hang; see A1b) | `chop_trailing_cr`/`chop_leading_cr`, `delim_replace` |
-| A2 | ~1 MB input leaks 142 MB, unbounded | High | `links.rs:167`, needs `--make_tables` |
+| A2 | one compiled regex is leaked per distinct pattern, ~3.9 KB each | Low (was High; bounded to ~0.3 MB/process once measured) | `links.rs:167`, needs `--make_tables` |
 | A3 | numeric options accept 0 and unbounded values | High | `cli.rs:386`, `convert.rs:1794` |
 | A4 | GUI cannot catch a Rust panic | **done** | `PanicException` re-export; `worker.py` re-raises completion |
 | A5 | GUI corrupts non-UTF-8 files on save | Medium | `files.py:38` |
@@ -861,8 +928,9 @@ Do **not** fix any of this by raising `backtrack_limit`; see the note above.
 `links::ascii_re_cached` (`links.rs:153-172`) returns `&'static Regex` by
 `Box::leak`-ing each compiled pattern. The 128-entry map cap at `links.rs:159`
 bounds the map; it does not bound the leak, because clearing a map of `&'static`
-drops no memory. Measured peak RSS against distinct table delimiters in the
-input, with `--make_tables`:
+drops no memory. Originally reported peak RSS against distinct table delimiters
+in the input, with `--make_tables` — **this table is unverified and the last two
+rows are not reachable; see "Measured" below**:
 
 | distinct delimiters | input | peak RSS |
 |---|---|---|
@@ -871,19 +939,52 @@ input, with `--make_tables`:
 | 3 000 | 92 KB | 20 180 KB |
 | 30 000 | 1 065 KB | **142 440 KB** |
 
-Linear in the delimiter count, not saturating at 128: ~4.5 KB leaked per
-delimiter against a ~6.9 MB baseline, so a 10 MB file approaches 1.3 GB. The
-30 000 case also takes 13.6 s, so this is a time cost too.
+**Measured (P12, 2026-09-30).** `tests/alloctest.rs` instruments every
+allocation with a counting global allocator, and `make alloctest` reports:
+
+| measurement | result |
+|---|---|
+| direct call, 1 000 distinct patterns | 3 927 180 B retained |
+| direct call, 4 000 distinct patterns | 15 676 924 B retained (**3 919 B/pattern**) |
+| real input, marginal cost per *additional* distinct delimiter | **3 451 B/delimiter** |
+
+So the leak is real, it is `Box::leak` and not the map cap, and it is **linear in
+the number of distinct patterns** — the original "not saturating at 128" claim
+holds. Two independent routes agree on ~3.5–3.9 KB per pattern: the direct call,
+and ordinary document content through the table path.
+
+**The severity claim above was wrong by about three orders of magnitude, and the
+correction matters.** "A 10 MB file approaches 1.3 GB" assumes the number of
+distinct patterns grows with the file size. It does not. A document can only
+induce a pattern per *distinct delimiter character*, and the delimiter is a
+single non-alphanumeric printable character that `convert.rs:2636` strips down
+(`^`, `[`, `]`, `\` are removed, and an empty result is rejected). That leaves
+roughly 28 reachable delimiters, plus ~39 fixed literal patterns at the
+`do_delim` call sites — on the order of 70 patterns, or **~0.3 MB retained for
+the life of the process**, once, not per megabyte of input.
+
+The 30 000-distinct-delimiter row of the old table is therefore **unreachable
+from a document**: only 94 printable ASCII characters exist, 62 of them
+alphanumeric. It can only have come from calling the cache API directly, which is
+what the direct-call row above reproduces. The old 142 MB / 13.6 s figure was a
+micro-benchmark of the API, not a cost any input can impose.
+
+Revised severity: **low.** A bounded one-time ~0.3 MB for a long-lived process
+that converts many documents, with correct output throughout. It is worth fixing —
+it is a real leak, it is trivially avoidable, and it is the only defect here that
+P12 exists to see — but it is hygiene, not a denial-of-service, and it should not
+outrank A3. The allocation *churn* is the larger cost and belongs to P6, not here:
+~3.4 KB is allocated per pattern, and 66 MB of allocate-and-free is observed for a
+100 KB document, most of it from the long-paragraph path.
 
 **Reachability caveat, and it is easy to get wrong:** this needs
 `--make_tables`, which is **off by default** (`options.rs:112`). Without the
 flag no table is ever detected, `is_delim_table` is never reached, and the
-delimiter is never compiled — a 1 MB file of delimiter tables then costs 12 MB
-and 1.5 s. Do not "verify" this fix by running the corpus without the flag and
-concluding it is fine.
+delimiter is never compiled. Do not "verify" this fix by running the corpus
+without the flag and concluding it is fine.
 
-The patterns are attacker-shaped: `convert.rs:2406` reads the delimiter out of
-the document and `convert.rs:2422` compiles `[{delim}]` from it.
+The patterns are attacker-shaped: `convert.rs:2629` reads the delimiter out of the
+document and `convert.rs:2645`/`2652`/`2653` compile `[{delim}]` from it.
 
 Fix, in order of preference:
 
@@ -899,10 +1000,27 @@ The `&'static` return type is what forces the leak, so this item cannot be
 closed by a one-line change inside the function — the signature has to change
 or the cache has to go.
 
-Test: a generated corpus case of ~3 000 delimiter tables with 3 000 distinct
-delimiters, asserting peak RSS growth stays under a fixed budget. This is the
-only kind of test that will catch a regression here; a byte-comparison against
-Perl will pass while the process leaks, because the output is correct.
+Test: `make alloctest`, which exists and fails on the current code in exactly the
+way a regression would. It is the only kind of test that can see this item; a
+byte-comparison against Perl passes while the process leaks, because the output
+is correct. Two tests, both currently reporting `KNOWN-OPEN [A2]`:
+
+- `a2_retains_one_regex_per_distinct_pattern` — calls the cache directly with
+  4 000 distinct patterns and asserts retained bytes stay under 64 KB. It also
+  asserts the per-pattern cost is still the ~3.9 KB *linear* leak, so that a
+  change of shape is noticed and the figures in this document revisited.
+- `a2_retained_bytes_do_not_scale_with_delimiter_count` — the honest one, and
+  the only one that exercises a real path: it converts actual DELIM-table
+  documents containing 4 versus 20 distinct delimiters, on separate threads, and
+  asserts the marginal retention per additional delimiter stays under 2 KB. It
+  currently measures 3 451 B.
+
+Note the original plan for this test — "~3 000 delimiter tables with 3 000
+distinct delimiters, asserting peak RSS" — was doubly unworkable: 3 000 distinct
+delimiters cannot be expressed in a document, and peak RSS is neither
+deterministic nor machine-independent. Getting a test that measures the right
+thing took three attempts; the two failures are written up under P12 because
+they are the more likely mistakes.
 
 ### A3. Clamp numeric options at parse time
 
