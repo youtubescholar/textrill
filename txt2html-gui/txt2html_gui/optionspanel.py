@@ -18,7 +18,7 @@ option in the Rust library shows up without touching this file.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -83,6 +83,27 @@ class OptionSpec:
     kind: str
     default: str
     help: str
+    #: The range the engine accepts, as reported by the extension module, or None
+    #: for an option it does not restrict. Read rather than restated here, so a
+    #: spin box cannot offer a value the engine will reject -- which is how
+    #: tab_width=0 used to reach the tab expander and divide by zero.
+    accepted: Optional[Tuple[int, int]] = None
+
+    def __init__(
+        self,
+        name: str,
+        aliases: List[str],
+        kind: str,
+        default: str,
+        help: str,
+        accepted: Optional[Tuple[int, int]] = None,
+    ) -> None:
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "aliases", aliases)
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "default", default)
+        object.__setattr__(self, "help", help)
+        object.__setattr__(self, "accepted", accepted)
 
     @property
     def is_list(self) -> bool:
@@ -106,17 +127,25 @@ class OptionSpec:
 
     @property
     def minimum(self) -> int:
-        """Lowest sensible value, so spin boxes are not silly."""
+        """Lowest value this option accepts, so spin boxes are not silly.
+
+        Taken from the engine when it reports a range. The preformat pair is the
+        exception: the engine clamps it to a signed byte rather than rejecting a
+        value, so its bound is the GUI's to state.
+        """
+        if self.accepted is not None:
+            return self.accepted[0]
         if self.name in ("preformat_trigger_lines", "endpreformat_trigger_lines"):
             return -128
         return 0
 
     @property
     def maximum(self) -> int:
+        """Highest value this option accepts, from the engine where it says."""
+        if self.accepted is not None:
+            return self.accepted[1]
         if self.name in ("preformat_trigger_lines", "endpreformat_trigger_lines"):
             return 127
-        if self.name in ("min_caps_length", "short_line_length", "hrule_min"):
-            return 999
         return 999
 
 
@@ -125,10 +154,19 @@ def load_specs() -> List[OptionSpec]:
     import txt2html
 
     specs = []
-    for name, aliases, kind, default, help_text in txt2html.option_specs():
+    for name, aliases, kind, default, accepted, help_text in txt2html.option_specs():
         if name in HIDDEN:
             continue
-        specs.append(OptionSpec(name, list(aliases), kind, default, help_text))
+        specs.append(
+            OptionSpec(
+                name,
+                list(aliases),
+                kind,
+                default,
+                help_text,
+                tuple(accepted) if accepted is not None else None,
+            )
+        )
     return specs
 
 

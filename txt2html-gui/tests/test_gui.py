@@ -108,7 +108,7 @@ class ConverterTests(unittest.TestCase):
         specs = txt2html.option_specs()
         self.assertGreater(len(specs), 40)
         names = set()
-        for name, aliases, kind, default, help_text in specs:
+        for name, aliases, kind, default, _accepted, help_text in specs:
             names.add(name)
             self.assertIn(kind, ("bool", "int", "str", "str_array", "table_type"))
             self.assertIsInstance(default, str)
@@ -122,7 +122,7 @@ class ConverterTests(unittest.TestCase):
         specs = txt2html.option_specs()
         names = {s[0] for s in specs}
         seen = set()
-        for name, aliases, kind, default, _ in specs:
+        for name, aliases, kind, default, _accepted, _help in specs:
             for alias in aliases:
                 # an alias must not hide a real option, and must not clash
                 # with another alias: Getopt::Long would have to pick one
@@ -180,6 +180,36 @@ class GuiTests(unittest.TestCase):
         self.assertIn("<em>world</em>", html)
         self.assertIn("hello", self.window.preview.toPlainText())
 
+    def test_numeric_spin_boxes_use_the_ranges_the_engine_accepts(self):
+        """A3: the spin box must not offer a value the engine will reject.
+
+        tab_width=0 was reachable from this window, not just the command line:
+        every numeric option had a spin-box minimum of 0, and 0 is the divisor in
+        the tab expander. The bounds now come from the extension module, which
+        reads the same table the engine validates against, so they cannot drift
+        apart again.
+        """
+        from txt2html_gui.optionspanel import load_specs
+
+        specs = {spec.name: spec for spec in load_specs()}
+
+        # The floor: this is the one that mattered.
+        self.assertEqual(specs["tab_width"].minimum, 1)
+        self.assertEqual(specs["indent_width"].minimum, 0)
+        for name in ("hrule_min", "min_caps_length", "preformat_whitespace_min"):
+            self.assertEqual(specs[name].minimum, 0, f"{name} has no floor of its own")
+
+        # Every bounded option shares the engine's ceiling.
+        for name in ("tab_width", "indent_width", "hrule_min", "min_caps_length",
+                     "preformat_whitespace_min"):
+            self.assertEqual(specs[name].maximum, 999, f"{name} ceiling")
+
+        # The preformat pair is clamped to a signed byte rather than rejected, so
+        # its bound stays the GUI's to state.
+        for name in ("preformat_trigger_lines", "endpreformat_trigger_lines"):
+            self.assertEqual(specs[name].minimum, -128)
+            self.assertEqual(specs[name].maximum, 127)
+
     def test_engine_panic_is_reported_instead_of_hanging(self):
         """A4: a panic in the engine must not leave the window waiting.
 
@@ -188,10 +218,17 @@ class GuiTests(unittest.TestCase):
         emitted, the status bar stayed on "converting…", and the user got a dead
         preview with no message. This asserts a message actually appears.
 
-        tab_width=0 divides by zero in the tab expander, so the engine panics.
+        The provocation is a `custom_heading_regexp` that does not compile, which
+        the engine turns into a `PanicException` (P4, still open). It used to be
+        `tab_width=0`, which divided by zero, until A3 made that a clean
+        validation error before any conversion starts -- a good sign for the fix
+        and a problem for this test, since A4 needs a panic to catch. When P4
+        closes the last reachable panic this test will need a fault injected
+        rather than a documented defect, because the thing it verifies is the
+        handler, not the defect.
         """
         self.window.editor.setPlainText("hello\n\tworld\n")
-        self.window.options.set_value("tab_width", 0)
+        self.window.options.set_value("custom_heading_regexp", ["a("])
         try:
             html = drain(self.app, self.window)
         finally:

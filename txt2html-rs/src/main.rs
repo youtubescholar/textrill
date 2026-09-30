@@ -47,6 +47,13 @@ fn main() -> ExitCode {
 
     opts.deal_with_options();
 
+    // Reject out-of-range values before converting anything, so the user gets a
+    // message and a non-zero exit rather than a panic or an uncatchable abort.
+    if let Err(e) = opts.validate() {
+        eprintln!("{PROG}: {e}");
+        return ExitCode::from(1);
+    }
+
     let mut conv = Converter::new(opts.clone());
     let out = conv.txt2html();
 

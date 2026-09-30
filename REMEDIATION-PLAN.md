@@ -93,7 +93,9 @@ the next person does not have to re-derive the ordering:
    output, since the output was always correct. Marginal retention per distinct
    delimiter fell from 3 451 B to 4 B, and output is byte-identical on a
    table-heavy document at the same speed.
-4. **A3**, then A5–A7. E3 whenever it is convenient.
+4. ~~**A3.**~~ **Done.** Five numeric options are now bounded and four are
+   deliberately not; the difference is measured, not assumed, and it does not
+   match what this plan originally said. Next: A5–A7, then E3 when convenient.
 5. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
    above, but answer it before starting any Tier 3 work.
 
@@ -746,7 +748,7 @@ referenced from `TOOL-SURVEY.md` and must not be renumbered.
 |---|---|---|---|
 | A1 | paragraph over ~500 KB panics the engine | **done** (panic + hang; see A1b) | `chop_trailing_cr`/`chop_leading_cr`, `delim_replace` |
 | A2 | one compiled regex is leaked per distinct pattern, ~3.9 KB each | **done** (was High, corrected to Low by measurement) | `links.rs:154`, needs `--make_tables` |
-| A3 | numeric options accept 0 and unbounded values | High | `cli.rs:386`, `convert.rs:1794` |
+| A3 | numeric options accept 0 and unbounded values | **done** | `options.rs:174` `validate`, enforced by `tests/cliexit.rs` and the GUI's spin boxes |
 | A4 | GUI cannot catch a Rust panic | **done** | `PanicException` re-export; `worker.py` re-raises completion |
 | A5 | GUI corrupts non-UTF-8 files on save | Medium | `files.py:38` |
 | A6 | GUI never cancels superseded conversions | Low–Med | `mainwindow.py:277` |
@@ -1087,6 +1089,61 @@ its range from the extension module instead of hardcoding 999 at
 
 Test: one case per numeric option at 0, at the maximum, and one past it,
 asserting a clean error and a non-zero exit rather than a panic or an abort.
+
+**Fixed (2026-09-30), and the measurement did not match the list above.**
+`Options::validate` (`options.rs:174`) enforces a table, `NUMERIC_RANGES`, and
+both entry points call it before any work: `main.rs` prints the message and
+returns exit 1, following the convention already used for argument errors, and
+`python.rs::options_from_dict` raises `ValueError`, which the GUI shows as a
+message while A4's worker still reports completion. Output is not written when a
+value is rejected.
+
+The bounded set is **not** the one above. Reading every use of all nine numeric
+options found two distinct hazards, and the second one is not in this plan:
+
+| option | hazard | range |
+|---|---|---|
+| `tab_width` | `tab % tw`, and `" ".repeat` | 1–999 |
+| `indent_width` | `" ".repeat(listnum * w)` | 0–999 |
+| `preformat_whitespace_min` | `\s{{n},}\S+` | 0–999 |
+| `hrule_min` | `([\-_~=*]\s*){{n,}}` | 0–999 |
+| `min_caps_length` | `[A-Z]{{n,}}` | 0–999 |
+| `par_indent`, `short_line_length`, `underline_length_tolerance`, `underline_offset_tolerance` | compared only | unbounded |
+
+Three corrections to the analysis above, all of them found by writing the test
+before the fix:
+
+- **`preformat_whitespace_min` can crash the process, and was missing.**
+  `--preformat_whitespace_min=2147483647` exits 101: the value is interpolated
+  into a regex quantifier, and `convert.rs:209` turns the compile failure into a
+  panic. It is the same shape of defect as `tab_width=0`, reachable the same
+  way, and it is not in the list above.
+- **`short_line_length` and `par_indent` are harmless and stay unbounded.** They
+  appear only in comparisons. Bounding them would make the port stricter than the
+  reference for no safety gain, which the compatibility policy forbids, and
+  `tests/cliexit.rs` now asserts they accept `i64::MAX`.
+- **The engine's quantifier limit is pattern-dependent, so 999 is a margin
+  rather than a threshold.** `\s{200000,}` is rejected; `[A-Z]{200000,}` and
+  `([\-_~=*]\s*){200000,}` are accepted. A single "regex limit" does not exist,
+  so the ceiling is a comfortable bound checked in the tests, not a number
+  derived from the engine.
+
+The GUI half is done too, and it is the half that actually caused the original
+report: `option_specs` now reports the accepted range per option from the same
+`NUMERIC_RANGES` table, and `OptionSpec.minimum`/`maximum` read it instead of
+restating 0 and 999 in Python. A spin box can no longer offer a value the engine
+rejects, and the two cannot drift apart again.
+
+`tests/cliexit.rs` covers it: every numeric option against 0, negative values,
+the ceiling and one past it, asserting no exit is 101, 134 or 139, plus the
+specific range and message for each bounded option, plus that rejection happens
+before any bytes reach stdout. A GUI test asserts the spin-box bounds.
+
+**Not done, deliberately: the O(k²·tw) tab expansion.** It is a performance
+problem rather than a crash, it needs a timing test to be trustworthy, and
+bundling it here would have meant committing a perf claim without a
+corresponding measurement. It moves to P6, where the other allocation costs are
+now recorded.
 
 ### A4. The GUI must survive anything the engine throws at it — **done**
 

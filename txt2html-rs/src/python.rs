@@ -17,7 +17,7 @@ use pyo3::types::{PyDict, PyList};
 
 use crate::cli::{self, Kind};
 use crate::convert::{read_any_file, Converter};
-use crate::options::Options;
+use crate::options::{self, Options};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -91,6 +91,12 @@ fn options_from_dict(dict: Option<&Bound<'_, PyDict>>) -> PyResult<Options> {
         };
         cli::set_value(&mut opts, &name, &text).map_err(PyValueError::new_err)?;
     }
+    // Checked here rather than in `run`, because this is the one place all three
+    // entry points build their options, and it is the earliest point at which
+    // every value is known. A bad option becomes a value error the GUI can show
+    // instead of a panic in the preview; A4's worker still reports completion
+    // either way.
+    opts.validate().map_err(PyValueError::new_err)?;
     Ok(opts)
 }
 
@@ -146,8 +152,13 @@ fn process_chunk(
 }
 
 /// Metadata for every option, so a front end can build itself: the canonical
-/// name, the accepted abbreviations, the value kind, the default value and a
-/// one-line description.
+/// name, the accepted abbreviations, the value kind, the default value, the
+/// accepted range for a numeric option, and a one-line description.
+///
+/// The range is reported from [`crate::options::NUMERIC_RANGES`], the same table
+/// the engine validates against, so a front end cannot offer a value the engine
+/// will reject. It is `(low, high)` for a bounded option and `None` for an
+/// unbounded one.
 #[pyfunction]
 fn option_specs(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
     let defaults = Options::default();
@@ -165,7 +176,11 @@ fn option_specs(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
             Kind::Str => "str",
         };
         let aliases: Vec<&str> = spec.names[1..].to_vec();
-        list.append((spec.names[0], aliases, kind, default, spec.help))?;
+        let range = match spec.kind {
+            Kind::Int => options::numeric_range(spec.names[0]),
+            _ => None,
+        };
+        list.append((spec.names[0], aliases, kind, default, range, spec.help))?;
     }
     Ok(list)
 }

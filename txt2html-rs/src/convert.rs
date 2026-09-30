@@ -2894,7 +2894,7 @@ mod cr_chop_tests {
 #[cfg(test)]
 mod delim_linear_tests {
     use super::*;
-    use crate::links::{ascii_re, ascii_re_cached};
+    use crate::links::ascii_re;
     use crate::options::Options;
 
     fn conv() -> Converter {
