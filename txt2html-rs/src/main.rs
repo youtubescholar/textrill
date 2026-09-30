@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 // txt2html — convert plain text to HTML.
 //
 // Copyright (C) 2026 the txt2html-rs authors.

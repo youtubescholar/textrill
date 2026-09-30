@@ -30,6 +30,7 @@
 //!   encoding has a byte in the `0x80`-`0x9F` range, and only while
 //!   `demoronize` is on.
 
+#![forbid(unsafe_code)]
 #[cfg(feature = "extension-module")]
 mod python;
 
