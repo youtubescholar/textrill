@@ -96,8 +96,11 @@ the next person does not have to re-derive the ordering:
 4. ~~**A3.**~~ **Done.** Five numeric options are now bounded and four are
    deliberately not; the difference is measured, not assumed, and it does not
    match what this plan originally said.
-5. ~~**A5.**~~ **Done.** Next: A6, A7, then E3 when convenient.
-6. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
+5. ~~**A5.**~~ **Done.**
+6. ~~**A6.**~~ **Done.** The saving is 85% of the CPU and 21 MB, not the
+   wall-clock win the plan predicted; see A6.
+7. **A7**, then E3 when convenient.
+8. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
    above, but answer it before starting any Tier 3 work.
 
 Two lessons worth carrying to the next item, because both cost time here: a
@@ -752,7 +755,7 @@ referenced from `TOOL-SURVEY.md` and must not be renumbered.
 | A3 | numeric options accept 0 and unbounded values | **done** | `options.rs:174` `validate`, enforced by `tests/cliexit.rs` and the GUI's spin boxes |
 | A4 | GUI cannot catch a Rust panic | **done** | `PanicException` re-export; `worker.py` re-raises completion |
 | A5 | GUI corrupts non-UTF-8 files on save | **done** (line endings still normalised; see A5) | `files.py:33` returns the encoding; the window writes it back |
-| A6 | GUI never cancels superseded conversions | Low–Med | `mainwindow.py:277` |
+| A6 | GUI never cancels superseded conversions | **done** (was Low–Med) | `worker.py:92` `Converter.convert` clears the queue |
 | A7 | save silently creates directories | Low | `files.py:41` |
 | A8 | `--title` / `--style_url` unescaped | Low | declared deviation |
 | A9 | unreadable input exits 0 | Low | declared deviation |
@@ -1230,7 +1233,7 @@ Two things measured while writing the tests, both worth recording:
   bug, so it is recorded here rather than fixed. The current behaviour is pinned
   by a test so that it is a choice and not a surprise.
 
-### A6. Cancel superseded conversions
+### A6. Cancel superseded conversions — **done**
 
 `Converter.cancel_pending` (`worker.py:84`) exists and is dead code —
 `grep -rn cancel_pending` finds only the definition. `convert_now`
@@ -1252,6 +1255,47 @@ is about not doing the stale *work*.
 Test: queue N conversions of a document slower than the debounce and assert the
 pool never holds more than a small constant number of active jobs, and that
 `activeThreadCount` returns to idle promptly after the last keystroke.
+
+**Fixed (2026-09-30).** `Converter.convert` now calls `pool.clear()` before
+queueing, which drops every runnable that has not started. It is in that method
+rather than in `convert_now` so that no future caller can forget it, and it
+replaces the dead `cancel_pending` that the plan above notes was defined and
+never called. A job already on a thread cannot be recalled, so at most
+`max_threads` conversions are ever in flight and the rest are dropped at each
+keystroke instead of accumulating.
+
+The pool's expiry timeout is left at its 30 s default. It reaps *threads*, and
+`clear()` already removes the queued work, so changing it would have been motion
+without effect; a test asserts the default rather than a new number.
+
+Measured, 20 conversions of a 793 KB document offered over 3 s of typing at the
+window's 300 ms debounce, one thread and two threads both tried, the second
+figure being the same scenario with `clear()` removed:
+
+| | with the fix | without |
+|---|---|---|
+| conversions actually performed | **3 of 20** | 20 of 20 |
+| CPU time | **1.36 s** | 7.69 s |
+| peak RSS | **97 MB** | 118 MB |
+| wall clock to settle | 3.51 s | 4.34 s |
+
+**The wall-clock claim above was overstated.** The plan's arithmetic predicted
+"6.4 s of wall clock for 1.25 s of useful work", and the real saving is 0.8 s,
+because the time to settle after the last keystroke is bounded by *one*
+conversion either way: the window discards a stale result, so a user waiting
+for the preview waits for the newest conversion and no amount of cancelling
+makes that one faster. What the fix actually removes is 85% of the CPU and 21 MB
+of the memory, which is what keeps the machine usable while someone types, and
+what stops the backlog growing without bound the longer they type. That is a
+worthwhile fix, and it is a different fix from the one described above.
+
+`tests/test_gui.py::BacklogTests` covers it. Writing that test needed one thing
+worth recording: `QThreadPool.waitForDone` blocks the main thread, and the
+results arrive as queued signals on that same thread, so a test that waits with
+it observes nothing and asserts nothing. The first version of this test passed
+with the fix reverted. It has to spin the event loop, and stop after the pool has
+been idle for a moment, which also covers the gap between `start` and the thread
+spinning up. Reverted, it fails with "8 of 8 queued conversions ran".
 
 ### A7. Stop creating directories on save
 

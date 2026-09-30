@@ -88,8 +88,21 @@ class Converter:
         return self._generation
 
     def convert(self, text: str, options: Dict[str, Any]) -> int:
-        """Queue a conversion; returns its generation number."""
+        """Queue a conversion; returns its generation number.
+
+        Anything still waiting in the queue is dropped first. Only the newest
+        text is worth converting: the window discards a stale *result* already,
+        but without this it went on doing the stale *work*, and a keystroke burst
+        queues faster than the pool drains. Each queued job holds its own copy of
+        the document, so a backlog is also a memory backlog.
+
+        `QThreadPool.clear` removes runnables that have not started. A job already
+        on a thread cannot be recalled, so at most `max_threads` conversions are
+        ever in flight and the rest of the queue is dropped at each keystroke
+        rather than growing for as long as the user types.
+        """
         self._generation += 1
+        self.pool.clear()
         job = _Job(self._generation, text, options, self.sink)
         self.pool.start(job)
         return self._generation

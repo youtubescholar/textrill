@@ -16,6 +16,7 @@ need no display: the offscreen Qt platform is selected before Qt starts.
 import os
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,6 +33,7 @@ import txt2html  # noqa: E402
 from txt2html_gui.app import build_application  # noqa: E402
 from txt2html_gui.files import decode_bytes, read_text_file, write_text_file  # noqa: E402
 from txt2html_gui.optionspanel import TABLE_TYPES  # noqa: E402
+from txt2html_gui.worker import Converter  # noqa: E402
 from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QFileDialog, QMessageBox  # noqa: E402
 
@@ -255,6 +257,88 @@ class FileTests(unittest.TestCase):
             out = Path(tmp) / "out.html"
             write_text_file(out, "<p>naïve 門牌</p>", "utf-8")
             self.assertEqual(out.read_bytes(), "<p>naïve 門牌</p>".encode("utf-8"))
+
+
+class BacklogTests(unittest.TestCase):
+    """A6: a new conversion should make the queued ones pointless.
+
+    The window already discards a stale *result*; without cancelling, it went on
+    doing the stale *work*. Each queued job holds its own copy of the document,
+    so a queue that grows while the user types is a queue that grows in memory
+    too.
+    """
+
+    #: Big enough that one conversion outlasts the 300 ms debounce, so a burst of
+    #: edits really does pile up. Measured at about 0.36 s.
+    SLOW = ("word " * (500 * 1024 // 5)) + "\n"
+
+    @classmethod
+    def setUpClass(cls):
+        # A QThreadPool needs an application object for cross-thread signals.
+        cls.app, _window, _ = build_application([])
+
+    def _settle(self, conv, ran, timeout=120.0, quiet=0.5):
+        """Wait for the pool to go idle, delivering results as the app really does.
+
+        `QThreadPool.waitForDone` blocks the main thread, and the results are
+        delivered by queued signals on that same thread -- so a test that waits
+        with it sees nothing and proves nothing. This spins the event loop
+        instead, and stops only after the pool has been idle for `quiet` seconds,
+        which also covers the window between `start` and the thread spinning up.
+        """
+        deadline = time.perf_counter() + timeout
+        last_change = time.perf_counter()
+        seen = 0
+        while time.perf_counter() < deadline:
+            self.app.processEvents()
+            if len(ran) != seen:
+                seen = len(ran)
+                last_change = time.perf_counter()
+            elif conv.pool.activeThreadCount() == 0 and time.perf_counter() - last_change > quiet:
+                return
+            time.sleep(0.005)
+        self.fail(f"the pool never went idle within {timeout}s")
+
+    def test_a_burst_of_conversions_does_not_queue_them_all(self):
+        conv = Converter(max_threads=1)
+        ran = []
+        conv.sink.finished.connect(lambda gen, html, secs, err: ran.append(gen))
+
+        queued = 8
+        for _ in range(queued):
+            conv.convert(self.SLOW, {})
+        self._settle(conv, ran)
+
+        # One job may already be on the thread and one may be waiting behind it;
+        # the rest were dropped when the next one was queued. Without the fix all
+        # eight run, and the suite gets several seconds slower as well as failing.
+        self.assertLessEqual(
+            len(ran), 2,
+            f"{len(ran)} of {queued} queued conversions ran; the queue is not being dropped",
+        )
+
+    def test_the_newest_generation_is_the_one_that_survives(self):
+        conv = Converter(max_threads=1)
+        latest = [0]
+        conv.sink.finished.connect(
+            lambda gen, html, secs, err: latest.__setitem__(0, max(latest[0], gen))
+        )
+        for _ in range(6):
+            latest[0] = conv.convert(self.SLOW, {})
+        self._settle(conv, latest)
+        self.assertEqual(
+            latest[0], 6,
+            "the last generation queued is the one whose result matters",
+        )
+
+    def test_the_pool_returns_to_idle(self):
+        conv = Converter(max_threads=2)
+        ran = []
+        conv.sink.finished.connect(lambda gen, html, secs, err: ran.append(gen))
+        for _ in range(4):
+            conv.convert(self.SLOW, {})
+        self._settle(conv, ran)
+        self.assertEqual(conv.pool.activeThreadCount(), 0)
 
 
 class GuiTests(unittest.TestCase):
