@@ -62,8 +62,14 @@ def read_text_file(path) -> tuple[str, str]:
 
 
 def write_text_file(path, text: str, encoding: str = "utf-8") -> None:
-    """Write text, creating parent directories that are missing."""
+    """Write text, failing if the directory it names does not exist.
+
+    A missing parent directory used to be created with `mkdir(parents=True)`, on
+    the theory that a save should always succeed. It should not: this is called
+    from a save dialog, which is exactly where a mistyped path happens, and one
+    typo like `newtree/a/b/c/out.html` then invented five directories. The user
+    is told the directory does not exist, which is actionable; a stray tree in
+    the filesystem is not.
+    """
     target = Path(path)
-    if target.parent and not target.parent.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding=encoding)

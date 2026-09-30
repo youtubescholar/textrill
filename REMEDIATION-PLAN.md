@@ -99,8 +99,10 @@ the next person does not have to re-derive the ordering:
 5. ~~**A5.**~~ **Done.**
 6. ~~**A6.**~~ **Done.** The saving is 85% of the CPU and 21 MB, not the
    wall-clock win the plan predicted; see A6.
-7. **A7**, then E3 when convenient.
-8. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
+7. ~~**A7.**~~ **Done.** The `mkdir` was load-bearing for an unrelated test, found
+   by a thirty-minute hang rather than a failure. A5–A7 are all closed.
+8. **E3** when convenient, then P13.
+9. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
    above, but answer it before starting any Tier 3 work.
 
 Two lessons worth carrying to the next item, because both cost time here: a
@@ -756,7 +758,7 @@ referenced from `TOOL-SURVEY.md` and must not be renumbered.
 | A4 | GUI cannot catch a Rust panic | **done** | `PanicException` re-export; `worker.py` re-raises completion |
 | A5 | GUI corrupts non-UTF-8 files on save | **done** (line endings still normalised; see A5) | `files.py:33` returns the encoding; the window writes it back |
 | A6 | GUI never cancels superseded conversions | **done** (was Low–Med) | `worker.py:92` `Converter.convert` clears the queue |
-| A7 | save silently creates directories | Low | `files.py:41` |
+| A7 | save silently creates directories | **done** | `files.py:64` no longer creates parents |
 | A8 | `--title` / `--style_url` unescaped | Low | declared deviation |
 | A9 | unreadable input exits 0 | Low | declared deviation |
 | A10 | unbounded `re_cache` | Low | `convert.rs:160` |
@@ -1297,13 +1299,32 @@ with the fix reverted. It has to spin the event loop, and stop after the pool ha
 been idle for a moment, which also covers the gap between `start` and the thread
 spinning up. Reverted, it fails with "8 of 8 queued conversions ran".
 
-### A7. Stop creating directories on save
+### A7. Stop creating directories on save — **done**
 
-`files.py:41-42` does `target.parent.mkdir(parents=True, exist_ok=True)`. A typo
-in the save dialog invents a directory tree — verified, saving to
-`newtree/a/b/c/out.html` created three directories. A save that cannot happen
-should be an error, not a new filesystem layout. Drop the `mkdir` and let the
-`OSError` surface, or keep it only when the parent already exists.
+`write_text_file` did `target.parent.mkdir(parents=True, exist_ok=True)`. A typo
+in the save dialog invents a directory tree — measured, saving to
+`newtree/a/b/c/out.html` created **five** directories, not the three first
+recorded. A save that cannot happen should be an error, not a new filesystem
+layout. Drop the `mkdir` and let the `OSError` surface, or keep it only when the
+parent already exists.
+
+**Fixed (2026-09-30).** Dropped. A save into a directory that does not exist now
+raises `FileNotFoundError`, which the window already catches and reports as
+"Cannot save", so the user is told something they can act on. Verified: the same
+path created five directories before and now creates nothing and fails cleanly.
+The second option in the paragraph above is the same code, so there was nothing to
+choose between them.
+
+**The removed behaviour was load-bearing, and was found by a hang.**
+`test_saving_twice_reuses_the_chosen_name` wrote to `tmp/out/book.html` and relied
+on the `mkdir` to create `out`. With it dropped the save failed, that test did not
+stub the message box, and the suite wedged on a modal dialog for thirty minutes
+instead of failing. The test now writes into the directory that exists, because
+what it is about is the second save reusing the name it was given, not directory
+creation. Worth keeping: a test that passes for a reason other than the one it
+names will not fail when that other reason is removed, and if it also leaves a
+dialog open it hangs rather than reporting. Both A7 tests were confirmed to fail
+with the `mkdir` restored before the fix was kept.
 
 ## Addendum Phase C — declared deviations from Perl
 

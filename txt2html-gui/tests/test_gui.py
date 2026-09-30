@@ -147,9 +147,38 @@ class FileTests(unittest.TestCase):
 
     def test_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "sub" / "note.txt"
+            path = Path(tmp) / "note.txt"
             write_text_file(path, "héllo\n")
             self.assertEqual(read_text_file(path)[0], "héllo\n")
+
+    # ------------------------------------------------- A7: a save that cannot
+    # happen should be an error, not a new filesystem layout.
+
+    def test_a_missing_directory_is_an_error_and_creates_nothing(self):
+        """One typo used to invent a whole tree.
+
+        `write_text_file` called `mkdir(parents=True)`, so saving to
+        `newtree/a/b/c/out.html` created five directories that the user never
+        asked for and has to clean up by hand.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "newtree" / "a" / "b" / "out.html"
+            with self.assertRaises(OSError):
+                write_text_file(target, "<p>x</p>")
+            self.assertFalse(
+                (Path(tmp) / "newtree").exists(),
+                "the directories were created anyway",
+            )
+            self.assertEqual(list(Path(tmp).iterdir()), [], "nothing should be left behind")
+
+    def test_an_existing_directory_is_used(self):
+        """Dropping the mkdir must not stop a save into a directory that exists."""
+        with tempfile.TemporaryDirectory() as tmp:
+            existing = Path(tmp) / "out"
+            existing.mkdir()
+            target = existing / "out.html"
+            write_text_file(target, "<p>x</p>")
+            self.assertEqual(target.read_text(encoding="utf-8"), "<p>x</p>")
 
     # ------------------------------------------------------------ A5: the
     # encoding a file was read with has to survive a save, or merely opening a
@@ -559,6 +588,31 @@ class GuiTests(unittest.TestCase):
             drain(self.app, self.window)
             self.assertEqual(self.window.encoding, "utf-8")
 
+    def test_saving_to_a_mistyped_path_reports_it_and_creates_nothing(self):
+        """A7 through the window, where a mistyped path actually happens.
+
+        The save dialog is the one place a path is typed by hand, so it is the
+        one place that must not paper over a missing directory.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self.window.editor.setPlainText("a chapter\n")
+            drain(self.app, self.window)
+
+            before = sorted(p.name for p in Path(tmp).iterdir())
+            proposed = str(Path(tmp) / "newtree" / "a" / "b" / "out.html")
+
+            with self._no_dialogs() as shown:
+                # Give the window a file to save, at the mistyped path.
+                self.window.path = proposed
+                self.window.save_text()
+
+            self.assertIn("warning", shown, "the user was not told the save failed")
+            self.assertFalse(
+                (Path(tmp) / "newtree").exists(),
+                "the window invented the directory tree",
+            )
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), before)
+
     def test_save_as_does_not_propose_overwriting_the_source(self):
         # Opening a .txt and hitting Save As used to suggest the .txt back,
         # which reads as "overwrite the file you are converting?".
@@ -592,7 +646,11 @@ class GuiTests(unittest.TestCase):
             self.window.load_file(str(source))
             html = drain(self.app, self.window)
 
-            target = Path(tmp) / "out" / "book.html"
+            # In the directory that exists: this test is about the second save
+            # reusing the name it was given, not about creating directories,
+            # which A7 deliberately stopped doing. An earlier version used
+            # `tmp/out/book.html` and relied on write_text_file making `out`.
+            target = Path(tmp) / "book.html"
             self.window._save(str(target))
             self.assertEqual(target.read_text(encoding="utf-8"), html)
             self.assertEqual(self.window.output_path, str(target))
