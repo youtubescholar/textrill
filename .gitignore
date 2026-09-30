@@ -1,0 +1,25 @@
+# Build output. 1.7 GB of cargo artifacts; the corpus runner also defaults
+# MINE to target/debug/txt2html, so this path is load-bearing, not just noise.
+txt2html-rs/target/
+
+# The reference (Perl) checkout the differential harness compares against.
+# Derived from the archives tracked at the top level -- extract
+# txt2html-3.0.tar.gz and add ref/stubs/YAML/Syck.pm -- so it is not tracked.
+ref/
+
+# Virtualenv used to build the extension and run the GUI tests
+# (maturin develop --release, python -m unittest).
+.venv/
+
+# Packaging droppings and the extension module maturin builds in place.
+*.egg-info/
+txt2html-rs/python/txt2html/_native*.so
+
+# Python bytecode from the corpus runner and the fuzzer.
+__pycache__/
+*.pyc
+
+# Editor and OS droppings.
+*.swp
+*~
+.DS_Store

@@ -1,0 +1,26 @@
+[package]
+name = "txt2html"
+version = "3.0.0"
+edition = "2021"
+description = "A Rust port of HTML::TextToHTML / txt2html: convert plain text to HTML."
+license = "GPL-3.0-or-later"
+
+[lib]
+name = "txt2html"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "txt2html"
+path = "src/main.rs"
+
+[dependencies]
+fancy-regex = "0.14"
+pyo3 = { version = "0.23", features = ["abi3-py38"] }
+
+[features]
+# Enabled by maturin when building the Python extension module.
+extension-module = ["pyo3/extension-module"]
+
+[profile.release]
+lto = true
+strip = true
