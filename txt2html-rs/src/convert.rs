@@ -2744,7 +2744,7 @@ fn blank_sep_at(chars: &[char], i: usize) -> bool {
 fn split_blank_lines(s: &str) -> Vec<String> {
     let chars: Vec<char> = s.chars().collect();
     let n = chars.len();
-    let mut out = Vec::new();
+    let mut out: Vec<String> = Vec::new();
     let mut start = 0;
     let mut i = 0;
     while i < n {
@@ -2771,6 +2771,16 @@ fn split_blank_lines(s: &str) -> Vec<String> {
     }
     if start < n {
         out.push(chars[start..].iter().collect());
+    }
+    // Perl's `split` drops *every* trailing empty field, not just a missing
+    // one. A string that is nothing but the separator therefore yields no
+    // fields at all: `split(/\r?\n\r?\n/, "\r\n\r\n")` is empty, because
+    // the only field is empty and it is trailing. The `if start < n` above
+    // only covers the absent tail, so the empty field a separator at the very
+    // end pushes in the loop was surviving here as a phantom paragraph --
+    // which is E3, two stray blank lines from an input ending in a blank line.
+    while out.last().is_some_and(|f| f.is_empty()) {
+        out.pop();
     }
     out
 }
@@ -2806,7 +2816,7 @@ impl ReplAll for Regex {
 }
 #[cfg(test)]
 mod cr_chop_tests {
-    use super::{chop_leading_cr, chop_trailing_cr};
+    use super::{chop_leading_cr, chop_trailing_cr, split_blank_lines};
 
     /// The patterns the two helpers replaced, compiled exactly as the engine
     /// compiled them.
@@ -2853,6 +2863,80 @@ mod cr_chop_tests {
             assert_eq!(chop_trailing_cr(s), want_t, "trailing, input {s:?}");
             assert_eq!(chop_leading_cr(s), want_l, "leading, input {s:?}");
         }
+    }
+
+    /// E3. `split_blank_lines` stands in for `split(/\r?\n\r?\n/, $s)`,
+    /// which is why the exhaustive treatment above did not reach it: the two
+    /// helpers it covers are the only ones checked against their regex, and
+    /// this one -- the one that decides where paragraphs begin and end -- was
+    /// not. It is now, over the same alphabet, against the regex itself.
+    ///
+    /// Perl's trailing-empty-field rule is the part that is easy to get wrong
+    /// and impossible to notice by reading: it is a property of `split` rather
+    /// than of the pattern, and a hand-written splitter has no reason to know
+    /// about it.
+    #[test]
+    fn split_blank_lines_matches_perl_split() {
+        let seps = crate::links::ascii_re_cached(r"\r?\n\r?\n");
+        let alphabet = ['a', ' ', '\r', '\n'];
+        let mut inputs: Vec<String> = vec![String::new()];
+        let mut level = inputs.clone();
+        for _ in 0..5 {
+            let mut next = Vec::new();
+            for s in &level {
+                for &c in &alphabet {
+                    let mut t = s.clone();
+                    t.push(c);
+                    next.push(t);
+                }
+            }
+            inputs.extend(next.iter().cloned());
+            level = next;
+        }
+        for s in &inputs {
+            // Perl semantics: split on every non-overlapping match, keeping
+            // leading and middle empty fields, then drop trailing empties.
+            let mut want: Vec<String> = seps
+                .split(s)
+                .map(|f| {
+                    f.unwrap_or_else(|e| panic!("split failed on {s:?}: {e}"))
+                        .to_string()
+                })
+                .collect();
+            while want.last().is_some_and(|f| f.is_empty()) {
+                want.pop();
+            }
+            assert_eq!(split_blank_lines(s), want, "input {s:?}");
+        }
+    }
+
+    /// The E3 repro, pinned at the level it was reported: a document whose only
+    /// record ends in a blank line must produce no paragraph from that
+    /// separator. It used to produce one empty paragraph, which is where the two
+    /// extra blank lines in the body came from.
+    #[test]
+    fn a_trailing_blank_line_is_not_a_paragraph() {
+        // Every expected value below was produced by running
+        // `split(/\r?\n\r?\n/, ...)` under Perl, not by reasoning about the
+        // pattern. Reasoning got two of them wrong while writing this test,
+        // which is why they are transcribed rather than derived.
+        assert_eq!(split_blank_lines("\r\n\r\n"), Vec::<String>::new());
+        assert_eq!(split_blank_lines("\n\n"), Vec::<String>::new());
+        assert_eq!(split_blank_lines("\r\n\r\n\r\n\r\n"), Vec::<String>::new());
+        // a separator at the very end leaves no paragraph behind it
+        assert_eq!(split_blank_lines("a\r\n\r\n"), vec!["a"]);
+        // ... but an empty field is kept whenever it is not the last one
+        assert_eq!(split_blank_lines("\r\n\r\na"), vec!["", "a"]);
+        assert_eq!(split_blank_lines("a\r\n\r\nb"), vec!["a", "b"]);
+        // only one separator fits in `a\r\n\r\n\r\nb`, so the tail is one
+        // field rather than an empty one plus a field
+        assert_eq!(split_blank_lines("a\r\n\r\n\r\nb"), vec!["a", "\r\nb"]);
+        assert_eq!(split_blank_lines("\r\n\r\n\r\n"), vec!["", "\r\n"]);
+        assert_eq!(split_blank_lines("a\r\n\r\n\r"), vec!["a", "\r"]);
+        assert_eq!(
+            split_blank_lines("a\r\n\r\na\r\n\r\nb"),
+            vec!["a", "a", "b"]
+        );
     }
 
     #[test]

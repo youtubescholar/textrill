@@ -327,31 +327,19 @@ def sanitise(text):
 # an explicit-quote PRE block that dropped everything after its first blank
 # line.  If a sweep starts printing "N known", something listed here has
 # regressed or a new bug matches a recorded shape exactly.
-KNOWN_DIVERGENCES = [
-    {
-        # CR-only lines leave stray blank lines in the body.  Very narrow: with
-        # these options, CR, LF, CR, LF, LF and CR, LF, CR, LF, LF, "-" are the
-        # only inputs found so far that diverge; \r\n, \r, \n, \r\n\r\n, \n\n and
-        # "a\r\n\r\n\r" all agree, so this is a paragraph-boundary accounting
-        # bug in the CR handling rather than a general "CRs are mishandled" one.
-        #
-        #   printf '\r\n\r\n\n' | txt2html --xhtml --make_anchors \
-        #     --preserve_indent --no-use_mosaic_header --no-titlefirst
-        #   reference  <body>\n\n\n</body>      (3 newlines)
-        #   port       <body>\n\n\n\n\n</body>   (5)
-        #
-        # Matched structurally, as "two extra blank lines somewhere", rather than
-        # on the text of the first differing line.  The reported line depends
-        # entirely on what follows the CRs -- the fuzzer has shown this same
-        # defect reported as a missing </body>, as a missing <p>-</p>, and as a
-        # missing <h1> -- and pinning any of those texts would let a genuinely
-        # different bug through.  The structural form cannot: it only matches
-        # when the port's line list is the reference's with two blank lines
-        # spliced in, so nothing is ever actually missing.
-        "requires": [("--xhtml",), ("--make_anchors",)],
-        "extra_blank_lines": 2,
-    },
-]
+# Divergences that are known, understood, and still unfixed.  Each entry keeps
+# the fuzzer quiet about one defect so that it can find the next one; removing an
+# entry is part of fixing the defect it describes.
+#
+# This list is empty because its only occupant, the CR path's phantom trailing
+# paragraph, is fixed (E3).  The entry described a signature -- "the port's line
+# list is the reference's with two blank lines spliced in" -- rather than the
+# defect, so leaving it in place after the fix would have suppressed the same
+# regression the moment it came back, and the fuzzer would have had nothing to
+# say about it.  A recurrence should be reported, not suppressed: add an entry
+# when a divergence is diagnosed but not yet fixed, and delete it in the same
+# change that fixes it.
+KNOWN_DIVERGENCES: list[dict] = []
 
 
 
