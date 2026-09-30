@@ -95,8 +95,9 @@ the next person does not have to re-derive the ordering:
    table-heavy document at the same speed.
 4. ~~**A3.**~~ **Done.** Five numeric options are now bounded and four are
    deliberately not; the difference is measured, not assumed, and it does not
-   match what this plan originally said. Next: A5–A7, then E3 when convenient.
-5. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
+   match what this plan originally said.
+5. ~~**A5.**~~ **Done.** Next: A6, A7, then E3 when convenient.
+6. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
    above, but answer it before starting any Tier 3 work.
 
 Two lessons worth carrying to the next item, because both cost time here: a
@@ -750,7 +751,7 @@ referenced from `TOOL-SURVEY.md` and must not be renumbered.
 | A2 | one compiled regex is leaked per distinct pattern, ~3.9 KB each | **done** (was High, corrected to Low by measurement) | `links.rs:154`, needs `--make_tables` |
 | A3 | numeric options accept 0 and unbounded values | **done** | `options.rs:174` `validate`, enforced by `tests/cliexit.rs` and the GUI's spin boxes |
 | A4 | GUI cannot catch a Rust panic | **done** | `PanicException` re-export; `worker.py` re-raises completion |
-| A5 | GUI corrupts non-UTF-8 files on save | Medium | `files.py:38` |
+| A5 | GUI corrupts non-UTF-8 files on save | **done** (line endings still normalised; see A5) | `files.py:33` returns the encoding; the window writes it back |
 | A6 | GUI never cancels superseded conversions | Low–Med | `mainwindow.py:277` |
 | A7 | save silently creates directories | Low | `files.py:41` |
 | A8 | `--title` / `--style_url` unescaped | Low | declared deviation |
@@ -1179,7 +1180,7 @@ A1 threshold.
 
 ## Addendum Phase B — GUI correctness
 
-### A5. Remember the encoding a file was read with
+### A5. Remember the encoding a file was read with — **done**
 
 `read_text_file` (`files.py:33`) decodes UTF-8-or-Latin-1 and throws the
 encoding away; `write_text_file` (`files.py:38`) defaults to UTF-8. So
@@ -1196,6 +1197,38 @@ for free and the two do not need reconciling later.
 
 Test: open a CP1252 fixture, save, assert the bytes are unchanged. Add the same
 assertion for UTF-8 and for a file with a BOM.
+
+**Fixed (2026-09-30).** `read_text_file` returns `(text, encoding)`, the window
+keeps the encoding of the file it has open, and "Save text" writes it back. The
+encoding is decided by `detect_encoding`, which is the converter's own rule --
+try UTF-8, fall back to Latin-1 -- rather than a declared charset or a locale, so
+the GUI cannot disagree with the converter about what a file contains. Loading a
+new file replaces the remembered encoding rather than keeping the old one, since
+the previous file says nothing about the new one.
+
+"Save HTML" writes UTF-8 deliberately and says so in a comment: the HTML is text
+this program produced, not a transcription of the input, so writing it in the
+source file's CP1252 would fail on any character CP1252 cannot represent. The
+plan above lists `mainwindow.py:421` as a transcode site, and it is not one --
+there is no original byte sequence for generated HTML to diverge from. What the
+generated HTML *does* lack is a `charset` declaration, so the browser guesses;
+that is P7.2, and it is the real problem at that call site.
+
+Two things measured while writing the tests, both worth recording:
+
+- **A byte-order mark is not stripped, deliberately.** The converter does not
+  strip it -- `txt2html` on a BOM file emits the U+FEFF into the output -- so
+  stripping it in the editor would make the preview disagree with both the saved
+  file and the reference. Parity beats tidiness, and the test says so.
+- **Line endings are *not* preserved by the window, and the tests now say that
+  too.** `files.py` round-trips CRLF byte for byte, but `QPlainTextEdit`
+  normalises CRLF to LF on the way in and back out again, so the text that
+  reaches `write_text_file` no longer has them. Opening and saving a CRLF file
+  therefore still changes it. This is Qt, not this code, and it is a real
+  byte-level loss of the kind A5 is about -- but whether an editor should
+  preserve the line endings of the file it opened is a decision, not an obvious
+  bug, so it is recorded here rather than fixed. The current behaviour is pinned
+  by a test so that it is a choice and not a surprise.
 
 ### A6. Cancel superseded conversions
 

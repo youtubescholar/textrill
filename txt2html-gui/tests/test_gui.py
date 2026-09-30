@@ -98,8 +98,8 @@ class ConverterTests(unittest.TestCase):
         source = os.environ.get("T2H_TFILES")
         if not source:
             self.skipTest("T2H_TFILES is not set")
-        text = read_text_file(os.path.join(source, "table-border.txt"))
-        golden = read_text_file(os.path.join(source, "good_table-border.html"))
+        text, _ = read_text_file(os.path.join(source, "table-border.txt"))
+        golden, _ = read_text_file(os.path.join(source, "good_table-border.html"))
         self.assertEqual(
             txt2html.convert(text, {"make_tables": True, "extract": True}), golden
         )
@@ -147,7 +147,114 @@ class FileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sub" / "note.txt"
             write_text_file(path, "héllo\n")
-            self.assertEqual(read_text_file(path), "héllo\n")
+            self.assertEqual(read_text_file(path)[0], "héllo\n")
+
+    # ------------------------------------------------------------ A5: the
+    # encoding a file was read with has to survive a save, or merely opening a
+    # file changes it.
+
+    def test_opening_and_saving_a_cp1252_file_leaves_the_bytes_alone(self):
+        """The defect: 0x80-0x9F are punctuation in CP1252.
+
+        Decoded as Latin-1 they are C1 control characters, so writing them back
+        as UTF-8 produced `\xc2\x97` where the file said `\x97` -- a curly
+        quote and an em dash replaced by control characters, and the file is
+        then a different file.
+        """
+        original = b"Caf\xe9 \x97 na\xefve \x93quotes\x94\r\nsecond\r\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cp1252.txt"
+            path.write_bytes(original)
+
+            text, encoding = read_text_file(path)
+            self.assertEqual(encoding, "latin-1")
+
+            # What the window does with it.
+            write_text_file(path, text, encoding)
+            self.assertEqual(
+                path.read_bytes(),
+                original,
+                "opening and saving a CP1252 file changed its bytes",
+            )
+
+    def test_encoding_is_reported_for_each_kind_of_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, data, expected in [
+                ("utf8.txt", "naïve 門牌\n".encode("utf-8"), "utf-8"),
+                ("bom.txt", b"\xef\xbb\xbfhello\n", "utf-8"),
+                # Not valid UTF-8, so Latin-1 by the converter's rule.
+                ("latin1.txt", b"caf\xe9\n", "latin-1"),
+                # 0x97 is a valid *UTF-8* sequence when followed by the right
+                # continuation byte, so this is a UTF-8 file containing a
+                # character that looks like a CP1252 quote.
+                ("looks-latin1.txt", b"\xc2\x97\n", "utf-8"),
+            ]:
+                path = Path(tmp) / name
+                path.write_bytes(data)
+                _, encoding = read_text_file(path)
+                self.assertEqual(encoding, expected, name)
+
+    def test_utf8_file_round_trips_byte_for_byte(self):
+        original = "naïve 門牌規劃 — dash\r\n".encode("utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "utf8.txt"
+            path.write_bytes(original)
+            text, encoding = read_text_file(path)
+            self.assertEqual(encoding, "utf-8")
+            write_text_file(path, text, encoding)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_byte_order_mark_is_kept_because_the_converter_keeps_it(self):
+        """Parity beats tidiness: the converter does not strip a BOM.
+
+        A BOM decodes to U+FEFF, which is part of the text, and it appears in the
+        converted output. Stripping it in the editor would show the user a
+        document the saved file does not contain, and would make the preview
+        disagree with the reference.
+        """
+        original = b"\xef\xbb\xbfhello\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bom.txt"
+            path.write_bytes(original)
+            text, encoding = read_text_file(path)
+            self.assertEqual(encoding, "utf-8")
+            self.assertTrue(text.startswith("\ufeff"), "the BOM should still be in the text")
+            write_text_file(path, text, encoding)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_files_module_preserves_crlf(self):
+        """The file module does not rewrite line endings.
+
+        True of `files.py` and *not* of the window: QPlainTextEdit normalises
+        CRLF to LF before `write_text_file` ever sees the text, which
+        `test_opening_and_saving_a_cp1252_file_through_the_window` pins. So this
+        is a property of the module, not a promise about the application.
+        """
+        original = b"one\r\ntwo\r\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "crlf.txt"
+            path.write_bytes(original)
+            text, encoding = read_text_file(path)
+            self.assertEqual(encoding, "utf-8")
+            write_text_file(path, text, encoding)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_generated_html_is_written_as_utf8_whatever_the_source_was(self):
+        """The HTML is this program's output, not a transcription of the input.
+
+        Writing it in the source file's CP1252 would be the wrong fix for A5: it
+        would fail outright on any character CP1252 cannot represent, and it
+        would leave the file with no declaration saying what it is (P7.2).
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "cp1252.txt"
+            source.write_bytes(b"na\xefve\n")
+            _text, encoding = read_text_file(source)
+            self.assertEqual(encoding, "latin-1")
+
+            out = Path(tmp) / "out.html"
+            write_text_file(out, "<p>naïve 門牌</p>", "utf-8")
+            self.assertEqual(out.read_bytes(), "<p>naïve 門牌</p>".encode("utf-8"))
 
 
 class GuiTests(unittest.TestCase):
@@ -302,6 +409,71 @@ class GuiTests(unittest.TestCase):
             ("list", "<ol"),
         ]:
             self.assertIn(fragment, html, f"the sample lost its {what}")
+
+    def test_opening_and_saving_a_cp1252_file_through_the_window(self):
+        """A5 end to end, through the window rather than the file module.
+
+        The module tests cover the read and write halves; this covers the wiring
+        between them, which is where the encoding has to be remembered.
+        """
+        original = b"Caf\xe9 \x97 na\xefve \x93quotes\x94\r\nsecond\r\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "cp1252.txt"
+            source.write_bytes(original)
+
+            self.window.load_file(str(source))
+            drain(self.app, self.window)
+            self.assertEqual(self.window.encoding, "latin-1")
+            # The editor shows the characters, not control codes.
+            # The editor shows what Latin-1 says, which is the converter's rule:
+            # 0x97 is a C1 control character, not the em dash CP1252 would make
+            # of it. Displaying a prettier character than the encoding contains
+            # would be wrong in the other direction -- the file says a control
+            # character and the file must keep saying so.
+            self.assertIn("\u0097", self.window.editor.toPlainText())
+            self.assertNotIn("\u2014", self.window.editor.toPlainText())
+
+            self.window.save_text()
+            saved = source.read_bytes()
+
+            # The 8-bit characters are the point of A5, and they survive.
+            for byte in (b"\xe9", b"\x97", b"\xef", b"\x93", b"\x94"):
+                self.assertIn(byte, saved, f"{byte!r} was lost")
+            self.assertTrue(
+                saved.startswith(b"Caf\xe9 \x97 na\xefve \x93quotes\x94"),
+                f"the text was transcoded: {saved[:40]!r}",
+            )
+            # No double encoding, which is what the defect looked like.
+            self.assertNotIn(b"\xc2\x97", saved)
+            self.assertNotIn(b"\xc3\xa9", saved)
+
+            # The line endings are not preserved, and that is Qt, not this code:
+            # QPlainTextEdit normalises CRLF to LF in both directions, so the
+            # text that reaches write_text_file no longer has them. Recorded in
+            # the plan as an open decision; pinned here so it is a choice rather
+            # than a surprise.
+            self.assertEqual(saved, b"Caf\xe9 \x97 na\xefve \x93quotes\x94\nsecond\n")
+
+    def test_saving_a_second_file_uses_its_own_encoding(self):
+        """A new file's encoding says nothing about the previous one.
+
+        Carrying the old encoding over would write the second file in the first
+        file's charset, which is a corruption bug of exactly the kind A5 is
+        about, just in the other direction.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "first.txt"
+            first.write_bytes(b"caf\xe9\n")
+            second = Path(tmp) / "second.txt"
+            second.write_bytes("naïve 門牌\n".encode("utf-8"))
+
+            self.window.load_file(str(first))
+            drain(self.app, self.window)
+            self.assertEqual(self.window.encoding, "latin-1")
+
+            self.window.load_file(str(second))
+            drain(self.app, self.window)
+            self.assertEqual(self.window.encoding, "utf-8")
 
     def test_save_as_does_not_propose_overwriting_the_source(self):
         # Opening a .txt and hitting Save As used to suggest the .txt back,

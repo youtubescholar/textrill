@@ -89,6 +89,11 @@ class MainWindow(QMainWindow):
         # was last written.  They are deliberately different files.
         self.path: Optional[str] = None
         self.output_path: Optional[str] = None
+        # The encoding the source file was decoded with, so "Save text" writes
+        # the same bytes back. Defaults to UTF-8 for text that never came from a
+        # file. Reset with the file on load, not carried over: a new file's
+        # encoding says nothing about the old one.
+        self.encoding: str = "utf-8"
         # dirty tracks edits to the *text*; output_stale tracks HTML that has
         # not been written to output_path yet.  Saving the HTML must never
         # make unsaved text edits look saved.
@@ -335,7 +340,7 @@ class MainWindow(QMainWindow):
 
     def load_file(self, name: str) -> None:
         try:
-            text = read_text_file(name)
+            text, self.encoding = read_text_file(name)
         except OSError as exc:
             QMessageBox.warning(self, "Cannot open", str(exc))
             return
@@ -373,7 +378,11 @@ class MainWindow(QMainWindow):
             if not name:
                 return
         try:
-            write_text_file(name, self.editor.toPlainText())
+            # Back to the encoding the file was read with. Decoding as Latin-1
+            # and writing UTF-8 would transcode the file behind the user's back,
+            # and for CP1252 that is lossy: 0x80-0x9F are punctuation there and
+            # control characters in Latin-1.
+            write_text_file(name, self.editor.toPlainText(), self.encoding)
         except OSError as exc:
             QMessageBox.warning(self, "Cannot save", str(exc))
             return
@@ -418,7 +427,10 @@ class MainWindow(QMainWindow):
             )
             return
         try:
-            write_text_file(name, self.html_view.toPlainText())
+            # The generated HTML is UTF-8 whatever the source file was: it is
+            # text this program produced, not a transcription of the input. Note
+            # that it declares no charset yet, which is P7.2's job.
+            write_text_file(name, self.html_view.toPlainText(), "utf-8")
         except OSError as exc:
             QMessageBox.warning(self, "Cannot save", str(exc))
             return
