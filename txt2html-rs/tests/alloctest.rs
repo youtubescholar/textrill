@@ -19,6 +19,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use txt2html::convert::Converter;
+use txt2html::links;
 use txt2html::options::Options;
 
 static CUMULATIVE: AtomicUsize = AtomicUsize::new(0);
@@ -122,69 +123,94 @@ fn printable_delimiters() -> Vec<char> {
 // 128-entry cap clears the map, which drops references without releasing
 // memory. This drives it directly, which is the only way to reach that state:
 // only ~90 printable delimiter characters exist, so no real document can
-// generate tens of thousands of distinct patterns in one process.
-//
-// This is a micro-benchmark and is labelled as one. It exists to establish the
-// shape of the defect, not to be a performance target.
-
-/// Drive the cache with `n` distinct keys and report what it cost.
+/// A2 was "`ascii_re_cached` leaks one `Regex` per distinct pattern, forever".
 ///
-/// The keys are deliberately built from a safe alphabet rather than from real
-/// delimiter characters: what is being measured is one compiled regex retained
-/// per distinct key, and that is independent of the pattern's contents.
-fn drive_cache(n: usize) -> (usize, isize) {
-    measure(|| {
-        for i in 0..n {
-            // A valid, distinct, metacharacter-free pattern per key.
-            let pat = format!("(?:p{i}q)");
-            let re = txt2html::links::ascii_re_cached(&pat);
-            assert!(re.as_str().starts_with("(?:p"));
-        }
-    })
-}
-
-/// The leak's signature is not churn, it is **retention**: bytes allocated and
-/// never given back. `cache.clear()` at `links.rs` drops the map's references
-/// without freeing the `Box::leak`ed regexes, so live bytes climb with the
-/// number of distinct keys and stay there.
+/// The fix is not to free those `Regex`es -- the function cannot, it returns
+/// `&'static` -- but to make the set of patterns *fixed*, so there is nothing
+/// unbounded left. The parameter is now `&'static str`, which makes that a
+/// compile-time guarantee rather than a convention: a caller holding a
+/// document-derived pattern gets a type error, and this file's own direct-call
+/// test was rewritten by that error, which is how the guarantee is known to
+/// hold.
 ///
-/// Cumulative allocation is reported too, but it is the weaker signal -- lots of
-/// allocation that is all freed is a time cost, not a leak, and conflating the
-/// two is how the plan's original figures went unquestioned.
+/// What remains is a bounded, one-time cost for the fixed literals, and that is
+/// what this measures. It is a real allocation the process never gives back, so
+/// it is recorded here rather than ignored; `valgrind` flags it, and the plan
+/// says so. Closing it entirely would mean changing the return type at 39 call
+/// sites, which is a larger change than the defect warrants.
 #[test]
-fn a2_retains_one_regex_per_distinct_pattern() {
-    let (_, live_small) = drive_cache(1_000);
-    let (alloc_large, live_large) = drive_cache(4_000);
+fn a2_literal_cache_retention_is_bounded() {
+    /// The patterns `do_delim` and the table sniffs actually use. Literals, so
+    /// they are what the cache is for.
+    const LITERALS: &[&str] = &[
+        r"^(?:From:?)|Newsgroups: ",
+        r"^\w*&gt",
+        r"^[\|:]",
+        r"^\s*o\s",
+        r"(?:^| ) +(?=[^ ])",
+        r"((?:^| ) +)(?=[^ ])",
+        r"^\s*\w+",
+        r"\s+\|\s+",
+        r"^\s*[^A-Za-z0-9]",
+        r"^\s*\([^)]*\)",
+        r"^[0-9]+\.",
+        r"^[-*+]\s",
+        r"^\s*[0-9]\)",
+        r"^\s*>",
+        r"^\s*#",
+        r"^\s*\*",
+        r"\S+\s+<\S+>",
+        r"^\w+:",
+        r"^\s*\[",
+        r"^\s*\d+[.)]\s",
+        r"^\s*[a-z]\)\s",
+        r"\w+@\w+",
+        r"^\s*<",
+        r"^\s*\?",
+        r"^\s*:",
+        r"^\s*;",
+        r"^\s*\|",
+        r"^\s*~",
+        r"^\s*\+",
+        r"^\s*=",
+        r"^\s*!",
+    ];
+
+    // One thread, so the measurement is of a cold cache: what a process pays to
+    // reach the steady state it then keeps.
+    let live: isize = std::thread::spawn(|| {
+        let (_alloc, live) = measure(|| {
+            for pat in LITERALS {
+                let re = links::ascii_re_cached(pat);
+                // Touch it, so the result cannot be optimised away.
+                assert!(re.as_str().len() > 0);
+            }
+        });
+        live
+    })
+    .join()
+    .expect("measurement thread panicked");
 
     eprintln!(
-        "A2 direct-call: 4000 extra keys -> {alloc_large} bytes cumulative, \
-         {live_large:+} bytes retained (1000 keys had retained {live_small:+})"
+        "A2 literal cache: {} fixed patterns, {live:+} bytes retained",
+        LITERALS.len()
     );
 
-    // Live memory must not scale with the number of distinct patterns. After the
-    // fix this is a small constant; while the leak is present it is kilobytes per
-    // pattern. The threshold sits between the two by three orders of magnitude.
-    const BUDGET: isize = 64 * 1024;
-    if live_large >= BUDGET {
+    // Before the fix this was unbounded in the number of *distinct* patterns and
+    // the same ~3.9 KB applied to each of them. Now the count is fixed by the
+    // source, so the budget is simply "the literals, times the per-pattern
+    // cost, plus room for the converter's own state".
+    const BUDGET: isize = 512 * 1024;
+    if live >= BUDGET {
         known_open(
             "A2",
             format!(
-                "4000 distinct patterns retain {live_large} bytes ({:.0} B/pattern), \
-                 over the {BUDGET} byte budget -- Box::leak in links::ascii_re_cached",
-                live_large as f64 / 4_000.0
+                "the fixed-literal cache retains {live} bytes, over the {BUDGET} byte \
+                 budget for {} patterns",
+                LITERALS.len()
             ),
         );
     }
-
-    // What must hold even while the leak is present: growth is linear in the
-    // number of distinct patterns, not quadratic. This is the plan's original
-    // claim, now checked rather than repeated.
-    let per_pattern = live_large as f64 / 4_000.0;
-    assert!(
-        (per_pattern - 3_927.0).abs() < 1_500.0,
-        "{per_pattern:.0} B/pattern is not the ~3.9 KB/pattern linear leak -- the \
-         cost per pattern has changed shape and the figures in the plan need revisiting"
-    );
 }
 
 // ------------------------------------------------------------------ A2, part 2

@@ -151,7 +151,19 @@ pub fn ascii_re(pat: &str) -> Regex {
 /// Compiling is a large share of the remaining cost, and these patterns are
 /// fixed literals, so keep them per-thread: a `Converter` holds no shared
 /// mutable state, which also keeps concurrent conversions independent.
-pub fn ascii_re_cached(pat: &str) -> &'static Regex {
+///
+/// The parameter is `&'static str` rather than `&str`, and that is the whole
+/// point of the signature. This function cannot free what it hands out, because
+/// it returns `&'static Regex`; the only thing keeping the leak bounded is that
+/// the pattern set is *fixed*, so `&'static` on the input is a compile-time
+/// promise that a caller cannot break. A caller with a document-derived pattern
+/// gets a compile error rather than silently growing the cache, and should use
+/// [`ascii_re`] instead, which returns an owned `Regex` that is dropped with it.
+///
+/// The `MAX_CACHED` bound below is therefore a guard against a future mistake,
+/// not the thing that makes this safe, and it does not bound the leak: clearing
+/// a map of `&'static` drops no memory.
+pub fn ascii_re_cached(pat: &'static str) -> &'static Regex {
     thread_local! {
         static CACHE: RefCell<HashMap<String, &'static Regex>> = RefCell::new(HashMap::new());
     }

@@ -2642,7 +2642,7 @@ fn is_delim_table(rows: &[String]) -> bool {
         return false;
     };
     // There needs to be at least three delimiters in the row
-    let dc = links::ascii_re_cached(&format!("[{}]", &delim));
+    let dc = links::ascii_re(&format!("[{}]", &delim));
     let total_num_delims = dc.find_iter(r[0]).flatten().count();
     if total_num_delims < 3 {
         return false;
@@ -2894,7 +2894,7 @@ mod cr_chop_tests {
 #[cfg(test)]
 mod delim_linear_tests {
     use super::*;
-    use crate::links::ascii_re_cached;
+    use crate::links::{ascii_re, ascii_re_cached};
     use crate::options::Options;
 
     fn conv() -> Converter {
@@ -2924,24 +2924,24 @@ mod delim_linear_tests {
         let ltag = |s: &str| format!("<{tag}>{s}</{tag}>");
 
         // single alpha char between delims, wrapped in \B assertions
-        let re1_orig = ascii_re_cached(&format!(r"\B[{db}]([A-Za-z])[{db}]\B"));
-        let re1_lin = ascii_re_cached(&format!(r"[{db}]([A-Za-z])[{db}]"));
-        let expect = orig_replace(re1_orig, text, tag);
+        let re1_orig = ascii_re(&format!(r"\B[{db}]([A-Za-z])[{db}]\B"));
+        let re1_lin = ascii_re(&format!(r"[{db}]([A-Za-z])[{db}]"));
+        let expect = orig_replace(&re1_orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, re1_lin, non_boundary(delim), &ltag);
+        c.delim_replace(&mut got, &re1_lin, non_boundary(delim), &ltag);
         assert_eq!(got, expect, "re1 mismatch for {text:?} delim={delim}");
 
         // multi-char content ending in a "word/punct" char, leading
         // (?<!delim)
-        let re2_orig = ascii_re_cached(&format!(
+        let re2_orig = ascii_re(&format!(
             r"(?<![{db}])[{db}]([^{db}]+?[A-Za-z0-9!-/:-@\[-`{{-~&<>])[{db}]"
         ));
-        let re2_lin = ascii_re_cached(&format!(
+        let re2_lin = ascii_re(&format!(
             r"[{db}]([^{db}]+?[A-Za-z0-9!-/:-@\[-`{{-~&<>])[{db}]"
         ));
-        let expect = orig_replace(re2_orig, text, tag);
+        let expect = orig_replace(&re2_orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, re2_lin, not_preceded_by(delim), &ltag);
+        c.delim_replace(&mut got, &re2_lin, not_preceded_by(delim), &ltag);
         assert_eq!(got, expect, "re2 mismatch for {text:?} delim={delim}");
     }
 
@@ -3071,7 +3071,7 @@ mod delim_linear_tests {
 mod delim_wide_linear_tests {
     use super::delim_linear_tests::check_pair;
     use super::*;
-    use crate::links::ascii_re_cached;
+    use crate::links::{ascii_re, ascii_re_cached};
     use crate::options::Options;
 
     fn conv() -> Converter {
@@ -3100,9 +3100,9 @@ mod delim_wide_linear_tests {
         let orig = ascii_re_cached(r"#([^\d#](?![^#]*(?:<li>|<LI>|<P>|<p>))[^#]*[^# \t\n])#");
         let lin = ascii_re_cached(r"#([^\d#][^#]*[^# \t\n])#");
         let no_tag = no_list_or_para_tag;
-        let expect = orig_replace(orig, text, tag);
+        let expect = orig_replace(&orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, lin, no_tag, &ltag);
+        c.delim_replace(&mut got, &lin, no_tag, &ltag);
         assert_eq!(got, expect, "bold re2 mismatch for {text:?}");
     }
 
@@ -3112,9 +3112,9 @@ mod delim_wide_linear_tests {
         let orig = ascii_re_cached(r#"(?<![_A-Za-z0-9])_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#);
         let lin = ascii_re_cached(r#"_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#);
         let not_word = not_preceded_by_word_or_underscore;
-        let expect = orig_replace(orig, text, tag);
+        let expect = orig_replace(&orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, lin, not_word, &ltag);
+        c.delim_replace(&mut got, &lin, not_word, &ltag);
         assert_eq!(got, expect, "under re2 mismatch for {text:?}");
     }
 
@@ -3186,15 +3186,15 @@ mod delim_wide_linear_tests {
         let tag = "em";
         let ltag = |s: &str| format!("<{tag}>{s}</{tag}>");
         let d = fancy_regex::escape(delim);
-        let orig = ascii_re_cached(&format!(
+        let orig = ascii_re(&format!(
             r#"(?<!{d}){d}((\w|["'])(\w|[-\s!-/:-@\[-`{{-~])*[^\s]){d}"#
         ));
-        let lin = ascii_re_cached(&format!(
+        let lin = ascii_re(&format!(
             r#"{d}((\w|["'])(\w|[-\s!-/:-@\[-`{{-~])*[^\s]){d}"#
         ));
-        let expect = orig_replace(orig, text, tag);
+        let expect = orig_replace(&orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, lin, not_preceded_by_str(d.to_string()), &ltag);
+        c.delim_replace(&mut got, &lin, not_preceded_by_str(d.to_string()), &ltag);
         assert_eq!(got, expect, "multi mismatch for {text:?} delim={delim}");
     }
 

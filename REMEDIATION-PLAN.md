@@ -68,7 +68,7 @@ seeds (16 000 cases), against 700 cases before.
 | A1 | **done** | `chop_trailing_cr`/`chop_leading_cr`; the ~500 KB panic and the hang behind it (A1b) |
 | A4 | **done** | `PanicException` re-export; GUI worker reports Rust panics and always completes |
 | non-ASCII delimiter predicate | **done** | `(?<!é)` was vacuous; predicates extracted so the tests exercise production code |
-| A2 | **open** | re-measured by P12: real, linear, ~3.9 KB per distinct pattern, but bounded to ~0.3 MB per process; low severity; fix next |
+| A2 | **done** | `ascii_re_cached` now takes `&'static str`, so only fixed literals can be cached and the leak is bounded by the source; verified by `make alloctest` |
 | P12 | **done** | `proptest.py` (5 properties, no Perl oracle) + `alloctest.rs` (counting allocator); wired into `make verify` |
 | P13 | **open** | packaging decision, blocks the scope of Tier 3 |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
@@ -89,9 +89,10 @@ the next person does not have to re-derive the ordering:
    is bounded near ~0.3 MB per process, so A2 drops from High to Low. The plan's
    1.3 GB figure was an artefact of a direct-call benchmark. Details and
    arithmetic under **A2** above.
-3. **A2 — the fix**, verified by `make alloctest` rather than by output, since
-   the output was always correct. Now the smallest remaining item rather than the
-   most urgent, which is the point of measuring first.
+3. ~~**A2 — the fix.**~~ **Done**, verified by `make alloctest` rather than by
+   output, since the output was always correct. Marginal retention per distinct
+   delimiter fell from 3 451 B to 4 B, and output is byte-identical on a
+   table-heavy document at the same speed.
 4. **A3**, then A5–A7. E3 whenever it is convenient.
 5. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
    above, but answer it before starting any Tier 3 work.
@@ -744,7 +745,7 @@ referenced from `TOOL-SURVEY.md` and must not be renumbered.
 | Addendum | Finding | Severity | Touches |
 |---|---|---|---|
 | A1 | paragraph over ~500 KB panics the engine | **done** (panic + hang; see A1b) | `chop_trailing_cr`/`chop_leading_cr`, `delim_replace` |
-| A2 | one compiled regex is leaked per distinct pattern, ~3.9 KB each | Low (was High; bounded to ~0.3 MB/process once measured) | `links.rs:167`, needs `--make_tables` |
+| A2 | one compiled regex is leaked per distinct pattern, ~3.9 KB each | **done** (was High, corrected to Low by measurement) | `links.rs:154`, needs `--make_tables` |
 | A3 | numeric options accept 0 and unbounded values | High | `cli.rs:386`, `convert.rs:1794` |
 | A4 | GUI cannot catch a Rust panic | **done** | `PanicException` re-export; `worker.py` re-raises completion |
 | A5 | GUI corrupts non-UTF-8 files on save | Medium | `files.py:38` |
@@ -986,7 +987,34 @@ without the flag and concluding it is fine.
 The patterns are attacker-shaped: `convert.rs:2629` reads the delimiter out of the
 document and `convert.rs:2645`/`2652`/`2653` compile `[{delim}]` from it.
 
-Fix, in order of preference:
+**Fixed (2026-09-30), by option 1, and slightly differently than option 1 is
+written.** `ascii_re_cached` now takes `&'static str` instead of `&str`. The
+type is the fix: the function returns `&'static Regex` and so can never free what
+it hands out, but if the *input* is `&'static` then the set of patterns is fixed
+by the source and there is nothing unbounded to leak. A caller holding a
+document-derived pattern now gets a compile error instead of silently growing
+the cache, and uses `ascii_re`, which returns an owned `Regex` that is dropped
+with it.
+
+That is stronger than the plan's version of option 1, which would have fixed the
+one bad call site and left the invariant as a comment for the next caller to
+violate. It is not stronger than option 2, which would end the leak completely:
+**a bounded leak remains for the 31 fixed literals, measured at 341 KB**,
+`valgrind` will still flag it, and this plan does not pretend otherwise. Ending
+it means changing the return type to a lifetime-bound borrow at 39 call sites,
+which is a bigger change than a 341 KB one-time cost justifies. The
+`MAX_CACHED = 128` bound is now a guard against a future mistake rather than the
+thing that makes this safe, and it never bounded the leak in any case: clearing a
+map of `&'static` drops no memory.
+
+Result on a table-heavy document (960 delimiter-table rows, `--make_tables`):
+output byte-identical, 0.23 s before and after, peak RSS 6.5 MB → 6.4 MB. The
+recompilation the fix introduces is not measurable, because a single-character
+class like `[;]` is cheap to compile and the alternative was retaining every one
+of them forever. `make alloctest` reports marginal retention per additional
+distinct delimiter of **4 B**, down from 3 451 B.
+
+The original two options, for the record:
 
 1. **Do not cache dynamic patterns.** The delimiter is a single character and the
    set in practice is tiny; compiling one small pattern per candidate table costs
@@ -1005,22 +1033,28 @@ way a regression would. It is the only kind of test that can see this item; a
 byte-comparison against Perl passes while the process leaks, because the output
 is correct. Two tests, both currently reporting `KNOWN-OPEN [A2]`:
 
-- `a2_retains_one_regex_per_distinct_pattern` — calls the cache directly with
-  4 000 distinct patterns and asserts retained bytes stay under 64 KB. It also
-  asserts the per-pattern cost is still the ~3.9 KB *linear* leak, so that a
-  change of shape is noticed and the figures in this document revisited.
-- `a2_retained_bytes_do_not_scale_with_delimiter_count` — the honest one, and
-  the only one that exercises a real path: it converts actual DELIM-table
-  documents containing 4 versus 20 distinct delimiters, on separate threads, and
-  asserts the marginal retention per additional delimiter stays under 2 KB. It
-  currently measures 3 451 B.
+- `a2_retained_bytes_do_not_scale_with_delimiter_count` — the one that
+  exercises a real path: it converts actual DELIM-table documents containing 4
+  versus 20 distinct delimiters, on separate threads, and asserts the marginal
+  retention per additional delimiter stays under 2 KB. **Measured 3 451 B before
+  the fix, 4 B after.**
+- `a2_literal_cache_retention_is_bounded` — the residual, recorded rather than
+  hidden: the 31 fixed literal patterns cost 341 KB once and are never released.
+  Budget 512 KB.
+
+The first version of the direct-call test (`a2_retains_one_regex_per_distinct_pattern`,
+4 000 generated patterns, ~3.9 KB each) was what established the shape of the
+defect, and it earned its keep, but it could not survive the fix: it called
+`ascii_re_cached` with a runtime-built pattern, which the new `&'static str`
+signature correctly rejects. That compile error is the guarantee working, and it
+is how the test knows the invariant now holds rather than merely being intended.
 
 Note the original plan for this test — "~3 000 delimiter tables with 3 000
 distinct delimiters, asserting peak RSS" — was doubly unworkable: 3 000 distinct
 delimiters cannot be expressed in a document, and peak RSS is neither
 deterministic nor machine-independent. Getting a test that measures the right
 thing took three attempts; the two failures are written up under P12 because
-they are the more likely mistakes.
+they are the more likely mistakes for the next person.
 
 ### A3. Clamp numeric options at parse time
 
