@@ -199,3 +199,23 @@ still diverges, character-wise and then line-wise, and prints a `python3 -c`
 one-liner that reproduces it. It bypasses `sanitise()`, so it can find inputs
 outside the fuzzer's claimed domain; that is intended, and the reason several of
 the divergences above were pinned down.
+
+## What this harness can and cannot judge
+
+`run.sh` is a **Tier 1** oracle: it asserts byte-identity with the Perl module,
+which is the correct and strict rule for ASCII input and the documented output
+format. It is not a universal correctness oracle, and two of its limits are worth
+knowing before trusting a green run:
+
+- **The reference is broken on genuine UTF-8 input.** It decodes bytes as
+  Latin-1, so `tfiles/utf8.txt` produces mojibake and a spurious `<sup>TM</sup>`
+  where `tfiles/good_utf8.html` — the author's own expected output — shows the
+  correct text. The port matches the golden. A byte diff there is reporting a
+  Perl bug, not a port bug; such a case belongs in the golden list, not in a
+  byte-identity case.
+- **It generates no non-ASCII.** `fuzz.py`'s `sanitise()` rewrites every
+  character `>= 0x80` to `?`, so all fuzz cases are ASCII by construction.
+
+The tiers and the reasoning are in `REMEDIATION-PLAN.md`, "Compatibility policy".
+The non-Tier-1 oracles — the author's goldens, and a property suite that does not
+reference Perl at all — are P12 and are not implemented yet.

@@ -1,5 +1,11 @@
 # txt2html — adversarial findings
 
+> **Scope note.** This pass judged the port against the Perl module as
+> the specification. That remains right for ASCII input, but on genuine UTF-8
+> input Perl is the defect — see "Compatibility policy" in
+> `REMEDIATION-PLAN.md`, which also records that this evidence pass reached
+> **2 of 65** upstream `tfiles` and no non-ASCII case at all.
+
 Status: 2026-09-29. Result of an attack pass over `txt2html-rs` and
 `txt2html-gui`. Companion to `REMEDIATION-PLAN.md` and `TOOL-SURVEY.md`.
 

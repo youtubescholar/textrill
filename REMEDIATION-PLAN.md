@@ -3,10 +3,14 @@
 Status: **in progress**, 2026-09-30. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
-**Progress is recorded in §0.1 and in §0.2 below. P1, P2 and P3 are done; A1–A10
-and P4–P11 are not started.** Phase 0 work turned up three defects in the
+**Progress is recorded in §0.1 below. P1–P3, A1, A1b and A4 are done; E3 and
+P4–P13 are not started.** Phase 0 work turned up three defects in the
 transformation logic itself (E1–E3), which corrects the original survey's
 central claim — see §0.1.
+
+**The Perl module is the oracle for most of the work below, but on non-ASCII
+input it is the defect, not the specification. Read the compatibility policy
+before starting anything that touches Unicode, encoding, or resource limits.**
 
 Companion documents: `TOOL-SURVEY.md` (feature-gap survey) and
 `ADVERSARIAL-FINDINGS.md` (attack pass).
@@ -32,10 +36,10 @@ are on this machine, Perl 5.38, release build, default options unless noted.
 
 | Check | Result |
 |---|---|
-| `cargo test` | 21/21 pass (5 linktest, 7 optionstest, 9 paratest) |
-| GUI `unittest` (offscreen) | 28/28 pass, 1 skipped without `T2H_TFILES`, 28/28 with it |
-| corpus, clean `RUNDIR` | **38/40** — 2 are false passes, see P1 |
-| differential fuzz, 700 cases x 12 option sets | 0 mismatches |
+| `cargo test --release` | 33/33 pass (12 unit, 5 linktest, 7 optionstest, 9 paratest) |
+| GUI `unittest` (offscreen) | 30/30 pass, 1 skipped |
+| corpus, clean `RUNDIR` | **46/46** byte-identical, 29/29 goldens (was 38/40, 2 false passes — see P1) |
+| differential fuzz | 16 000 cases across 8 seeds, 0 mismatches (was 700 x 12) |
 | `good_sample.html`, `good_xhtml_sample.html` | byte identical |
 | upstream Perl `t/*.t` (7 functional files) | 102/102 assertions pass — the canary for P1 |
 | speed, 2 MB document | Rust 2.94 s vs Perl 1.51 s (**1.9–2.0x slower**) |
@@ -61,6 +65,11 @@ seeds (16 000 cases), against 700 cases before.
 | E3 | **open** | CR-only lines leave two stray blank lines in the body |
 | A1 | **done** | `chop_trailing_cr`/`chop_leading_cr`; the ~500 KB panic and the hang behind it (A1b) |
 | A4 | **done** | `PanicException` re-export; GUI worker reports Rust panics and always completes |
+| non-ASCII delimiter predicate | **done** | `(?<!é)` was vacuous; predicates extracted so the tests exercise production code |
+| A2 | **open** | next; blocked on P12 to re-measure, and the figures above are unverified |
+| P12 | **open** | property suite; the oracle this tool currently lacks |
+| P13 | **open** | packaging decision, blocks the scope of Tier 3 |
+| toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
 ### The claim above was wrong
 
@@ -161,6 +170,123 @@ randomised inputs including multi-byte characters. That is the only coverage
 that would have caught the three wrong rewrites below, none of which a
 byte-comparison test against Perl could explain on its own.
 
+## Compatibility policy — match Perl where Perl is right, and not where it is wrong
+
+Added 2026-09-30, after reviewing the A1 diff. Everything above treats the Perl
+module as the specification. That is the right *oracle* for nearly all of it, and
+it is how A1, A1b, E1, E2 and the fuzzer's retry bug were found. It is the wrong
+*specification* for one large input class, and that was invisible until the
+non-ASCII predicate bug in the A1 diff forced the question.
+
+### The finding
+
+On non-ASCII input Perl is the defect, and the reference's own expected output
+proves it. `ref/txt2html-3.0/tfiles/utf8.txt` contains `門牌號碼規劃`:
+
+| producer | output for that line |
+|---|---|
+| `tfiles/good_utf8.html` — the author's expected output | `<p>$ echo 門牌號碼規劃` |
+| the port | `<p>$ echo 門牌號碼規劃` — identical to the golden |
+| Perl 5.38, 3.0 as shipped | `&eacute;` then raw `96 80`, a spurious `<sup>TM</sup>`, and a truncated `&cent` |
+
+Perl decodes each UTF-8 byte as Latin-1 and entity-escapes the result; byte `0x99`
+additionally trips the CP1252 smart-quote path, so it injects `<sup>TM</sup>` into
+the middle of a mojibake run. A second probe — a CJK setext heading — gives Perl
+`&aelig;&yen;&not;…` plus an `<em>f</em>` where the source contains no markup.
+
+So byte-parity on this class would require us to reproduce corruption and inject
+spurious markup. Parity is not merely unhelpful here; as a specification it is
+actively harmful, and it would have reported the port's correct behaviour as a bug.
+
+This settles the direction for **genuine UTF-8 input only**. It does not settle
+P7, and P7's cases run the other way in places: for a CP1252 file the port emits
+C1 control characters where Perl passes the bytes through for a Latin-1 browser,
+and under `eight_bit_clean` the port emits `CafÃ©` where Perl is right. Those are
+Tier 2 as well, but there the *port* is the one at fault. So Tier 2 means
+"establish which side is right, per input class" — not "the port is always
+right".
+
+### Three tiers
+
+| Tier | Scope | Rule | Oracle |
+|---|---|---|---|
+| 1 | ASCII input, documented output format | byte-identical to Perl | `cases.sh` byte diff, `tfiles/good_*.html` goldens |
+| 2 | non-ASCII / Unicode, resource limits, error handling | may differ, **must be better** — Perl is the defect | goldens, plus the property suite (P12) |
+| 3 | streaming, parallelism, diagnostics, GUI | no Perl analogue; must stand on its own | property suite |
+
+Tier 1 is unchanged and stays strict. Tier 2 is new: a divergence there is not a
+bug to be closed by making the port match Perl, and no Tier 2 item may be verified
+by byte-comparing against the reference.
+
+### How little of the input space any oracle actually reaches
+
+| Measurement | Result |
+|---|---|
+| `cases.sh` coverage of upstream `tfiles` | **2 of 65** files |
+| upstream non-ASCII files under test | **0 of 4** — `utf8.txt`, `good_utf8.html`, `umlauttest.txt`, `list-styles.txt` |
+| non-ASCII characters in 16 000 fuzz cases | **0** — `fuzz.py:310` `sanitise()` rewrites every character `>= 0x80` to `?` |
+| non-ASCII characters in our 6 corpus inputs | **0** |
+| corpus inputs containing emoji / combining marks | **0 / 0** |
+| crate dependencies | `fancy-regex`, `pyo3` — no Unicode capability at all |
+
+`fuzz.py`'s generator alphabet lists `ä ü Ä € 中`, but `sanitise()` replaces every
+one of them with `?` before the case runs, so the dynamic oracle is ASCII by
+construction. The upstream author wrote tests for exactly the hard classes —
+`utf8.txt`, `umlauttest.txt`, `list-styles.txt` — and we reference none of them.
+
+The last row is the deeper problem. The layout heuristics that ought to measure
+display width — setext and underline headings, table alignment, heading
+tolerances — count characters or bytes. For CJK and emoji that is wrong in the
+port *and* in Perl, so byte-parity renders a shared defect invisible. A single
+oracle structurally cannot find this class, which is the actual answer to
+"is the differential approach myopic": the approach is not, the oracle set is.
+
+### P12. A property suite that does not reference Perl
+
+The missing capability. Invariants that must hold whatever Perl does, so the tool
+can be judged on its own terms:
+
+- **No data loss.** Unescaping the output must recover every input character.
+  Catches silent truncation and mangling without needing a reference.
+- **Well-formedness.** `--xhtml` output must parse as XML. Perl's CJK output does
+  not; this alone would have caught the finding above.
+- **Determinism and idempotence.** The same input converts to the same bytes;
+  re-converting already-converted output does not compound.
+- **Resource bounds.** Cumulative allocation and wall time under fixed budgets.
+
+This is also where A2's regression test belongs, for the reason A2 already
+records: a byte-comparison passes while the process leaks, because the output is
+correct. Use a counting `#[global_allocator]` in its own test binary rather than
+peak RSS — it is deterministic and machine-independent, and it catches both the
+leak and the recompile thrash. Keep peak RSS and `valgrind --tool=massif` as
+diagnostics, not gates.
+
+### P13. Decide what "stands on its own" means for packaging
+
+Undecided, and it should be settled before more engine work rather than after.
+The CLI is a self-contained Rust binary. The GUI is not: `txt2html-gui` needs a
+Python runtime plus PySide6 at run time, and is built as a wheel. If the
+deliverable is a single artifact, Rust + Qt (C++) is a different architecture, not
+a refactor. Tier 3 of the policy above is scoped by this answer.
+
+### Corrections to the items above
+
+- **A2's RSS table is unverified.** The 30 000-delimiter row (142 440 KB, 13.6 s)
+  predates P12 and cannot be reproduced from real input: there are only ~90
+  printable delimiter characters, so a real document cannot generate 30 000
+  distinct patterns in one process. It appears to come from a direct-call
+  micro-benchmark. Do not treat the figures as a target, and do not close A2
+  against them — re-measure with a counting allocator first. Relatedly,
+  `fuzz.py`'s `manydelims` fixture generates at most 60 distinct delimiters
+  against a cap of 128, so it cannot reach the thrash path either.
+- **P7's step 1 cannot be executed as written.** It asks for a UTF-8 fixture with
+  wide characters and "assert Rust == Perl"; by the above, that assertion cannot
+  hold. Under this policy it becomes a golden assertion instead. P7's remaining
+  steps (explicit encoding option, `meta_charset`, GUI write-back) stand.
+- **A2's own caveat stands** and is worth repeating: it needs `--make_tables`,
+  which is off by default. Do not verify the fix by running the corpus without
+  the flag.
+
 ## Phase 0 — Make the harness trustworthy
 
 Do this before anything else. Two of the three bugs in later phases were
@@ -170,7 +296,8 @@ validated until this is fixed.
 ### P1. The corpus can report PASS on a run that crashed — **done**
 
 _Landed 2026-09-30. See §0.1. The `38/40` in §0 is the number this item
-produced, kept as the record of the defect; the corpus is now `43/43`._
+produced, kept as the record of the defect; the corpus was `43/43` when this
+landed and is `46/46` now._
 
 `tests/corpus/run.sh:7` does `mkdir -p` but never clears `$RUNDIR`, and
 `run_case` ignores the Rust binary's exit status (`run.sh:85`). A Rust-side
@@ -514,9 +641,19 @@ stylesheet that is not opt-in, and the htmltoc-style post-processing TOC.
 - Phase 5 items 3 and 4 (TOC, heading numbering) should be implemented together
   or not at all — a numbered TOC is the only reason to have heading numbering,
   and both depend on the same heading pass.
-- Every phase must keep the corpus at 43/43 and the goldens byte-identical
-  (43 as of 2026-09-30; it was 40 when this was written)
-  except where a change is explicitly declared a deviation.
+- Every phase must keep the corpus at **46/46** and the goldens at **29/29**
+  byte-identical, except where a change is explicitly declared a deviation.
+  (46 as of 2026-09-30; it was 40 when this was written.)
+- That invariant is the **Tier 1** rule and it holds for every item below, all of
+  which are Tier 1 or have no non-ASCII surface. A Tier 2 item — anything that
+  changes behaviour for non-ASCII input, resource limits, or error handling — is
+  verified by goldens and the P12 property suite instead, and must be recorded as
+  a deliberate divergence rather than closed by matching Perl.
+- **P12 before A2.** A2 has no test that can see it: the output is correct while
+  the process leaks, so a byte-comparison passes. P12's counting allocator is that
+  test, and A2's published RSS figures are unverified until it exists.
+- **P13 is a decision, not work.** It changes what Tier 3 means, so answer it
+  before starting anything in it, but it does not block Tier 1 or Tier 2.
 
 ---
 
@@ -957,13 +1094,16 @@ P3 seed corpus should be extended with the new fixtures as seeds.
   `BaseException` catch and the `finally` emit first even though it is 5 lines:
   until it exists, every A1–A3 regression is invisible in the GUI, and the GUI is
   where users meet this tool.
-- **A1, A2, A3 next, in that order.** A1 is the most reachable, A2 is the most
-  damaging per byte of input, A3 is the smallest and also unlocks correct GUI
-  spin-box ranges.
+- **A1 is done; A2 and A3 next, in that order** — but A2 waits on P12, because
+  nothing else in the harness can observe it. A3 is the smallest item here and
+  also unlocks correct GUI spin-box ranges.
 - **A5 before A6.** A5 is data loss; A6 is wasted CPU.
 - **A7 any time.** A8, A9, A10 are decisions, not blockers, and should not hold
   up anything above them.
-- **Every item in Phases A and B must leave the corpus at 43/43 and the goldens
-  byte-identical.** None of them should change output for any input that does
-  not currently fail. A8 and A9 are the exceptions and must be recorded as
+- **Every item in Phases A and B must leave the corpus at 46/46 and the goldens
+  at 29/29 byte-identical.** None of them should change output for any input that
+  does not currently fail. A8 and A9 are the exceptions and must be recorded as
   declared deviations in `lib.rs:16-31` and in the README.
+- **A2 is the exception to "the harness will show you".** It is the one item
+  whose defect is invisible to byte-comparison, so it is verified by P12's
+  allocation budget instead, and its current figures are unverified.
