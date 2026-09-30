@@ -83,8 +83,7 @@ fn options_from_dict(dict: Option<&Bound<'_, PyDict>>) -> PyResult<Options> {
                         _ => {}
                     }
                     for item in items {
-                        cli::set_value(&mut opts, &name, &item)
-                            .map_err(PyValueError::new_err)?;
+                        cli::set_value(&mut opts, &name, &item).map_err(PyValueError::new_err)?;
                     }
                     continue;
                 }
@@ -120,7 +119,11 @@ fn convert(py: Python<'_>, text: &str, options: Option<&Bound<'_, PyDict>>) -> P
 /// Latin-1 otherwise) and convert it.
 #[pyfunction]
 #[pyo3(signature = (path, options = None))]
-fn convert_file(py: Python<'_>, path: &str, options: Option<&Bound<'_, PyDict>>) -> PyResult<String> {
+fn convert_file(
+    py: Python<'_>,
+    path: &str,
+    options: Option<&Bound<'_, PyDict>>,
+) -> PyResult<String> {
     let text = read_any_file(path)
         .ok_or_else(|| PyValueError::new_err(format!("Could not open {path}")))?;
     let opts = options_from_dict(options)?;
@@ -150,8 +153,8 @@ fn option_specs(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
     let defaults = Options::default();
     let list = PyList::empty(py);
     for spec in cli::SPECS {
-        let default = cli::get_value(&defaults, spec.names[0])
-            .map_err(|e| PyValueError::new_err(e))?;
+        let default =
+            cli::get_value(&defaults, spec.names[0]).map_err(|e| PyValueError::new_err(e))?;
         let kind = match spec.kind {
             Kind::Flag => "bool",
             Kind::Int => "int",
@@ -162,13 +165,7 @@ fn option_specs(py: Python<'_>) -> PyResult<Bound<'_, PyList>> {
             Kind::Str => "str",
         };
         let aliases: Vec<&str> = spec.names[1..].to_vec();
-        list.append((
-            spec.names[0],
-            aliases,
-            kind,
-            default,
-            spec.help,
-        ))?;
+        list.append((spec.names[0], aliases, kind, default, spec.help))?;
     }
     Ok(list)
 }

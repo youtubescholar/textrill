@@ -130,7 +130,8 @@ fn expand_ascii_escapes(pat: &str) -> String {
 /// Translate Perl POSIX classes and `\W\d`-style shortcuts to ASCII.
 pub fn translate_pattern(pat: &str) -> String {
     let ascii = expand_ascii_escapes(pat);
-    ascii.replace("[:alpha:]", "A-Za-z")
+    ascii
+        .replace("[:alpha:]", "A-Za-z")
         .replace("[:alnum:]", "A-Za-z0-9")
         .replace("[:lower:]", "a-z")
         .replace("[:upper:]", "A-Z")
@@ -257,9 +258,14 @@ pub fn glob2regexp(glob: &str) -> String {
     // Escape funky chars
     let mut escaped_glob = String::new();
     for c in v.iter() {
-        if !(c.is_ascii_alphanumeric() || *c == '_'
-            || *c == '[' || *c == ']' || *c == '*'
-            || *c == '?' || *c == '|' || *c == '\\')
+        if !(c.is_ascii_alphanumeric()
+            || *c == '_'
+            || *c == '['
+            || *c == ']'
+            || *c == '*'
+            || *c == '?'
+            || *c == '|'
+            || *c == '\\')
         {
             escaped_glob.push('\\');
         }
@@ -403,9 +409,18 @@ impl LinkParser {
             if caps.len() < 4 {
                 continue;
             }
-            let mut key = caps.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let options = caps.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let url = caps.get(3).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let mut key = caps
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            let options = caps
+                .get(2)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            let url = caps
+                .get(3)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
 
             let mut switches: u8 = 0;
             if options.contains('i') || options.contains('I') {
@@ -492,12 +507,7 @@ impl LinkParser {
             let mut line_with_links = String::new();
             if rule_switches & LINK_ONCE != 0 {
                 if !self.once_done[i] {
-                    if let Some(caps) = self.rules[i]
-                        .regex
-                        .captures(&*para_ref)
-                        .ok()
-                        .flatten()
-                    {
+                    if let Some(caps) = self.rules[i].regex.captures(&*para_ref).ok().flatten() {
                         let m = caps.get(0).unwrap();
                         let (pre, matched, post) = split_front(para_ref, m.start(), m.end());
                         self.once_done[i] = true;
@@ -518,12 +528,7 @@ impl LinkParser {
                 *para_ref = format!("{line_with_links}{para_ref}");
             } else if rule_switches & LINK_SECT_ONCE != 0 {
                 if !self.sect_once_done[i] {
-                    if let Some(caps) = self.rules[i]
-                        .regex
-                        .captures(&*para_ref)
-                        .ok()
-                        .flatten()
-                    {
+                    if let Some(caps) = self.rules[i].regex.captures(&*para_ref).ok().flatten() {
                         let m = caps.get(0).unwrap();
                         let (pre, matched, post) = split_front(para_ref, m.start(), m.end());
                         self.sect_once_done[i] = true;
@@ -729,8 +734,7 @@ pub fn load_links(opts: &Options) -> LinkParser {
     for dict_file in &opts.links_dictionaries {
         dict_files.push(dict_file);
     }
-    if !opts.default_link_dict.is_empty()
-        && std::path::Path::new(&opts.default_link_dict).is_file()
+    if !opts.default_link_dict.is_empty() && std::path::Path::new(&opts.default_link_dict).is_file()
     {
         dict_files.push(&opts.default_link_dict);
     }

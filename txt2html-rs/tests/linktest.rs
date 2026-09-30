@@ -50,9 +50,7 @@ fn no_nested_anchors_when_a_url_contains_a_dictionary_word() {
     );
 
     assert!(
-        !html.contains(
-            "<a href=\"https://github.com/resurrecting-open-source-projects/<a "
-        ),
+        !html.contains("<a href=\"https://github.com/resurrecting-open-source-projects/<a "),
         "nested anchor generated: {html}"
     );
     let opens = html.matches("<a ").count();
@@ -97,7 +95,10 @@ fn conversions_are_independent_across_threads() {
 
     let handles: Vec<_> = (0..24)
         .map(|i| {
-            let (text, want) = (texts[i % texts.len()].to_string(), expected[i % texts.len()].clone());
+            let (text, want) = (
+                texts[i % texts.len()].to_string(),
+                expected[i % texts.len()].clone(),
+            );
             std::thread::spawn(move || {
                 for _ in 0..5 {
                     let got = convert_string(&text, true);

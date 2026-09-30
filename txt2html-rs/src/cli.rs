@@ -135,7 +135,10 @@ pub fn set_value(opts: &mut Options, name: &str, value: &str) -> Result<(), Stri
     let spec = lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?;
     match spec.kind {
         Kind::Flag => {
-            let (v, negated) = match value.strip_prefix("no-").or_else(|| value.strip_prefix("no_")) {
+            let (v, negated) = match value
+                .strip_prefix("no-")
+                .or_else(|| value.strip_prefix("no_"))
+            {
                 Some(rest) => (parse_bool(rest)?, true),
                 None => (parse_bool(value)?, false),
             };
@@ -253,10 +256,16 @@ pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
         {
             match lookup(stripped) {
                 Some(s) => (s, true),
-                None => (lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?, false),
+                None => (
+                    lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?,
+                    false,
+                ),
             }
         } else {
-            (lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?, false)
+            (
+                lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?,
+                false,
+            )
         };
         if negated && !matches!(spec.kind, Kind::Flag) {
             return Err(format!("Unknown option `{name}`"));
@@ -283,7 +292,9 @@ pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
                     Some(v) => v,
                     None => take_value(&mut it, name)?,
                 };
-                let n: i64 = v.parse().map_err(|_| format!("Option {name} requires a number, got `{v}`"))?;
+                let n: i64 = v
+                    .parse()
+                    .map_err(|_| format!("Option {name} requires a number, got `{v}`"))?;
                 set_int(opts, spec, n);
             }
             Kind::StrArray => {
@@ -312,7 +323,10 @@ pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
     Ok(())
 }
 
-pub fn take_value<'a>(it: &mut std::iter::Peekable<std::slice::Iter<'a, String>>, name: &str) -> Result<String, String> {
+pub fn take_value<'a>(
+    it: &mut std::iter::Peekable<std::slice::Iter<'a, String>>,
+    name: &str,
+) -> Result<String, String> {
     match it.next() {
         Some(v) => Ok(v.clone()),
         None => Err(format!("Option {name} requires an argument")),
@@ -471,14 +485,22 @@ fn set_one_table_type(opts: &mut Options, v: &str) -> Result<(), String> {
     let on = match val {
         "0" => false,
         "1" => true,
-        _ => return Err(format!("table_type value for {key} must be 0 or 1, got `{val}`")),
+        _ => {
+            return Err(format!(
+                "table_type value for {key} must be 0 or 1, got `{val}`"
+            ))
+        }
     };
     match key {
         "ALIGN" | "align" | "Align" => opts.table_type.align = on,
         "PGSQL" | "pgsql" | "Pgsql" => opts.table_type.pgsql = on,
         "BORDER" | "border" | "Border" => opts.table_type.border = on,
         "DELIM" | "delim" | "Delim" => opts.table_type.delim = on,
-        other => return Err(format!("Unknown table_type `{other}` (expected ALIGN, PGSQL, BORDER or DELIM)")),
+        other => {
+            return Err(format!(
+                "Unknown table_type `{other}` (expected ALIGN, PGSQL, BORDER or DELIM)"
+            ))
+        }
     }
     Ok(())
 }

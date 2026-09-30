@@ -13,7 +13,12 @@ pub struct TableTypeFlags {
 
 impl Default for TableTypeFlags {
     fn default() -> Self {
-        TableTypeFlags { align: true, pgsql: true, border: true, delim: true }
+        TableTypeFlags {
+            align: true,
+            pgsql: true,
+            border: true,
+            delim: true,
+        }
     }
 }
 
@@ -115,10 +120,8 @@ impl Default for Options {
             par_indent: 2,
             preformat_trigger_lines: 2,
             endpreformat_trigger_lines: 2,
-            preformat_start_marker:
-                "^(:?(:?&lt;)|<)PRE(:?(:?&gt;)|>)$".to_string(),
-            preformat_end_marker:
-                "^(:?(:?&lt;)|<)/PRE(:?(:?&gt;)|>)$".to_string(),
+            preformat_start_marker: "^(:?(:?&lt;)|<)PRE(:?(:?&gt;)|>)$".to_string(),
+            preformat_end_marker: "^(:?(:?&lt;)|<)/PRE(:?(:?&gt;)|>)$".to_string(),
             preformat_whitespace_min: 5,
             prepend_file: String::new(),
             preserve_indent: false,

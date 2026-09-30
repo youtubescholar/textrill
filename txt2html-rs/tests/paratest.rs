@@ -44,8 +44,12 @@ fn process_chunk_is_fragment() {
 #[test]
 fn process_para_fragment_with_url() {
     let mut c = converter();
-    let ok_str = "I like to look at <a href=\"http://www.example.com\">http://www.example.com</a> a lot";
-    assert_eq!(c.process_para("I like to look at http://www.example.com a lot", true, true), ok_str);
+    let ok_str =
+        "I like to look at <a href=\"http://www.example.com\">http://www.example.com</a> a lot";
+    assert_eq!(
+        c.process_para("I like to look at http://www.example.com a lot", true, true),
+        ok_str
+    );
 }
 
 #[test]
@@ -90,5 +94,8 @@ fn instring_round_trip() {
     o.instring = vec!["hello world\n".to_string()];
     let mut c = Converter::new(o);
     let out = c.txt2html();
-    assert!(out.contains("<p>hello world</p>"), "unexpected output: {out:?}");
+    assert!(
+        out.contains("<p>hello world</p>"),
+        "unexpected output: {out:?}"
+    );
 }
