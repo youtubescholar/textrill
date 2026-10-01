@@ -4,7 +4,7 @@ Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
 **Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P19, P21, P22, E1–E3, A1,
-A1b, A2–A9. Open: A10, P5–P11, P13.** Every High and Medium item
+A1b, A2–A10. Open: P5–P11, P13.** Every High and Medium item
 from the attack pass is closed. The Phase 0b gate audit is finished:
 all four defects it found are fixed, the panic divergence it surfaced (P22) is
 closed, and P20's alignment guard is in. What remains is the ordinary backlog.
@@ -212,8 +212,9 @@ Recommended order from here:
 3. **P13** — the packaging decision. Blocks Tier 3 scoping only.
 4. ~~**A8** — escape `--title` / `--style_url`.~~ **Done.** It was the sole
    owner of the 30 known-open `proptest` checks; there are none left.
-5. **A10**, then the Phase 2–4 items **P5–P11** in the order §0.1 gives them.
-   A9 is done: an unreadable input exits 1, output unchanged.
+5. **The Phase 2–4 items P5–P11**, in the order §0.1 gives them. A10 is done:
+   the pattern cache is bounded at a measured 6× the worst realistic working
+   set. Nothing in Phases A or B is open now.
    Note that P4/P22 was what kept the GUI's panic handler honest, and it is the same
    panic seen from the CLI, where nothing catches it.
 
@@ -2028,6 +2029,45 @@ the patterns that reach it from input-derived data (`convert.rs:1646,1652,1658`,
 symmetry with A2 and as insurance, but record it as unproven rather than
 shipping it as a fix for something.
 
+**Done, and the original reasoning was right about the cause and wrong about the
+consequence.** The growth is reachable, but not through document content.
+
+Measured, by instrumenting `re_cache` and throwing a document at it that reaches
+every construct which compiles a pattern — ordered and bulleted lists,
+definition lists, all four inline delimiters, tables, hrules, preformatted
+blocks, caps, short lines: **19 distinct patterns**, with default options and
+also with *every* pattern-varying option set to a distinct value at once
+(`bullets`, `bullets_ordered`, all three delimiters, `hrule_min`, both preformat
+markers, custom heading patterns). It is 19 either way, and repeating the
+document 30 times does not move it, because the cache memoises per *pattern* and
+a given converter's patterns are a function of its options, not of its input.
+
+The one unbounded source is `custom_heading_regexp`, which is a user-supplied
+**list**: 500 patterns give 512 entries, since each is compiled and cached as it
+is tried. So the cap is 128 against a user option, and the worst realistic
+working set is 19 — about 6× headroom. The cap number is measured rather than
+picked, and `the_cap_is_above_the_measured_working_set` fails if a future change
+pushes the working set to it, which is what stops this becoming a performance
+regression wearing a fix's clothes.
+
+**What it costs, measured rather than asserted.** The cap clears the whole cache
+when full rather than evicting one entry: a compiled `Regex` is expensive to
+build and cheap to keep, the working set of any real conversion is small, and an
+LRU would put a lookup on the hot path that the cache exists to avoid. Clearing
+cannot change the output — the cache is a pure memo, so a miss recompiles
+exactly what a hit returned — and `clearing_the_cache_does_not_change_the_output`
+measures that by converting one document with a cache that clears repeatedly
+part-way through and comparing against the same document converted with the
+cache intact.
+
+The worst case is 200 heading patterns cycled over 12 000 paragraphs, which
+makes the uncapped cache a 100% hit rate: **1.25 s capped against 1.17 s
+uncapped, and 7 536 KB against 7 480 KB.** So it costs about 7% of wall clock
+in a case no real invocation produces, and saves memory that is not measurable at
+realistic pattern sizes. That is the honest trade, and it is a weak one: the
+value here is symmetry with `ascii_re_cached` and having a bound at all, not a
+demonstrated saving. Shipping it as a fix for anything would be overstating it.
+
 ## Harness work this addendum requires
 
 The existing harness story in Phase 0 is unchanged and still comes first, but
@@ -2067,7 +2107,9 @@ P3 seed corpus should be extended with the new fixtures as seeds.
   also unlocks correct GUI spin-box ranges.
 - **A5 before A6.** A5 is data loss; A6 is wasted CPU.
 - **A7 any time.** A8, A9, A10 are decisions, not blockers, and should not hold
-  up anything above them.
+  up anything above them. All three are done: A8 escapes two option values, A9
+  exits non-zero on an unreadable input, A10 bounds the pattern cache. What
+  remains is P5–P11, none of which is a decision.
 - **Every item in Phases A and B must leave the corpus at 47/47 and the goldens
   at 33/33 byte-identical.** None of them should change output for any input that
   does not currently fail. A8 and A9 are the exceptions and must be recorded as

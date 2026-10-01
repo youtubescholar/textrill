@@ -214,6 +214,41 @@ impl Converter {
         }
     }
 
+    /// The most compiled patterns [`Converter::re_cache`] will hold (A10).
+    ///
+    /// Mirrors `links::ascii_re_cached`'s 128, so the two caches in the engine
+    /// are bounded the same way. Measured rather than guessed: a document
+    /// exercising every construct that reaches `re` -- lists, definition lists,
+    /// all four inline delimiters, tables, hrules, preformatted blocks, caps and
+    /// short lines -- compiles 19 distinct patterns with default options, and 19
+    /// with *every* pattern-varying option set to a distinct value at once
+    /// (bullets, bullets_ordered, all three delimiters, hrule_min, both preformat
+    /// markers, custom heading patterns). So 128 is roughly 6x the worst
+    /// realistic case rather than an arbitrary round number, and the same input
+    /// does not grow the cache: these are memoised per *pattern*, not per line.
+    const RE_CACHE_MAX: usize = 128;
+
+    /// Insert into the pattern cache, keeping it bounded (A10).
+    ///
+    /// Clears the whole cache when it is full rather than evicting one entry.
+    /// A compiled `Regex` is expensive to build and cheap to keep, and the
+    /// working set of any real conversion is small, so clearing occasionally
+    /// costs a few recompiles; an LRU would cost a lookup on the hot path that
+    /// this function exists to avoid. It cannot change the output either way --
+    /// the cache is a pure memo of `pattern -> compiled`, and a miss recompiles
+    /// exactly what a hit would have returned.
+    fn cache_pattern(&mut self, key: &str, re: Regex) -> &Regex {
+        if self.re_cache.len() >= Self::RE_CACHE_MAX {
+            self.re_cache.clear();
+        }
+        self.re_cache.insert(key.to_string(), re);
+        // Looked up rather than reached for, because after a `clear()` above
+        // this is the only entry but without one it is not, and
+        // `values().next()` would then be free to return a *different*
+        // pattern's Regex.
+        self.re_cache.get(key).expect("just inserted")
+    }
+
     fn re(&mut self, pat: &str) -> &Regex {
         let key = format!("(?s){pat}");
         if !self.re_cache.contains_key(&key) {
@@ -224,7 +259,7 @@ impl Converter {
             // other pattern reaching this line is a literal in this file.
             let re = links::try_compile_pattern(pat, false)
                 .unwrap_or_else(|e| panic!("bad regex {pat:?}: {e}"));
-            self.re_cache.insert(key.clone(), re);
+            return self.cache_pattern(&key, re);
         }
         self.re_cache.get(&key).unwrap()
     }
@@ -234,7 +269,7 @@ impl Converter {
         if !self.re_cache.contains_key(&key) {
             let re = links::try_compile_pattern(pat, true)
                 .unwrap_or_else(|e| panic!("bad regex {pat:?}: {e}"));
-            self.re_cache.insert(key.clone(), re);
+            return self.cache_pattern(&key, re);
         }
         self.re_cache.get(&key).unwrap()
     }
@@ -3584,6 +3619,161 @@ mod delim_wide_linear_tests {
                 .collect();
             check_bold(&mut c, &text);
             check_under(&mut c, &text);
+        }
+    }
+}
+
+#[cfg(test)]
+mod re_cache_tests {
+    use super::*;
+    use crate::options::Options;
+
+    /// The cap, restated here so the test does not have to reach into the
+    /// engine for a constant. `re_cache_bounded_by_a_measured_maximum` asserts
+    /// the two agree, so this cannot drift from the real limit unnoticed.
+    const MAX: usize = 128;
+
+    /// Options set so that each one that feeds a pattern gives a *different*
+    /// pattern. Every pattern the engine builds from an option is derived from
+    /// one of these, so with all of them varied the working set is as large as
+    /// one conversion can make it.
+    fn max_varied_options() -> Options {
+        Options {
+            default_link_dict: String::new(),
+            bullets: "a_b_".to_string(),
+            bullets_ordered: "z".to_string(),
+            bold_delimiter: "@".to_string(),
+            italic_delimiter: "\u{a3}".to_string(),
+            underline_delimiter: "~".to_string(),
+            hrule_min: 7,
+            preformat_start_marker: "START".to_string(),
+            preformat_end_marker: "STOP".to_string(),
+            custom_heading_regexp: vec!["^H1".to_string(), "^H2".to_string()],
+            ..Options::default()
+        }
+    }
+
+    /// A document that reaches every construct that compiles a pattern:
+    /// ordered and bulleted lists, definition lists, all four inline
+    /// delimiters, tables, hrules, preformatted blocks, caps and short lines.
+    fn maximal_document(sections: usize) -> String {
+        let mut text = String::new();
+        for i in 0..sections {
+            text.push_str(&format!("--- section {i} ---\n"));
+            text.push_str("H1 heading\nH2 heading\n");
+            text.push_str("1. ordered\n* bullet\na_b_ x\nTerm: definition\n");
+            text.push_str("@b@ \u{a3}i\u{a3} ~u~ #h# ^s^ |v| **w** <<n>>\n");
+            text.push_str("-------\n");
+            text.push_str("<pre>\npre line\n</pre>\n\n");
+            text.push_str("START\npre start\nSTOP\n\n");
+        }
+        text
+    }
+
+    /// A10, part 1: the cache stays inside its cap.
+    ///
+    /// The growth is reachable, and it is worth being precise about where it
+    /// comes from. Every other pattern the engine builds is either a literal in
+    /// the source or derived from a single-valued option, so no document can
+    /// grow the cache -- the same input twice produces the same entries, and
+    /// `maximal_document` below shows a large document does not either. The one
+    /// unbounded source is `custom_heading_regexp`, which is a user-supplied
+    /// *list*: 500 patterns give 512 entries, because each is compiled and
+    /// cached as it is tried.
+    ///
+    /// So this is insurance against a user option, not a fix for an attack on
+    /// untrusted input, and the plan said as much. It is here for symmetry with
+    /// `links::ascii_re_cached`, which bounds the same kind of thing at the same
+    /// number.
+    #[test]
+    fn re_cache_bounded_by_a_measured_maximum() {
+        let mut c = Converter::new(Options {
+            default_link_dict: String::new(),
+            // 400 patterns: comfortably past the cap, so the limit is reached
+            // rather than approached.
+            custom_heading_regexp: (0..400).map(|i| format!("^NOMATCH{i}")).collect(),
+            ..Options::default()
+        });
+        // A line matching none of them, so all 400 are actually tried.
+        c.convert_text("NOMATCH399 heading\n\nplain paragraph\n");
+
+        assert!(
+            c.re_cache.len() <= MAX,
+            "the pattern cache grew to {} entries, past its cap of {MAX}",
+            c.re_cache.len()
+        );
+    }
+
+    /// A10, part 2: the cap is above the real working set, so a normal
+    /// conversion never hits it and never pays for a clear.
+    ///
+    /// This is the test that stops the cap from becoming a performance
+    /// regression dressed up as a fix. 19 is measured, not chosen: it is what
+    /// this document compiles with defaults and with every pattern-varying
+    /// option set to a distinct value at once. If a future change pushed the
+    /// working set past 128, the cap would start clearing on real input and this
+    /// would fail rather than quietly getting slower.
+    #[test]
+    fn the_cap_is_above_the_measured_working_set() {
+        for opts in [
+            Options {
+                default_link_dict: String::new(),
+                ..Options::default()
+            },
+            max_varied_options(),
+        ] {
+            let mut c = Converter::new(opts);
+            c.convert_text(&maximal_document(30));
+            let n = c.re_cache.len();
+            assert!(
+                n < MAX,
+                "a normal conversion compiled {n} patterns, at or past the cap of \
+                 {MAX}: the cap would be clearing on ordinary input"
+            );
+        }
+    }
+
+    /// A10, part 3: bounding the cache cannot change the output.
+    ///
+    /// The cache is a pure memo of `pattern -> compiled Regex`, so a miss
+    /// recompiles exactly what a hit returned and clearing it is invisible --
+    /// but "invisible" is an argument, and this is the measurement. The same
+    /// document is converted by a converter whose patterns all fit, and by one
+    /// holding 400 uncached-compiling heading patterns that force several
+    /// clears part-way through, and the two outputs must be identical.
+    #[test]
+    fn clearing_the_cache_does_not_change_the_output() {
+        let text = maximal_document(30);
+
+        let mut small = Converter::new(Options {
+            default_link_dict: String::new(),
+            ..Options::default()
+        });
+        let expected = small.convert_text(&text);
+
+        let mut big = Converter::new(Options {
+            default_link_dict: String::new(),
+            // 400 patterns, none of which match, so the cache is filled and
+            // cleared repeatedly while the document is converted.
+            custom_heading_regexp: (0..400).map(|i| format!("^NOMATCH{i}")).collect(),
+            ..Options::default()
+        });
+        assert!(
+            big.re_cache_len_for_test() < MAX,
+            "precondition: the cache starts empty, so the clears happen during \
+             the conversion rather than before it"
+        );
+        let got = big.convert_text(&text);
+
+        assert_eq!(
+            got, expected,
+            "bounding the pattern cache changed the output"
+        );
+    }
+
+    impl Converter {
+        fn re_cache_len_for_test(&self) -> usize {
+            self.re_cache.len()
         }
     }
 }
