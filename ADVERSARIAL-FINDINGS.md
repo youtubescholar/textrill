@@ -24,6 +24,25 @@ app that opens files a user downloaded. No findings require a network attacker.
 > silent content loss reachable with default options. "Not listed here" means
 > "not examined", not "correct". See `REMEDIATION-PLAN.md` §0.1.
 
+> **Status, 2026-10-01. Every High and Medium finding here is fixed.** This
+> document is kept as the point-in-time record of the pass and its severities
+> are *as assessed then* — read §7's recommended order as history, not as a
+> to-do list. The remediation plan owns current state; the mapping is:
+>
+> | Finding | Plan item | State |
+> |---|---|---|
+> | S1 leak | A2 | **done** — and the severity was wrong. Retention is bounded near ~0.3 MB per process, not 142 MB and not unbounded; the plan's original 1.3 GB figure was a direct-call benchmark artefact. |
+> | S2 >500 KB panic | A1 | **done** |
+> | S3 `tab_width=0` panic | A3 | **done** |
+> | S4 GUI swallows panics | A4 | **done** |
+> | S5 large `tab_width` | A3 | **done** — four options deliberately left unbounded, measured |
+> | S6 non-UTF-8 corruption | A5 | **done** |
+> | S7 no cancellation | A6 | **done** |
+> | S8 `--title` unescaped | A8 | **open** — sole owner of the 30 known-open `proptest` checks |
+> | S9 missing input exits 0 | A9 | **open** |
+> | S10 `mkdir` on save | A7 | **done** |
+> | S11 unbounded `re_cache` | A10 | **open** — still code-review only, not demonstrated |
+
 ## 1. Summary
 
 | # | Finding | Severity | Reachable from |
@@ -483,10 +502,13 @@ threads do not race. The *memory* problem is S1, not a data race.
 6. **S8**, **S9**, **S10** — decide whether each is worth a declared deviation
    from Perl.
 
-Regression status after this pass: `cargo test --release` 21/21 (5 link + 7
-options + 9 convert), GUI `unittest` 28/28, upstream Perl suite 102/102
-assertions across the 7 functional `.t` files (`t/20tfiles.t` alone accounts for
-50 of them). No source file was modified.
+Regression status **as of this pass (2026-09-29)**: `cargo test --release` 21/21
+(5 link + 7 options + 9 convert), GUI `unittest` 28/28, upstream Perl suite
+102/102 assertions across the 7 functional `.t` files (`t/20tfiles.t` alone
+accounts for 50 of them). No source file was modified.
+
+For current numbers see `REMEDIATION-PLAN.md` §0, which had reached 45/45 Rust
+tests and 45/45 GUI tests by 2026-10-01.
 
 The remediation plan for all of the above is the A1–A10 addendum at the end of
 `REMEDIATION-PLAN.md`.

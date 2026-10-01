@@ -1,12 +1,14 @@
 # txt2html — remediation plan
 
-Status: **in progress**, 2026-09-30. Covers `txt2html-rs` (Rust engine + CLI +
+Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
-**Progress is recorded in §0.1 below. P1–P3, A1, A1b and A4 are done; E3 and
-P4–P13 are not started.** Phase 0 work turned up three defects in the
+**Progress is recorded in §0.1 below. Done: P1–P3, P12, E1–E3, A1, A1b, A2–A7.
+Open: A8, A9, A10, P4–P11, P13.** Phase 0 work turned up three defects in the
 transformation logic itself (E1–E3), which corrects the original survey's
-central claim — see §0.1.
+central claim — see §0.1. Every High and Medium item from the attack pass is
+closed; what remains is three Low items (A8–A10), the Phase 2–4 backlog
+(P4–P11), and the P13 packaging decision.
 
 **The Perl module is the oracle for most of the work below, but on non-ASCII
 input it is the defect, not the specification. Read the compatibility policy
@@ -36,25 +38,46 @@ are on this machine, Perl 5.38, release build, default options unless noted.
 
 ## 0. Where things stand
 
+Re-measured 2026-10-01 (release build, Perl 5.38, default options). Figures
+marked ✓ were run again that day; the rest are carried from 2026-09-30.
+
 | Check | Result |
 |---|---|
-| `cargo test --release` | 33/33 pass (12 unit, 5 linktest, 7 optionstest, 9 paratest) |
-| GUI `unittest` (offscreen) | 30/30 pass, 1 skipped |
-| corpus, clean `RUNDIR` | **46/46** byte-identical, 29/29 goldens (was 38/40, 2 false passes — see P1) |
-| differential fuzz | 16 000 cases across 8 seeds, 0 mismatches (was 700 x 12) |
-| `good_sample.html`, `good_xhtml_sample.html` | byte identical |
-| upstream Perl `t/*.t` (7 functional files) | 102/102 assertions pass — the canary for P1 |
-| speed, 2 MB document | Rust 2.94 s vs Perl 1.51 s (**1.9–2.0x slower**) |
+| `cargo test --release` ✓ | **45/45** pass (14 lib, 5 linktest, 7 optionstest, 9 paratest, 4 alloctest, 6 cliexit) — was 33/33 |
+| GUI `unittest` (offscreen) ✓ | **45/45** pass, 1 skipped — was 30/30 |
+| corpus, clean `RUNDIR` ✓ | **46/46** byte-identical, 29/29 goldens (was 38/40, 2 false passes — see P1) |
+| `proptest.py` ✓ | OK — 30 known-open checks, all owned by A8 and printed, not silenced |
+| `alloctest` ✓ | 4/4, at any `--test-threads` (see P12) |
+| `cargo fmt --check` ✓ | clean |
+| `cargo clippy --release --all-targets` ✓ | 0 errors, 51 lib warnings — deliberately warn-only, see §0.1 |
+| upstream Perl `t/*.t` ✓ | **102/102** assertions pass, 7 functional files (5 release-only files skipped) — the canary for P1 |
+| differential fuzz | 16 000 cases across 8 seeds, 0 mismatches (2026-09-30). Re-verified 2026-10-01 at **1 200** cases across all 8 seeds, 0 mismatches, ~32 MB peak — the full 16 000 was not re-run |
+| speed, `big_para` 1.1 MB ✓ | Rust **0.37 s** vs Perl **0.18 s** (~2.1x slower) |
+| speed, `big_para_crlf` 0.8 MB ✓ | Rust **0.37 s** vs Perl **0.41 s** — the port is *faster* here |
 
-The conversion engine is in good shape. Every defect found below is in the
-harness, in error handling, in performance, or in encoding policy — not in the
-transformation logic.
+Both scale probes are byte-identical to the reference.
 
-## 0.1 Progress, 2026-09-30
+The original §0 speed row said "2 MB document, Rust 2.94 s vs Perl 1.51 s". That
+fixture is no longer in the tree, so the figure cannot be reproduced or refuted
+from the repository; the two rows above replace it. The conclusion is unchanged in
+direction and slightly worse than recorded: still about 2x slower than Perl on
+plain LF input, and *faster* on CRLF input, which the single old figure hid.
+
+The conversion engine is in good shape. The defects that remain are in error
+handling, performance, encoding policy and packaging — not, with the exception of
+E1–E3, in the transformation logic. **An earlier version of this section claimed
+no defect at all lay in the transformation logic. That was wrong**, and §0.1
+records why: promoting the fuzzer to a real test found three engine bugs in its
+first four runs, one of them silent content loss.
+
+## 0.1 Progress, 2026-09-30, reconciled 2026-10-01
 
 Phase 0 is complete, and the corpus is at **46/46** with **29/29** goldens
-byte-identical and the GUI at **30/30**. Fuzzing is now 2 000 cases across eight
+byte-identical and the GUI at **45/45**. Fuzzing is 2 000 cases across eight
 seeds (16 000 cases), against 700 cases before.
+
+E3 landed on 2026-10-01, which was the last item on the agreed sequence below
+apart from P13.
 
 | Item | State | Note |
 |---|---|---|
@@ -64,12 +87,17 @@ seeds (16 000 cases), against 700 cases before.
 | harness false-greens | done | durable `PERL5LIB`, reference smoke gate, stale-binary warning |
 | E1 | done | `table_type` merged instead of replacing |
 | E2 | done | explicit-quote `<pre>` dropped text after a blank line |
-| E3 | **open** | CR-only lines leave two stray blank lines in the body |
+| E3 | **done** | `split_blank_lines` drops every trailing empty field, as Perl's `split()` does; checked exhaustively against Perl over 1 365 inputs. `KNOWN_DIVERGENCES` is now empty |
 | A1 | **done** | `chop_trailing_cr`/`chop_leading_cr`; the ~500 KB panic and the hang behind it (A1b) |
-| A4 | **done** | `PanicException` re-export; GUI worker reports Rust panics and always completes |
-| non-ASCII delimiter predicate | **done** | `(?<!é)` was vacuous; predicates extracted so the tests exercise production code |
 | A2 | **done** | `ascii_re_cached` now takes `&'static str`, so only fixed literals can be cached and the leak is bounded by the source; verified by `make alloctest` |
+| A3 | **done** | five numeric options bounded, four deliberately not, from one table the GUI also reads; the difference is measured |
+| A4 | **done** | `PanicException` re-export; GUI worker reports Rust panics and always completes |
+| A5 | **done** | a file's encoding is remembered and written back, so a non-UTF-8 save no longer corrupts it |
+| A6 | **done** | superseded conversions are cancelled; 85% of the CPU and 21 MB saved, not the wall-clock win first predicted |
+| A7 | **done** | no directories created on save; the `mkdir` was load-bearing for an unrelated test, found by a 30-minute hang |
+| non-ASCII delimiter predicate | **done** | `(?<!é)` was vacuous; predicates extracted so the tests exercise production code |
 | P12 | **done** | `proptest.py` (5 properties, no Perl oracle) + `alloctest.rs` (counting allocator); wired into `make verify` |
+| P12 harness fix | **done** | the allocation budgets raced on a process-global counter, so `cargo test` was intermittently red; serialised, commit `4f48dbd` |
 | P13 | **open** | packaging decision, blocks the scope of Tier 3 |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
@@ -101,9 +129,15 @@ the next person does not have to re-derive the ordering:
    wall-clock win the plan predicted; see A6.
 7. ~~**A7.**~~ **Done.** The `mkdir` was load-bearing for an unrelated test, found
    by a thirty-minute hang rather than a failure. A5–A7 are all closed.
-8. **E3** when convenient, then P13.
+8. ~~**E3.**~~ **Done**, 2026-10-01, commit `ce8f949`. It was a one-character-class
+   accounting bug in the paragraph slurper, and it is the reason `KNOWN_DIVERGENCES`
+   is now empty rather than merely accurate.
 9. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
    above, but answer it before starting any Tier 3 work.
+
+That was the agreed sequence, and items 1–8 are all closed. **P13 is the only
+item left from it.** After P13, the remaining backlog is A8, A9, A10, then the
+Phase 2–4 items P4–P11, in the order §0.1 originally gave them.
 
 Two lessons worth carrying to the next item, because both cost time here: a
 micro-benchmark of a helper API is not evidence about the tool's exposure to
@@ -113,6 +147,16 @@ A2's severity; the second produced a first allocator test that passed because it
 generated a document no table was ever detected in, and a second that measured
 nothing because the `thread_local` cache was already warm from the first
 measurement.
+
+**A third instance of the second lesson arrived on 2026-10-01.** The allocation
+budgets in `alloctest.rs` read process-global counters, and libtest runs tests in
+parallel, so a sibling test's 100 MB conversion landed inside another test's
+measurement window and `cargo test` was intermittently red with a residual that
+should have been zero. `make alloctest` passed `--test-threads=1` and so looked
+healthy, which is the trap: the suite had a flag that made one entry point
+trustworthy and left the other lying. The fix is in commit `4f48dbd` and the
+lesson generalises — **a gate that passes for one reason you did not write down
+is not a gate.** See P12.
 
 Deliberately not doing yet: GitHub Actions (no remote, so it could not be run),
 and clippy `-D warnings` (the crate is not clean; the bulk fix deserves its own
@@ -129,7 +173,7 @@ engine bug rate was high *per unit of harness trust* — three of four bugs were
 invisible before P1 and P2 landed, and a fourth was misreported by the fuzzer
 for several iterations (below).
 
-### E1. `--table_type` merged into the defaults instead of replacing them
+### E1. `--table_type` merged into the defaults instead of replacing them — **done**
 
 `set_table_type` mutated the existing `TableTypeFlags`, so any `--table_type`
 argument was unioned with the four defaults. Getopt::Long's `n%` spec builds a
@@ -146,7 +190,7 @@ apparently unrelated table-detection difference.
 If the Python and GUI bindings are meant to match `t/20tfiles.t` semantics,
 replacement likely belongs there too. Unresolved.
 
-### E2. Explicit-quote `<pre>` dropped everything after its first blank line
+### E2. Explicit-quote `<pre>` dropped everything after its first blank line — **done**
 
 `split_end_explicit_preformat` buffers the continuation text, but the join back
 lived inside a branch that only runs when text remains, so the continuation was
@@ -156,7 +200,9 @@ options.
 Fixed in `src/convert.rs`. The continuation must also reach `apply_links`:
 `--use_preformat_marker` with `<pre>\n\n*d*` gives `<em>d</em>`, not `*d*`.
 
-### E3. CR-only lines leave two stray blank lines (open)
+### E3. CR-only lines leave two stray blank lines — **done**
+
+_Landed 2026-10-01, commit `ce8f949`._
 
 Narrow, and not general CR handling: `\r\n`, `\r`, `\n`, `\r\n\r\n`, `\n\n` and
 `a\r\n\r\n\r` all agree.
@@ -164,12 +210,31 @@ Narrow, and not general CR handling: `\r\n`, `\r`, `\n`, `\r\n\r\n`, `\n\n` and
 ```sh
 printf '\r\n\r\n\n' | txt2html --xhtml --make_anchors \
   --preserve_indent --no-use_mosaic_header --no-titlefirst
-# reference  <body>\n\n\n</body>       3 newlines
-# port       <body>\n\n\n\n\n</body>    5
+# before  port  <body>\n\n\n\n\n</body>    5 newlines
+# now     port  <body>\n\n\n</body>       3 -- agrees with the reference
 ```
 
-A paragraph-boundary accounting bug in the CR path. Recorded in
-`KNOWN_DIVERGENCES` in `tests/corpus/fuzz.py` with a repro rather than fixed.
+A paragraph-boundary accounting bug in the CR path. The paragraph slurper split
+on `/\r?\n\r?\n/` but trimmed the final trailing empty field *only when text
+followed it*, so a trailing empty field left after consuming the whole input
+slipped through and became one extra empty paragraph. Perl's `split()` drops
+*every* trailing empty field; `split_blank_lines` now does the same.
+
+It is checked exhaustively against Perl rather than by example: every string of
+length ≤ 5 over `{a, space, \r, \n}` — 1 365 inputs — plus explicit repros for the
+case above.
+
+The `KNOWN_DIVERGENCES` entry that suppressed this is **deleted, not left in
+place**. It was keyed to the symptom, so after the fix it would have hidden a
+regression of the same bug. `KNOWN_DIVERGENCES` in `tests/corpus/fuzz.py` is now
+empty; any future divergence must be diagnosed, and either fixed or re-added with
+a precise signature. The `424242` seed stays in `FUZZ_SEEDS` because it reaches
+this input shape — it no longer carries a known divergence, and the Makefile
+comment saying otherwise is corrected there.
+
+One test was also changed: it asserted the old behaviour was correct, having been
+written by reason rather than measured. Its assertions are now Perl-derived ground
+truth.
 
 ### Two misdiagnoses worth recording
 
@@ -288,7 +353,7 @@ port *and* in Perl, so byte-parity renders a shared defect invisible. A single
 oracle structurally cannot find this class, which is the actual answer to
 "is the differential approach myopic": the approach is not, the oracle set is.
 
-### P12. A property suite that does not reference Perl
+### P12. A property suite that does not reference Perl — **done**
 
 The missing capability. Invariants that must hold whatever Perl does, so the tool
 can be judged on its own terms:
@@ -932,7 +997,7 @@ delimiter Perl can compile and working behaviour for the ones it cannot.
 
 Do **not** fix any of this by raising `backtrack_limit`; see the note above.
 
-### A2. Stop leaking compiled regexes
+### A2. Stop leaking compiled regexes — **done**
 
 `links::ascii_re_cached` (`links.rs:153-172`) returns `&'static Regex` by
 `Box::leak`-ing each compiled pattern. The 128-entry map cap at `links.rs:159`
@@ -1064,7 +1129,7 @@ deterministic nor machine-independent. Getting a test that measures the right
 thing took three attempts; the two failures are written up under P12 because
 they are the more likely mistakes for the next person.
 
-### A3. Clamp numeric options at parse time
+### A3. Clamp numeric options at parse time — **done**
 
 `set_int` (`cli.rs:375-397`) floors with `v.max(0) as usize` at `cli.rs:386`. That does two
 harmful things:

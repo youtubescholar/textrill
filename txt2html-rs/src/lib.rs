@@ -5,12 +5,14 @@
 //!
 //! # Compatibility
 //!
-//! The conversion output is byte-identical to the Perl module for every file
-//! of the upstream `tfiles` corpus (see `tests/corpus`). Perl-isms that the
-//! output depends on are reproduced deliberately: `$/ = ""` paragraph records,
-//! `$` matching before one trailing newline, `"0"` being false, one-byte
-//! placeholders in the table space maps, and option tables that keep their
-//! state between calls.
+//! The conversion output is byte-identical to the Perl module for 29 of the 31
+//! golden files in the upstream `tfiles` corpus (see `tests/corpus`). The other
+//! two are not divergences: upstream's own comparison is looser than
+//! byte-comparison there, so the port's output is the correct one and the
+//! goldens are not. Perl-isms that the output depends on are reproduced
+//! deliberately: `$/ = ""` paragraph records, `$` matching before one trailing
+//! newline, `"0"` being false, one-byte placeholders in the table space maps, and
+//! option tables that keep their state between calls.
 //!
 //! Three deliberate deviations, none of which the upstream test suite
 //! exercises:

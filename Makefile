@@ -27,9 +27,12 @@ STUBS       ?= $(ROOT)/ref/stubs
 export PERL5LIB := $(STUBS):$(REFDIR)/lib
 export MINE     := $(RELEASE_BIN)
 
-# The seeds are fixed so a run is reproducible; 424242 carries the one known
-# divergence (E3, CR-only blank lines) and 99 is the seed that found the
-# delimiter retry bug, so both must stay in the list.
+# The seeds are fixed so a run is reproducible. 424242 reaches the input shape
+# that E3 lived in -- CR-terminated blank sequences -- so it stays in the list
+# as a regression seed, but it no longer carries a known divergence: E3 is fixed
+# and KNOWN_DIVERGENCES in fuzz.py is empty. 99 is the seed that found the
+# delimiter retry bug. Any divergence found from here on must be diagnosed, and
+# either fixed or re-added with a precise signature.
 FUZZ_SEEDS ?= 99 424242 20260929 7 31337 555 90210 1
 FUZZ_CASES ?= 2000
 
@@ -75,6 +78,11 @@ proptest: build
 # Allocation budgets via a counting global allocator. Byte-comparison cannot see
 # a resource defect: A2 leaks while producing correct output, so the corpus passes.
 # Known-open budgets are printed, not silenced; see KNOWN_OPEN in the test.
+# --test-threads=1 is belt-and-braces, not what makes this correct. The budgets
+# read process-global counters, so until commit 4f48dbd the four tests raced each
+# other and this flag was the only reason this entry point was honest while
+# `make test` was intermittently red. alloctest.rs now serialises itself, and
+# `cargo test --release` runs it green at any thread count.
 alloctest: build
 	cd $(RS) && $(CARGO) test --release --test alloctest -- --nocapture --test-threads=1
 
