@@ -171,8 +171,23 @@ if [ "$#" -gt 0 ]; then
   run_case "$stem" "$extra" "$cli"
   echo "== $stem =="
   [ -n "$CASE_ERR" ] && echo "  ERROR: $CASE_ERR"
-  python3 "$RUNDIR/cmp.py" "$RUNDIR/ref/$stem.html" "$RUNDIR/mine/$stem.html"
-  GOLDEN_FAILS=(); golden_check "$stem"
+  res=$(python3 "$RUNDIR/cmp.py" "$RUNDIR/ref/$stem.html" "$RUNDIR/mine/$stem.html")
+  echo "$res"
+  # GOLDEN_N is only initialised in the full-run branch below, and golden_check
+  # increments it, so a single-stem invocation over a stem that has a golden
+  # died on `set -u` with "GOLDEN_N: unbound variable" -- after printing PASS
+  # and "GOLDEN pass", which is a nasty way to fail. Single-stem mode was
+  # therefore unusable for 28 of the 46 cases and nothing caught it, because
+  # no gate invokes it.
+  GOLDEN_N=0; GOLDEN_FAILS=()
+  golden_check "$stem"
+  # Same exit contract as the full run below: a single-stem invocation is still
+  # a gate, and must be able to fail.
+  rc=0
+  [ -n "$CASE_ERR" ] && rc=1
+  echo "$res" | grep -q PASS || rc=1
+  [ "${#GOLDEN_FAILS[@]}" -gt 0 ] && rc=1
+  exit "$rc"
 else
   pass=0; fail=0; failnames=()
   GOLDEN_FAILS=(); GOLDEN_N=0
@@ -197,4 +212,17 @@ else
   if [ "${#GOLDEN_FAILS[@]}" -gt 0 ]; then
     printf '  differing: %s\n' "${GOLDEN_FAILS[*]}"
   fi
+  # The counters above are for humans. Without this the script ends on a
+  # successful `echo` and reports success to `make corpus` and `make verify`
+  # even when every case failed: demonstrated with a stub converter that exits
+  # 0 and writes wrong output, which produced "PASS=0 FAIL=46" and exit 0.
+  #
+  # That made the Tier 1 invariant -- 46/46 and 29/29, restated in this plan
+  # after nearly every item -- unenforced. It is the same false-green shape as
+  # the P1 per-case bug, one level up: P1 made a crashed case count as a pass,
+  # this made every crashed case count as a pass without anyone counting.
+  if [ "$fail" -gt 0 ] || [ "${#GOLDEN_FAILS[@]}" -gt 0 ]; then
+    exit 1
+  fi
+  exit 0
 fi
