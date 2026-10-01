@@ -55,7 +55,16 @@ fn main() -> ExitCode {
     }
 
     let mut conv = Converter::new(opts.clone());
-    let out = conv.txt2html();
+
+    // A9: an input file that could not be opened is a failure, not something to
+    // carry on from. The reference prints `Could not open …` and exits 0, so a
+    // Makefile or CI step reads a 0-byte output file as a successful build. The
+    // output itself is unchanged -- an unreadable file contributed nothing to it
+    // either way -- but the exit code now says what happened.
+    let (out, unreadable) = match conv.try_txt2html() {
+        Ok(out) => (out, Vec::new()),
+        Err(e) => (e.out, e.unreadable),
+    };
 
     let result = if opts.outfile.is_empty() || opts.outfile == "-" {
         // Write through a locked handle so that a closed pipe (as in
@@ -71,15 +80,32 @@ fn main() -> ExitCode {
     } else {
         std::fs::write(&opts.outfile, out)
     };
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
+    let wrote = match result {
+        Ok(()) => true,
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
             // The reader went away; that is a normal way to stop, not a fault.
-            ExitCode::SUCCESS
+            true
         }
         Err(e) => {
             eprintln!("Error: unable to open {},: {}", opts.outfile, e);
-            ExitCode::from(1)
+            false
         }
+    };
+
+    // Reported after the write, so that a broken pipe (`txt2html f | head`) is
+    // still exit 0 and a successful conversion of the readable inputs is not
+    // lost behind the diagnostic.
+    if !unreadable.is_empty() {
+        // `try_txt2html` has already printed the reference's own
+        // `Could not open …` line; this says what it means for the exit code.
+        eprintln!(
+            "{PROG}: could not read {} input file(s), exiting non-zero",
+            unreadable.len()
+        );
+        return ExitCode::from(1);
     }
+    if !wrote {
+        return ExitCode::from(1);
+    }
+    ExitCode::SUCCESS
 }

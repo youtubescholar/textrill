@@ -14,7 +14,7 @@
 //! newline, `"0"` being false, one-byte placeholders in the table space maps, and
 //! option tables that keep their state between calls.
 //!
-//! Four deliberate deviations, none of which the upstream test suite
+//! Five deliberate deviations, none of which the upstream test suite
 //! exercises:
 //!
 //! * An explicit `--title` and `--style_url` are escaped on their way into the
@@ -40,6 +40,16 @@
 //!   difference is visible only for UTF-8 input containing characters whose
 //!   encoding has a byte in the `0x80`-`0x9F` range, and only while
 //!   `demoronize` is on.
+//! * An input file that cannot be read is a failure, not a shrug. Perl prints
+//!   `Could not open …` and exits 0 having written a 0-byte output file, which
+//!   `make` and CI read as a successful build; the port exits 1. **The output
+//!   is unchanged** — an unreadable file contributed nothing to it either way,
+//!   and with several inputs the readable ones are still converted — so this
+//!   moves no golden. The reference's own message is still printed. An *empty*
+//!   file is not a failure: it is readable, and it exits 0. Use
+//!   [`Converter::try_txt2html`] to see which files could not be read;
+//!   [`Converter::txt2html`] keeps the reference's forgiving behaviour for
+//!   in-process callers that want a `String` regardless.
 
 #![forbid(unsafe_code)]
 #[cfg(feature = "extension-module")]

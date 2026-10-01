@@ -3,6 +3,10 @@ declare -A INPUT
 declare -A CTOR
 declare -A EXTRA CLI
 declare -A DICT
+# GOLDEN[stem] overrides the tfiles/good_<stem>.html default, for the case where
+# upstream scores several conversions against one golden. See empty1.
+# shellcheck disable=SC2034  # consumed by the sourcing run.sh, like the arrays above
+declare -A GOLDEN
 # Cases whose stem has a tfiles/good_<stem>.html golden but which legitimately
 # cannot match it, with the reason.  Empty means every case with a golden must
 # match it byte for byte.
@@ -79,17 +83,36 @@ CLI[table-border]='--extract --make_tables'
 EXTRA[table-delim]='extract=>1,make_tables=>1,xhtml=>1'
 CLI[table-delim]='--extract --make_tables --xhtml'
 
+# t/20tfiles.t:554,579,604,629 converts tfiles/empty.txt four times, once per
+# extract/xhtml combination, and compares *all four* against the same golden,
+# tfiles/good_empty.html.
+#
+# The stems here are upstream's *output* filenames (empty1.html .. empty4.html).
+# Left at the default, INPUT[stem] is "$stem.txt" and run_case looks for
+# tfiles/empty1.txt, which does not exist -- so all four cases were reading a
+# missing file, and the reference and the port each produced 0 bytes and matched
+# each other. They have been passing without testing anything since the corpus
+# was imported. A9 is what exposed it: an unreadable input now exits non-zero,
+# so the four cases fail loudly instead of comparing two empty files.
 EXTRA[empty1]='extract=>0,xhtml=>0'
 CLI[empty1]='--no-xhtml'
+INPUT[empty1]='empty.txt'
+GOLDEN[empty1]='good_empty.html'
 
 EXTRA[empty2]='extract=>0,xhtml=>1'
 CLI[empty2]='--xhtml'
+INPUT[empty2]='empty.txt'
+GOLDEN[empty2]='good_empty.html'
 
 EXTRA[empty3]='extract=>1,xhtml=>0'
 CLI[empty3]='--extract --no-xhtml'
+INPUT[empty3]='empty.txt'
+GOLDEN[empty3]='good_empty.html'
 
 EXTRA[empty4]='extract=>1,xhtml=>1'
 CLI[empty4]='--extract --xhtml'
+INPUT[empty4]='empty.txt'
+GOLDEN[empty4]='good_empty.html'
 
 # system_link_dict is deliberately absent from CLI[] here: 3.0 removed the
 # option from scripts/txt2html (ChangeLog: "no longer a --system_link_dict

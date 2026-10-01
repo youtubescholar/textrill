@@ -80,6 +80,25 @@ def main():
 main()
 PYEOF
 
+# Print a case's verdict. A case whose converter reported an error is reported
+# as an error, not as the byte comparison's result.
+#
+# The two are separate signals and conflating them is how a case can look green
+# while telling you something is wrong: cmp.py compares the two output files, and
+# when a converter failed to read its input it writes a 0-byte file, so the
+# comparison legitimately reports PASS. Printing both lines said "PASS" on a case
+# that had just said it could not run. empty1 hit exactly this -- it was reading
+# a tfiles/empty1.txt that does not exist, and comparing two empty files.
+# A9 is what made the port non-zero there, which is what finally surfaced it.
+report_result() {
+  if [ -n "$CASE_ERR" ]; then
+    # run_case already printed the error, once.
+    echo "  (the byte comparison is not meaningful for this case)"
+  else
+    echo "$res"
+  fi
+}
+
 run_case() {
   local stem="$1"; local extra="$2"; local cli="$3"
   CASE_ERR=""
@@ -150,8 +169,28 @@ run_case() {
 golden_check() {
   local stem="$1"
   [ -n "${NOGOLDEN[$stem]+x}" ] && { echo "  GOLDEN skipped (${NOGOLDEN[$stem]})"; return; }
-  local g="$REFDIR/tfiles/good_$stem.html"
+  # GOLDEN[stem] names the golden explicitly where upstream scores more than
+  # one conversion against the same file; otherwise it is derived from the stem.
+  local g="$REFDIR/tfiles/${GOLDEN[$stem]:-good_$stem.html}"
+  # An explicitly named golden that does not exist is a broken case, not a case
+  # without one. The derived name cannot fail this way (a stem with no good_
+  # file simply has no golden), so a missing file here means GOLDEN[stem] is
+  # wrong -- and "GOLDEN none" would report that as a skip and pass.
+  if [ -n "${GOLDEN[$stem]+x}" ] && [ ! -f "$g" ]; then
+    echo "  GOLDEN FAIL (GOLDEN[$stem]=$g does not exist)"
+    GOLDEN_FAILS+=("$stem")
+    GOLDEN_N=$((GOLDEN_N + 1))
+    return
+  fi
   [ -f "$g" ] || { echo "  GOLDEN none"; return; }
+  # A case whose converter errored has no output to judge. good_empty.html is
+  # 0 bytes, so an errored run trivially "matched" it -- a green that means
+  # nothing. Not counted either way, so a real empty-file regression still
+  # shows up as a genuine golden failure once the converter stops erroring.
+  if [ -n "$CASE_ERR" ]; then
+    echo "  GOLDEN not compared (the converter errored)"
+    return
+  fi
   if LC_ALL=C cmp -s "$g" "$RUNDIR/mine/$stem.html"; then
     echo "  GOLDEN pass"
   else
@@ -256,7 +295,7 @@ if [ "$#" -gt 0 ]; then
   echo "== $stem =="
   [ -n "$CASE_ERR" ] && echo "  ERROR: $CASE_ERR"
   res=$(python3 "$RUNDIR/cmp.py" "$RUNDIR/ref/$stem.html" "$RUNDIR/mine/$stem.html")
-  echo "$res"
+  report_result
   # GOLDEN_N is only initialised in the full-run branch below, and golden_check
   # increments it, so a single-stem invocation over a stem that has a golden
   # died on `set -u` with "GOLDEN_N: unbound variable" -- after printing PASS
@@ -299,8 +338,7 @@ else
     run_case "$stem" "$extra" "$cli"
     echo "== $stem =="
     res=$(python3 "$RUNDIR/cmp.py" "$RUNDIR/ref/$stem.html" "$RUNDIR/mine/$stem.html")
-    [ -n "$CASE_ERR" ] && echo "  ERROR: $CASE_ERR"
-    echo "$res"
+    report_result
     golden_check "$stem"
     # A case declared `differential must fail:` has no golden and diverges from
     # the reference *on purpose* -- the reference is the defect, which is the

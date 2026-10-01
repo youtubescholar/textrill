@@ -4,7 +4,7 @@ Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
 **Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P19, P21, P22, E1–E3, A1,
-A1b, A2–A8. Open: A9, A10, P5–P11, P13.** Every High and Medium item
+A1b, A2–A9. Open: A10, P5–P11, P13.** Every High and Medium item
 from the attack pass is closed. The Phase 0b gate audit is finished:
 all four defects it found are fixed, the panic divergence it surfaced (P22) is
 closed, and P20's alignment guard is in. What remains is the ordinary backlog.
@@ -92,7 +92,7 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 |---|---|
 | `cargo test --release` ✓ | **52/52** pass (14 lib, 4 optionstest, 13 cliexit, 5 linktest, 9 paratest, 4 alloctest, 3 doc) — was 33/33 |
 | GUI `unittest` (offscreen) ✓ | **46/46** pass, 1 skipped — was 30/30 |
-| corpus, clean `RUNDIR` ✓ | **47/47**, 29/29 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15. The 47th is `pre_explicit_blank`, plus `opt_injection`, which is a declared Tier 2 divergence scored the other way round |
+| corpus, clean `RUNDIR` ✓ | **47/47**, 33/33 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15. The 47th is `pre_explicit_blank`, plus `opt_injection`, which is a declared Tier 2 divergence scored the other way round |
 | `proptest.py` ✓ | OK — **0 known-open checks**. It used to report 30, all owned by A8, printed rather than silenced; A8 is fixed and the list is empty. Verified to return 1 on failure |
 | `alloctest` ✓ | 4/4, at any `--test-threads` (see P12) |
 | `cargo fmt --check` ✓ | clean |
@@ -121,7 +121,7 @@ first four runs, one of them silent content loss.
 
 ## 0.1 Progress, 2026-09-30, reconciled 2026-10-01
 
-Phase 0 is complete, and the corpus is at **47/47** with **29/29** goldens
+Phase 0 is complete, and the corpus is at **47/47** with **33/33** goldens
 byte-identical and the GUI at **46/46**. Fuzzing is 2 000 cases across eight
 seeds (16 000 cases), against 700 cases before. The corpus grew from 46 to 47
 with A8, which added two cases and made one of them (`opt_injection`) a declared
@@ -212,7 +212,8 @@ Recommended order from here:
 3. **P13** — the packaging decision. Blocks Tier 3 scoping only.
 4. ~~**A8** — escape `--title` / `--style_url`.~~ **Done.** It was the sole
    owner of the 30 known-open `proptest` checks; there are none left.
-5. **A9, A10**, then the Phase 2–4 items **P5–P11** in the order §0.1 gives them.
+5. **A10**, then the Phase 2–4 items **P5–P11** in the order §0.1 gives them.
+   A9 is done: an unreadable input exits 1, output unchanged.
    Note that P4/P22 was what kept the GUI's panic handler honest, and it is the same
    panic seen from the CLI, where nothing catches it.
 
@@ -654,7 +655,7 @@ $ echo $?          ->  0
 
 **Every case failed and `make corpus` reported success.**
 
-This is the Tier 1 invariant — "47/47 and 29/29", restated in this plan after
+This is the Tier 1 invariant — "47/47 and 33/33", restated in this plan after
 almost every item since Phase 0 — and it was not being enforced by anything. It
 was being *reported*. Those are different things, and the difference is the whole
 of P15.
@@ -665,7 +666,7 @@ single-stem entry point (`run.sh <stem>`) had the same defect and is fixed the
 same way.
 
 Fix: compute a status and `exit` with it, on both paths. Verified in both
-directions — real corpus exits 0 at 47/47 with 29/29 goldens; the stub exits
+directions — real corpus exits 0 at 47/47 with 33/33 goldens; the stub exits
 non-zero at `FAIL=46`; `run.sh list` alone exits 0 on the real port and non-zero
 on the stub.
 
@@ -954,13 +955,39 @@ than dead weight: measured with an injected reference failing on one input size 
 four, the old code printed `12 compared, 0 mismatches, 8 skipped` and exited 0,
 having discarded 40% of the sweep. `fuzz.py` is 719 lines and now 659.
 
-**One finding from writing the guard, not fixed here.** The reference tree has 32
-goldens and the corpus covers 31 of them: `good_empty.html` has no case, though
-`t/20tfiles.t:546` tests it. The port already agrees with the reference on an
-empty file (both emit 0 bytes), so an `empty` case would pass today. It is left
-alone deliberately — adding a case changes the Tier 1 invariant from 46/46 and
-29/29 everywhere it is quoted, which is its own kind of churn, and it belongs
-with whoever next revisits the corpus rather than inside a harness guard.
+**One finding from writing the guard, now fixed under A9 — and it was worse
+than "no case for `good_empty.html`."** This said the reference tree has 32
+goldens, the corpus covers 31, and `good_empty.html` is the missing one.
+
+The corpus *did* have four cases for it: `empty1`–`empty4`, one per
+`extract`/`xhtml` combination, which is exactly what `t/20tfiles.t:554,579,604,629`
+does. They were reading the wrong file the whole time. Upstream's stems there are
+its *output* names — `empty1.html`, `empty2.html` — and `run_case` defaults
+`INPUT[stem]` to `"$stem.txt"`, so the cases asked for `tfiles/empty1.txt` through
+`tfiles/empty4.txt`, none of which exist. Both converters therefore failed to
+read their input, each wrote 0 bytes, and `cmp.py` compared two empty files and
+reported PASS. All four had been green since the corpus was imported, testing
+nothing, and `good_empty.html` read as uncovered because the case that should
+have covered it never read anything.
+
+The reasoning that "the port already agrees on an empty file, so a case would
+pass today" was the reason it stayed invisible: it was true, and it was tested
+against the *wrong input*.
+
+A9 is what surfaced it. An unreadable input now exits non-zero, so four cases
+that had been quietly vacuous started failing loudly with
+`port exited 1: Could not open tfiles/empty1.txt`. `INPUT[empty*]` now points at
+`tfiles/empty.txt`, and a new `GOLDEN[stem]` override points all four at the
+golden they were always meant to be scored against — 29/29 becomes 33/33, and the
+32-golden coverage is now complete. `golden_check` fails rather than skipping
+when an explicitly named golden does not exist, since a wrong `GOLDEN[]` entry
+would otherwise report itself as a case that has no golden.
+
+Two reporting defects found while confirming it, both the same shape as the bug
+they were hiding: a case whose converter errored printed `PASS` from the byte
+comparison *and* the `ERROR` above it, and `good_empty.html` being 0 bytes meant
+`GOLDEN pass` too. A failed run matching an empty golden is a green that means
+nothing. A case that errored now says so and is not scored either way.
 
 ### What this section does not claim
 
@@ -1288,10 +1315,10 @@ stylesheet that is not opt-in, and the htmltoc-style post-processing TOC.
 - Phase 5 items 3 and 4 (TOC, heading numbering) should be implemented together
   or not at all — a numbered TOC is the only reason to have heading numbering,
   and both depend on the same heading pass.
-- Every phase must keep the corpus at **47/47** and the goldens at **29/29**
+- Every phase must keep the corpus at **47/47** and the goldens at **33/33**
   byte-identical, except where a change is explicitly declared a deviation.
-  (47 as of 2026-10-01, after A8; 46 as of 2026-09-30; 40 when this was
-  written.) One of the 47 is a declared divergence, so 46 of them are
+  (47/33 as of 2026-10-01, after A8 and A9; 46/29 as of 2026-09-30; 40 when
+  this was written.) One of the 47 is a declared divergence, so 46 of them are
   byte-identical to the reference and one must not be.
 - That invariant is the **Tier 1** rule and it holds for every item below, all of
   which are Tier 1 or have no non-ASCII surface. A Tier 2 item — anything that
@@ -1962,8 +1989,35 @@ from Perl's exit code but not from its output, so it should not disturb any
 goldens. A9 is the one item here that makes the tool *safer* in automation
 without changing a single byte of what it produces.
 
-**Not started.** Confirmed still open: `--infile /nonexistent` writes a 0-byte
-output file and exits 0, on both sides.
+**Done.** `--infile /nonexistent` wrote a 0-byte output file and exited 0, on
+both sides; it now exits 1.
+
+The design point is that **only the exit code changes**. The output is
+untouched, deliberately: an unreadable file contributed nothing to it either
+way, so changing the bytes would move goldens for no gain and would make this a
+much larger deviation than it needs to be. That is checked rather than assumed —
+`a_mix_of_readable_and_unreadable_still_converts_and_still_exits_non_zero`
+converts one readable and one unreadable input, and the document it writes is
+byte-identical to what the reference writes for the same invocation (verified
+by `cmp` against the reference, not just asserted about the port).
+
+Two smaller decisions, both visible in `cliexit.rs`:
+
+* **Which failures?** A path that does not exist, and a path that opens but
+  cannot be read (a directory is the portable way to ask for it). Both exit 1.
+* **Not an empty file.** `an_empty_input_still_exits_zero` pins the boundary: an
+  empty file *is* readable, it produces the same near-empty document, and it
+  exits 0. Without that test "input failed to be read" and "input had no
+  content" are indistinguishable from the outside, which is the confusion that
+  made the original exit 0 worth fixing.
+* **stdin is not a file.** `--infile -` is caught before the read check, so
+  `stdin_is_not_treated_as_an_unreadable_input` guards the obvious regression of
+  "just check every entry in `infile`".
+
+`try_txt2html` returns `Result<String, UnreadableInput>`; `txt2html` is kept as
+the forgiving wrapper, because the Python bindings and the in-process tests want
+a `String` and a library should not force its callers to care. Only `main.rs`
+asks for the `Result`. Recorded as the fifth deviation in `lib.rs:16-31`.
 
 ### A10. Bound `re_cache`
 
@@ -2014,10 +2068,13 @@ P3 seed corpus should be extended with the new fixtures as seeds.
 - **A5 before A6.** A5 is data loss; A6 is wasted CPU.
 - **A7 any time.** A8, A9, A10 are decisions, not blockers, and should not hold
   up anything above them.
-- **Every item in Phases A and B must leave the corpus at 46/46 and the goldens
-  at 29/29 byte-identical.** None of them should change output for any input that
+- **Every item in Phases A and B must leave the corpus at 47/47 and the goldens
+  at 33/33 byte-identical.** None of them should change output for any input that
   does not currently fail. A8 and A9 are the exceptions and must be recorded as
-  declared deviations in `lib.rs:16-31` and in the README.
+  declared deviations in `lib.rs:16-31` and in the README — both now are.
+  (47/33 as of 2026-10-01; A8 added `pre_explicit_blank` and `opt_injection`, and
+  A9 turned the four vacuous `empty1`–`empty4` cases into real ones, which is
+  where the fourth golden came from.)
 - **A2 is the exception to "the harness will show you".** It is the one item
   whose defect is invisible to byte-comparison, so it is verified by P12's
   allocation budget instead, and its current figures are unverified.

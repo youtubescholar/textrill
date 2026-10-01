@@ -12,6 +12,18 @@ use crate::chars;
 use crate::links::{self, LinkParser};
 use crate::options::Options;
 
+/// One or more inputs that could not be opened, and the output built from
+/// whatever *was* readable (A9). The caller should write that output if it has
+/// anywhere to put it, and exit non-zero regardless.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadableInput {
+    /// The input paths that could not be opened, in the order given.
+    pub unreadable: Vec<String>,
+    /// The document produced from the inputs that were readable. Empty when
+    /// none of them were.
+    pub out: String,
+}
+
 /// Read a text file for conversion. Perl reads raw bytes and keeps 8-bit
 /// characters intact; mimic that by decoding UTF-8 when possible and
 /// falling back to Latin-1 (byte == code point).
@@ -2341,9 +2353,21 @@ impl Converter {
 
     /// Convert the whole input (could already be pre-split paragraphs)
     /// through the full `txt2html` pipeline.
-    pub fn txt2html(&mut self) -> String {
+    ///
+    /// A9: an input file that cannot be read is reported to the caller instead
+    /// of being skipped. The reference prints `Could not open …` to stderr and
+    /// carries on, which means the process exits 0 having written a 0-byte
+    /// output file -- a Makefile or CI job reads that as success. This returns
+    /// `Err` so the caller can exit non-zero.
+    ///
+    /// The *output* is unchanged, so no golden moves: a file that cannot be read
+    /// contributes nothing either way. When several inputs are given, the ones
+    /// that are readable are still converted and the error carries that partial
+    /// output, so this differs from the reference only in the exit code.
+    pub fn try_txt2html(&mut self) -> Result<String, UnreadableInput> {
         let mut sources: Vec<String> = Vec::new();
         let source_type;
+        let mut unreadable: Vec<String> = Vec::new();
         if !self.opts.infile.is_empty() {
             source_type = "file".to_string();
             for f in &self.opts.infile {
@@ -2358,7 +2382,11 @@ impl Converter {
                         Some(c) => sources.push(c),
                         None => {
                             eprintln!("Could not open {f}\n");
-                            continue;
+                            // Kept going rather than bailing out, so that a
+                            // multi-file invocation still converts the files
+                            // that *are* readable. What changed is the exit
+                            // code, not which files get read.
+                            unreadable.push(f.clone());
                         }
                     }
                 }
@@ -2367,10 +2395,26 @@ impl Converter {
             source_type = "string".to_string();
             sources = self.opts.instring.clone();
         } else {
-            return String::new();
+            return Ok(String::new());
         }
 
-        self.convert_sources(sources, source_type == "string")
+        let out = self.convert_sources(sources, source_type == "string");
+        if unreadable.is_empty() {
+            Ok(out)
+        } else {
+            Err(UnreadableInput { unreadable, out })
+        }
+    }
+
+    /// As [`Converter::try_txt2html`], but discarding the unreadable-file error
+    /// so the output is always produced. This is the behaviour the reference
+    /// has; it is what the Python bindings and the in-process tests use, and it
+    /// is kept so that A9 is a change to the CLI's exit code only.
+    pub fn txt2html(&mut self) -> String {
+        match self.try_txt2html() {
+            Ok(out) => out,
+            Err(e) => e.out,
+        }
     }
 
     /// Convert text held in memory exactly as if it had been read from a

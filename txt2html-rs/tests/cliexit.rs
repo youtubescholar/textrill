@@ -257,6 +257,153 @@ fn comparison_only_options_are_not_bounded() {
     );
 }
 
+// ---------------------------------------------------------------- A9
+//
+// `--infile /nonexistent` printed `Could not open …` to stderr, carried on, and
+// exited 0 having written a 0-byte output file. Perl does the same, so this is a
+// declared deviation -- but the reference's behaviour is the one that breaks a
+// build: `make` and CI read exit 0 as success and hand the next step an empty
+// document. `--outfile` to an unwritable path was already exit 1, so the tool
+// was inconsistent with itself.
+//
+// What is asserted here is the exit code, not the output: the output is
+// deliberately unchanged, since an unreadable file contributed nothing to it
+// either way, and changing it would move goldens for no gain.
+
+fn tmp(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join("txt2html-cliexit-infile");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    dir.join(name)
+}
+
+/// The case from the plan: a missing input file, writing to a file.
+#[test]
+fn a_missing_input_file_exits_non_zero() {
+    let out_path = tmp("missing-out.html");
+    let _ = std::fs::remove_file(&out_path);
+    let missing = tmp("no-such-file.txt");
+    let _ = std::fs::remove_file(&missing);
+    assert!(!missing.exists(), "test bug: {} exists", missing.display());
+
+    let r = run(&[
+        "--infile",
+        missing.to_str().expect("path"),
+        "--outfile",
+        out_path.to_str().expect("path"),
+    ]);
+    assert_eq!(
+        r.code,
+        1,
+        "a missing input must not read as success; stderr: {}",
+        r.stderr.trim()
+    );
+    assert!(
+        r.stderr.contains(missing.to_str().expect("path")),
+        "diagnostic does not name the file it could not read: {}",
+        r.stderr.trim()
+    );
+    // The reference's own message is still printed: the port reports the same
+    // thing it always did, plus the exit code.
+    assert!(
+        r.stderr.contains("Could not open"),
+        "the reference diagnostic was lost: {}",
+        r.stderr.trim()
+    );
+    let _ = std::fs::remove_file(&out_path);
+}
+
+/// Same thing to stdout, since that is the common pipeline shape and a reader
+/// of stdout is the one who most needs the failure to be visible.
+#[test]
+fn a_missing_input_file_to_stdout_exits_non_zero() {
+    let missing = tmp("no-such-file-2.txt");
+    let _ = std::fs::remove_file(&missing);
+    let r = run(&["--infile", missing.to_str().expect("path")]);
+    assert_eq!(r.code, 1, "stderr: {}", r.stderr.trim());
+}
+
+/// An input that cannot be read is not the same as an empty input. Both produce
+/// a 0-byte or near-empty document, and that is exactly why the exit code has
+/// to distinguish them.
+#[test]
+fn an_empty_input_still_exits_zero() {
+    let empty = tmp("empty.txt");
+    std::fs::write(&empty, "").expect("write");
+    let r = run(&["--infile", empty.to_str().expect("path")]);
+    assert_eq!(
+        r.code,
+        0,
+        "an empty but readable file is a success, not a failure: {}",
+        r.stderr.trim()
+    );
+    let _ = std::fs::remove_file(&empty);
+}
+
+/// The exit code must not be a blunt "any non-zero input list is a failure":
+/// with several inputs, the readable ones are still converted, and the partial
+/// document is written. Only the exit code differs from the reference.
+#[test]
+fn a_mix_of_readable_and_unreadable_still_converts_and_still_exits_non_zero() {
+    let good = tmp("good.txt");
+    let out_path = tmp("mix-out.html");
+    std::fs::write(&good, "readable text\n").expect("write");
+    let _ = std::fs::remove_file(&out_path);
+    let missing = tmp("no-such-file-3.txt");
+    let _ = std::fs::remove_file(&missing);
+
+    let r = run(&[
+        "--infile",
+        good.to_str().expect("path"),
+        "--infile",
+        missing.to_str().expect("path"),
+        "--outfile",
+        out_path.to_str().expect("path"),
+    ]);
+    assert_eq!(
+        r.code,
+        1,
+        "one unreadable input still means failure; stderr: {}",
+        r.stderr.trim()
+    );
+    let written = std::fs::read_to_string(&out_path).expect("output should exist");
+    assert!(
+        written.contains("<p>readable text</p>"),
+        "the readable input was not converted: {written}"
+    );
+    let _ = std::fs::remove_file(&out_path);
+    let _ = std::fs::remove_file(&good);
+}
+
+/// A file that exists but cannot be read is the same failure, reached without a
+/// path that does not exist. A directory is the portable way to ask for it: it
+/// opens and then fails to read, on every platform this runs on.
+#[test]
+fn an_unreadable_input_exits_non_zero() {
+    let dir = tmp("a-directory");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let r = run(&["--infile", dir.to_str().expect("path")]);
+    assert_eq!(
+        r.code,
+        1,
+        "a directory as input is not a readable file: {}",
+        r.stderr.trim()
+    );
+    let _ = std::fs::remove_dir(&dir);
+}
+
+/// `--infile -` is standard input, and the caller supplies it. It must not be
+/// caught by the unreadable-input check, and it must still exit 0.
+#[test]
+fn stdin_is_not_treated_as_an_unreadable_input() {
+    let r = run(&["--infile", "-"]);
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr.trim());
+    assert!(
+        !r.stderr.contains("could not read"),
+        "stdin was reported as unreadable: {}",
+        r.stderr.trim()
+    );
+}
+
 // ---------------------------------------------------------------- P22
 //
 // A user-supplied regular expression that does not compile used to abort the
