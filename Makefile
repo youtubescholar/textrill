@@ -91,12 +91,35 @@ alloctest: build
 corpus: build
 	cd $(RS) && ./tests/corpus/run.sh
 
+# Each seed's exit status must reach make. This target used to end the fuzz.py
+# invocation in `| tail -1` to print just the summary line, and a pipeline
+# reports the status of its *last* command -- so `tail` exited 0 whatever the
+# fuzzer did, and `make fuzz` was incapable of failing. A run that crashed, or
+# found a mismatch, or aborted early, was reported as a pass by `make verify`.
+# That is the P1 false-green shape in a third place, and it made the plan's
+# "16 000 cases, 0 mismatches" unprovable.
+#
+# So: capture each seed's output and status, print the summary line as before,
+# print the whole log if the seed failed, and fail the target if any seed did.
+# --cases is per seed, so the total is 8 x FUZZ_CASES.
 fuzz: build
-	@for seed in $(FUZZ_SEEDS); do \
+	@rc=0; \
+	for seed in $(FUZZ_SEEDS); do \
+		log=$$(mktemp); \
+		( cd $(RS)/tests/corpus && $(PYTHON) fuzz.py --seed "$$seed" --cases $(FUZZ_CASES) ) \
+			>$$log 2>&1; \
+		st=$$?; \
 		printf 'seed %-10s ' "$$seed"; \
-		cd $(RS)/tests/corpus && $(PYTHON) fuzz.py --seed "$$seed" --cases $(FUZZ_CASES) \
-			| tail -1; \
-	done
+		tail -1 $$log; \
+		if [ $$st -ne 0 ]; then \
+			echo "  --- seed $$seed FAILED (exit $$st), full output: ---"; \
+			sed 's/^/  /' $$log; \
+			rc=1; \
+		fi; \
+		rm -f $$log; \
+	done; \
+	if [ $$rc -ne 0 ]; then echo "fuzz: FAILED"; exit 1; fi; \
+	echo "fuzz: OK"
 
 # --- scale probes ------------------------------------------------------------
 

@@ -557,6 +557,7 @@ def main():
     mismatches = 0
     skipped = 0
     known = 0
+    timeouts = 0
 
     for n in range(args.cases):
         name, text, flags = build_case(rng, seeds)
@@ -567,8 +568,37 @@ def main():
             if os.path.exists(p):
                 os.remove(p)
 
-        m = run_rust(inpath, myout, flags)
-        r = run_perl(inpath, refout, flags)
+        # A converter that hangs must not take the rest of the run with it.
+        # subprocess.run raises TimeoutExpired, and until this was caught that
+        # exception propagated out of the loop and ended the whole seed after
+        # however many cases it had reached -- silently, because the Makefile
+        # piped our output through `tail -1` and so reported success either way.
+        # That made "16 000 cases, 0 mismatches" unprovable: an aborted run and
+        # a clean one were indistinguishable from the exit status.
+        #
+        # The two sides are not equal here. The port hanging on an input is a
+        # defect in the port (P5, the inherited hang, is still open). The
+        # reference hanging tells us nothing about the port, so it is skipped
+        # like any other reference refusal -- but counted and printed, never
+        # folded into "0 mismatches" without saying so.
+        try:
+            m = run_rust(inpath, myout, flags)
+        except subprocess.TimeoutExpired:
+            timeouts += 1
+            print(f"case {n} (seed {args.seed}, from {name}): PORT TIMED OUT")
+            print("  flags:", " ".join(flags))
+            if args.keep:
+                _save(inpath, refout, myout, name, n)
+            continue
+        try:
+            r = run_perl(inpath, refout, flags)
+        except subprocess.TimeoutExpired:
+            timeouts += 1
+            skipped += 1
+            print(
+                f"case {n} (seed {args.seed}, from {name}): reference timed out, skipped"
+            )
+            continue
 
         # A non-zero exit on either side is a failure, not something to
         # compare -- this is the P1 harness bug in a different place.
@@ -622,9 +652,12 @@ def main():
     print(
         f"fuzz: {args.cases} cases, seed {args.seed}, "
         f"{mismatches} mismatches, {known} known, "
-        f"{skipped} skipped (reference refused)"
+        f"{skipped} skipped (reference refused), {timeouts} timed out"
     )
-    return 1 if mismatches else 0
+    # A port timeout is a defect, so it fails the run on its own. The count is
+    # in the summary line as well so an aborted-looking run cannot be mistaken
+    # for a clean one by reading the output either.
+    return 1 if (mismatches or timeouts) else 0
 
 
 def _save(inpath, refout, myout, name, n):
