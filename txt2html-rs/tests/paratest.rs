@@ -6,8 +6,10 @@ use txt2html::convert::Converter;
 use txt2html::options::Options;
 
 fn converter() -> Converter {
-    let mut o = Options::default();
-    o.default_link_dict = String::new();
+    let o = Options {
+        default_link_dict: String::new(),
+        ..Options::default()
+    };
     Converter::new(o)
 }
 
@@ -54,9 +56,11 @@ fn process_para_fragment_with_url() {
 
 #[test]
 fn process_chunk_caps_tag_off() {
-    let mut o = Options::default();
-    o.default_link_dict = String::new();
-    o.caps_tag = String::new();
+    let o = Options {
+        default_link_dict: String::new(),
+        caps_tag: String::new(),
+        ..Options::default()
+    };
     let mut c = Converter::new(o);
     let test_str = "We have a line alone\nFULL OF CAPS AND FURY\n";
     let ok_str = "We have a line alone<br/>\nFULL OF CAPS AND FURY\n";
@@ -65,10 +69,12 @@ fn process_chunk_caps_tag_off() {
 
 #[test]
 fn process_chunk_custom_delimiters() {
-    let mut o = Options::default();
-    o.default_link_dict = String::new();
-    o.bold_delimiter = "^".to_string();
-    o.italic_delimiter = "--".to_string();
+    let o = Options {
+        default_link_dict: String::new(),
+        bold_delimiter: "^".to_string(),
+        italic_delimiter: "--".to_string(),
+        ..Options::default()
+    };
     let mut c = Converter::new(o);
     let test_str = "I am ^bold^,\nYou are --really krazy--.\n-----------------\n";
     let ok_str = "I am <strong>bold</strong>,<br/>\nYou are <em>really krazy</em>.\n<hr/>\n";
@@ -77,10 +83,12 @@ fn process_chunk_custom_delimiters() {
 
 #[test]
 fn process_chunk_no_delimiters() {
-    let mut o = Options::default();
-    o.default_link_dict = String::new();
-    o.bold_delimiter = String::new();
-    o.italic_delimiter = String::new();
+    let o = Options {
+        default_link_dict: String::new(),
+        bold_delimiter: String::new(),
+        italic_delimiter: String::new(),
+        ..Options::default()
+    };
     let mut c = Converter::new(o);
     let test_str = "I am ^bold^,\nYou are --really krazy--.\n-----------------\n";
     let ok_str = "I am ^bold^,<br/>\nYou are --really krazy--.\n<hr/>\n";
@@ -89,9 +97,11 @@ fn process_chunk_no_delimiters() {
 
 #[test]
 fn instring_round_trip() {
-    let mut o = Options::default();
-    o.default_link_dict = String::new();
-    o.instring = vec!["hello world\n".to_string()];
+    let o = Options {
+        default_link_dict: String::new(),
+        instring: vec!["hello world\n".to_string()],
+        ..Options::default()
+    };
     let mut c = Converter::new(o);
     let out = c.txt2html();
     assert!(

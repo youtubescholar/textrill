@@ -515,9 +515,8 @@ pub fn usage() -> String {
             if i > 0 {
                 names.push('|');
             }
-            match spec.kind {
-                Kind::Flag => names.push_str("--"),
-                _ => {}
+            if spec.kind == Kind::Flag {
+                names.push_str("--")
             }
             names.push_str(n);
         }

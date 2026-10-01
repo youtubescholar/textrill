@@ -27,9 +27,11 @@ fn literal_system_links_match() {
 }
 
 fn convert_string(text: &str, extract: bool) -> String {
-    let mut opts = Options::default();
-    opts.extract = extract;
-    opts.instring = vec![text.to_string()];
+    let mut opts = Options {
+        extract,
+        instring: vec![text.to_string()],
+        ..Options::default()
+    };
     opts.deal_with_options();
     let mut conv = Converter::new(opts);
     conv.txt2html()

@@ -35,11 +35,7 @@ fn expand_ascii_escapes(pat: &str) -> String {
     let mut out = String::new();
     let mut chars = pat.chars().peekable();
     let mut in_class = false;
-    loop {
-        let c = match chars.next() {
-            Some(c) => c,
-            None => break,
-        };
+    while let Some(c) = chars.next() {
         if c == '[' {
             in_class = true;
             out.push('[');
@@ -135,6 +131,10 @@ fn expand_ascii_escapes(pat: &str) -> String {
 /// happened to agree; having one function means they cannot stop agreeing. The
 /// flags go on first and the translation second, which is the order `Convert`
 /// used and therefore the order the engine's behaviour is defined by.
+// The error is upstream's and 136 bytes wide. Boxing it would change this
+// signature and the call sites for no gain: the width only shows up on the
+// path where a pattern has already failed to compile.
+#[allow(clippy::result_large_err)]
 pub fn try_compile_pattern(pat: &str, nocase: bool) -> Result<Regex, fancy_regex::Error> {
     let full = if nocase {
         format!("(?s)(?i){pat}")
@@ -488,19 +488,13 @@ impl LinkParser {
             }
             key = key.trim_end().to_string();
 
-            if key.starts_with('/') {
-                let mut k = key[1..].to_string();
-                if k.ends_with('/') {
-                    k.pop();
-                }
-                self.add_regexp(&k, &k, &url, switches);
-            } else if key.starts_with('|') {
-                let mut k = key[1..].to_string();
-                if k.ends_with('|') {
-                    k.pop();
-                }
+            if let Some(k) = key.strip_prefix('/') {
+                let k = k.strip_suffix('/').unwrap_or(k);
+                self.add_regexp(k, k, &url, switches);
+            } else if let Some(k) = key.strip_prefix('|') {
+                let k = k.strip_suffix('|').unwrap_or(k);
                 // escape all slashes (only matters for /-delimited regexes)
-                self.add_regexp(&k, &k, &url, switches);
+                self.add_regexp(k, k, &url, switches);
             } else if key.contains('"') || key.starts_with('"') {
                 let mut k = key.clone();
                 if k.starts_with('"') {

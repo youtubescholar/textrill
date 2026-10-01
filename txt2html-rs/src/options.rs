@@ -304,21 +304,11 @@ impl Options {
         if !self.make_links {
             self.links_dictionaries.clear();
         }
-        if self.preformat_trigger_lines < 0 {
-            self.preformat_trigger_lines = 0;
-        }
-        if self.preformat_trigger_lines > 2 {
-            self.preformat_trigger_lines = 2;
-        }
+        self.preformat_trigger_lines = self.preformat_trigger_lines.clamp(0, 2);
         if self.preformat_trigger_lines == 0 {
             self.endpreformat_trigger_lines = 1;
         }
-        if self.endpreformat_trigger_lines < 0 {
-            self.endpreformat_trigger_lines = 0;
-        }
-        if self.endpreformat_trigger_lines > 2 {
-            self.endpreformat_trigger_lines = 2;
-        }
+        self.endpreformat_trigger_lines = self.endpreformat_trigger_lines.clamp(0, 2);
         // XHTML implies lower case
         if self.xhtml {
             self.lower_case_tags = true;

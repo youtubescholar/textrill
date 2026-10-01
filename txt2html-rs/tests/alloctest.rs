@@ -124,9 +124,11 @@ fn measure<F: FnOnce()>(f: F) -> (usize, isize) {
 }
 
 fn converter(tables: bool) -> Converter {
-    let mut o = Options::default();
-    o.default_link_dict = String::new();
-    o.make_tables = tables;
+    let o = Options {
+        default_link_dict: String::new(),
+        make_tables: tables,
+        ..Options::default()
+    };
     Converter::new(o)
 }
 
@@ -219,7 +221,7 @@ fn a2_literal_cache_retention_is_bounded() {
             for pat in LITERALS {
                 let re = links::ascii_re_cached(pat);
                 // Touch it, so the result cannot be optimised away.
-                assert!(re.as_str().len() > 0);
+                assert!(!re.as_str().is_empty());
             }
         });
         live

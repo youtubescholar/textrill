@@ -18,6 +18,10 @@ ref/
 # Packaging droppings and the extension module maturin builds in place.
 *.egg-info/
 txt2html-rs/python/txt2html/_native*.so
+# setuptools' staging dirs, left behind by `python -m build` on the GUI
+# package. Untracked build output, not part of the sdist or wheel.
+txt2html-gui/build/
+txt2html-gui/dist/
 
 # Python bytecode from the corpus runner and the fuzzer.
 __pycache__/

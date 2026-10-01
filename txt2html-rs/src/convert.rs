@@ -281,10 +281,15 @@ impl Converter {
         let mut tag_prefix = String::new();
 
         if self.opts.xhtml {
-            if open_tag == "p" && in_tag == "p" && tag_type != TAG_END {
-                tag_prefix = self.close_tag("p");
-            } else if open_tag == "p"
-                && (in_tag.starts_with("hr")
+            // Two conditions per close, merged with `||` where they close the
+            // same tag: a `p` is closed by a nested `p` *or* by a block element
+            // that cannot live inside one, and a `li` by a nested `li` *or* by
+            // the end of its list. The reference states these as separate
+            // branches; identical bodies make that a repetition rather than a
+            // distinction, and the corpus is what pins the result.
+            if open_tag == "p"
+                && ((in_tag == "p" && tag_type != TAG_END)
+                    || in_tag.starts_with("hr")
                     || in_tag == "ul"
                     || in_tag == "ol"
                     || in_tag == "dl"
@@ -293,16 +298,17 @@ impl Converter {
                     || in_tag.starts_with('h'))
             {
                 tag_prefix = self.close_tag("p");
-            } else if open_tag == "li" && in_tag == "li" && tag_type != TAG_END {
-                tag_prefix = self.close_tag("li");
-            } else if open_tag == "li" && (in_tag == "ul" || in_tag == "ol") && tag_type == TAG_END
+            } else if open_tag == "li"
+                && ((in_tag == "li" && tag_type != TAG_END)
+                    || ((in_tag == "ul" || in_tag == "ol") && tag_type == TAG_END))
             {
                 tag_prefix = self.close_tag("li");
             } else if open_tag == "dt" && in_tag == "dd" && tag_type != TAG_END {
                 tag_prefix = self.close_tag("dt");
-            } else if open_tag == "dd" && in_tag == "dt" && tag_type != TAG_END {
-                tag_prefix = self.close_tag("dd");
-            } else if open_tag == "dd" && in_tag == "dl" && tag_type == TAG_END {
+            } else if open_tag == "dd"
+                && ((in_tag == "dt" && tag_type != TAG_END)
+                    || (in_tag == "dl" && tag_type == TAG_END))
+            {
                 tag_prefix = self.close_tag("dd");
             }
         }
@@ -357,7 +363,7 @@ impl Converter {
 
     // ------------------------------------------------------- simple blocks
 
-    fn hrule(&mut self, lines: &mut Vec<String>, actions: &mut Vec<u32>, ind: usize) {
+    fn hrule(&mut self, lines: &mut [String], actions: &mut [u32], ind: usize) {
         let hrmin = self.opts.hrule_min;
         let pat = format!(r"^\s*([\-_~=*]\s*){{{hrmin},}}$");
         if self.re(&pat).is_match(&lines[ind]).unwrap_or(false) {
@@ -373,8 +379,8 @@ impl Converter {
 
     fn shortline(
         &mut self,
-        lines: &mut Vec<String>,
-        actions: &mut Vec<u32>,
+        lines: &mut [String],
+        actions: &mut [u32],
         i: usize,
         prev: &mut String,
         prev_action: &mut u32,
@@ -382,7 +388,7 @@ impl Converter {
     ) {
         let tag = self.get_tag("br", TAG_EMPTY, "");
         if !lines[i].trim().is_empty()
-            && prev.trim().is_empty() == false
+            && !prev.trim().is_empty()
             && prev_line_len < self.opts.short_line_length
             && actions[i] & (END | HEADER | HRULE | LIST | IND_BREAK | PAR) == 0
             && *prev_action & (HEADER | HRULE | BREAK | IND_BREAK) == 0
@@ -416,17 +422,23 @@ impl Converter {
             let tag = self.get_tag("p", TAG_START, " class='mail_header'");
             let tag2 = self.get_tag("br", TAG_EMPTY, "");
             rows[0] = format!("<!-- New Message -->\n{tag}{}{tag2}\n", rows[0]);
-            let rlen = rows.len();
-            for rn in 1..rlen {
-                if self.opts.escape_html_chars {
-                    rows[rn] = chars::escape(&rows[rn]);
-                }
-                if rn != rlen - 1 {
-                    let tag3 = self.get_tag("br", TAG_EMPTY, "");
-                    if rows[rn].ends_with('\n') {
-                        rows[rn].pop();
+            // Every row but the last is terminated with a `<br/>`; the last is
+            // left for the paragraph that follows it. Splitting the tail apart
+            // says that directly, where the index form needed `rlen` to say it.
+            if rows.len() > 1 {
+                let (final_row, br_rows) = rows[1..].split_last_mut().unwrap();
+                for row in br_rows {
+                    if self.opts.escape_html_chars {
+                        *row = chars::escape(row);
                     }
-                    rows[rn] = format!("{}{}\n", rows[rn], tag3);
+                    if row.ends_with('\n') {
+                        row.pop();
+                    }
+                    let tag3 = self.get_tag("br", TAG_EMPTY, "");
+                    *row = format!("{row}{tag3}\n");
+                }
+                if self.opts.escape_html_chars {
+                    *final_row = chars::escape(final_row);
                 }
             }
         }
@@ -435,8 +447,8 @@ impl Converter {
 
     fn mailquote(
         &mut self,
-        lines: &mut Vec<String>,
-        actions: &mut Vec<u32>,
+        lines: &mut [String],
+        actions: &mut [u32],
         ind: usize,
         prev: &mut String,
         prev_action: &mut u32,
@@ -467,10 +479,16 @@ impl Converter {
         }
     }
 
+    // The parameters of the three state-machine dispatchers below are the
+    // reference's argument list for the same routine. Threading this state
+    // through a struct would hide which state each routine reads and writes,
+    // and that mapping is what the differential corpus tests. So the argument
+    // counts are what they are on purpose.
+    #[allow(clippy::too_many_arguments)]
     fn paragraph(
         &mut self,
-        lines: &mut Vec<String>,
-        actions: &mut Vec<u32>,
+        lines: &mut [String],
+        actions: &mut [u32],
         _indents: &mut Vec<usize>,
         ind: usize,
         prev: &mut String,
@@ -575,9 +593,8 @@ impl Converter {
             }
         }
 
-        let prefix;
         let rawprefix;
-        if !term.is_empty() {
+        let prefix = if !term.is_empty() {
             let pat = format!(r"^(\s*{term_match}.)$");
             rawprefix = self
                 .re(&pat)
@@ -587,7 +604,7 @@ impl Converter {
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string())
                 .unwrap_or_default();
-            prefix = rawprefix.replace(&term, "");
+            rawprefix.replace(&term, "")
         } else if !number.is_empty() {
             // the captured number string is truthy in Perl (even "0")
             let pat = format!(r"^(\s*{number_match}.)");
@@ -599,7 +616,7 @@ impl Converter {
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string())
                 .unwrap_or_default();
-            prefix = rawprefix.replace(&number, "");
+            rawprefix.replace(&number, "")
         } else {
             let pat = format!(r"^(\s*{}.)", bullets_full);
             rawprefix = self
@@ -610,19 +627,20 @@ impl Converter {
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string())
                 .unwrap_or_default();
-            prefix = rawprefix.clone();
-        }
+            rawprefix.clone()
+        };
         (prefix, number, rawprefix, term)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn startlist(
         &mut self,
         prefix: &str,
         number: &str,
         _rawprefix: &str,
         term: &str,
-        _lines: &mut Vec<String>,
-        actions: &mut Vec<u32>,
+        _lines: &mut [String],
+        actions: &mut [u32],
         _indents: &mut Vec<usize>,
         ind: usize,
         prev: &mut String,
@@ -679,16 +697,16 @@ impl Converter {
         while n > 0 {
             self.list_nice_indent = " ".repeat((self.listnum - 1) * self.opts.indent_width);
             let lt = self.list.get(self.listnum - 1).copied().unwrap_or(0);
-            let tag;
-            if lt == UL {
-                tag = self.get_tag("ul", TAG_END, "");
+
+            let tag = if lt == UL {
+                self.get_tag("ul", TAG_END, "")
             } else if lt == OL {
-                tag = self.get_tag("ol", TAG_END, "");
+                self.get_tag("ol", TAG_END, "")
             } else if lt == DL {
-                tag = self.get_tag("dl", TAG_END, "");
+                self.get_tag("dl", TAG_END, "")
             } else {
-                tag = String::new();
-            }
+                String::new()
+            };
             prev.push_str(&format!("{}{tag}\n", self.list_nice_indent));
             self.list_indent.pop();
             self.listnum = self.listnum.saturating_sub(1);
@@ -700,13 +718,7 @@ impl Converter {
         }
     }
 
-    fn continuelist(
-        &mut self,
-        lines: &mut Vec<String>,
-        actions: &mut Vec<u32>,
-        ind: usize,
-        term: &str,
-    ) {
+    fn continuelist(&mut self, lines: &mut [String], actions: &mut [u32], ind: usize, term: &str) {
         let list_indent = self.list_nice_indent.clone();
         let lt = self.list.get(self.listnum - 1).copied().unwrap_or(0);
         if lt == UL {
@@ -785,8 +797,8 @@ impl Converter {
 
     fn liststuff(
         &mut self,
-        lines: &mut Vec<String>,
-        actions: &mut Vec<u32>,
+        lines: &mut [String],
+        actions: &mut [u32],
         indents: &mut Vec<usize>,
         ind: usize,
         prev: &mut String,
@@ -927,10 +939,8 @@ impl Converter {
             ends.push(g.start());
             starts.push(g.end());
         }
-        if spaces.starts_with(' ') {
-            if !ends.is_empty() {
-                ends.remove(0);
-            }
+        if spaces.starts_with(' ') && !ends.is_empty() {
+            ends.remove(0);
         }
         ends.push(max);
         (starts, ends)
@@ -957,15 +967,13 @@ impl Converter {
                     };
                     count[a + b] += 1;
                 }
-                let mut align = 0;
                 let population = count[1] + count[2] + count[3];
-                for x in 1..=3 {
-                    if count[x] * 2 > population {
-                        align = x;
-                        break;
-                    }
-                }
-                align
+                count
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .find(|(_, n)| **n * 2 > population)
+                    .map_or(0, |(x, _)| x)
             })
             .collect();
 
@@ -1125,9 +1133,7 @@ impl Converter {
         rows.remove(0);
         // get the head row and cut off the start and end |
         let mut head_row = rows.remove(0);
-        head_row = head_row
-            .trim_start_matches(|c| c == ' ' || c == '\t')
-            .to_string();
+        head_row = head_row.trim_start_matches([' ', '\t']).to_string();
         if head_row.starts_with('|') {
             head_row.remove(0);
         }
@@ -1180,9 +1186,7 @@ impl Converter {
         for row in &rows {
             let mut row = row.trim_end_matches('\n').to_string();
             // cut off the start and end |
-            row = row
-                .trim_start_matches(|c| c == ' ' || c == '\t')
-                .to_string();
+            row = row.trim_start_matches([' ', '\t']).to_string();
             if row.starts_with('|') {
                 row.remove(0);
             }
@@ -1377,8 +1381,8 @@ impl Converter {
 
     fn endpreformat(
         &mut self,
-        lines: &mut Vec<String>,
-        actions: &mut Vec<u32>,
+        lines: &mut [String],
+        actions: &mut [u32],
         ind: usize,
         prev: &mut String,
     ) {
@@ -1419,8 +1423,8 @@ impl Converter {
 
     fn preformat(
         &mut self,
-        lines: &mut Vec<String>,
-        actions: &mut Vec<u32>,
+        lines: &mut [String],
+        actions: &mut [u32],
         ind: usize,
         prev: &mut String,
         prev_action: &mut u32,
@@ -1617,8 +1621,13 @@ impl Converter {
     }
 
     fn custom_heading(&mut self, line_ref: &mut String) {
-        let mut i = 0;
-        for reg in self.opts.custom_heading_regexp.clone() {
+        for (i, reg) in self
+            .opts
+            .custom_heading_regexp
+            .clone()
+            .into_iter()
+            .enumerate()
+        {
             let re = self.re(&reg);
             if re.is_match(&*line_ref).unwrap_or(false) {
                 let level = if self.opts.explicit_headings {
@@ -1634,7 +1643,6 @@ impl Converter {
                 self.anchor_heading(level, line_ref);
                 return;
             }
-            i += 1;
         }
     }
 
@@ -1689,12 +1697,12 @@ impl Converter {
             // of `\B`/lookaround so fancy-regex stays on its linear path;
             // the boundary condition is applied in code instead.
             let re1 = self.re(r"#([A-Za-z])#").clone();
-            self.delim_replace(line_ref, &re1, non_boundary('#'), &ltag);
+            self.delim_replace(line_ref, &re1, non_boundary('#'), ltag);
             // special treatment of # for the #num case and the #link case
             if line_ref.contains('#') {
                 let re2 = self.re(r"#([^\d#][^#]*[^# \t\n])#").clone();
                 if !line_ref.contains("<a") && !line_ref.contains("<A") {
-                    self.delim_replace(line_ref, &re2, no_list_or_para_tag, &ltag);
+                    self.delim_replace(line_ref, &re2, no_list_or_para_tag, ltag);
                 } else {
                     *line_ref = self.delim_loop(line_ref, &re2, no_list_or_para_tag, tag);
                 }
@@ -1706,13 +1714,13 @@ impl Converter {
                     re1.replace_all_captures(line_ref, |c| ltag(c.get(1).unwrap().as_str()));
             }
             let re2 = self.re(r"\^([A-Za-z])\^").clone();
-            self.delim_replace(line_ref, &re2, non_boundary('^'), &ltag);
+            self.delim_replace(line_ref, &re2, non_boundary('^'), ltag);
         } else if delim == "_" {
             let re1 = self.re(r"_([A-Za-z])_").clone();
-            let r1m = self.delim_replace(line_ref, &re1, non_boundary('_'), &ltag);
+            let r1m = self.delim_replace(line_ref, &re1, non_boundary('_'), ltag);
             if r1m {
                 let re2 = self.re(r#"_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#).clone();
-                self.delim_replace(line_ref, &re2, not_preceded_by_word_or_underscore, &ltag);
+                self.delim_replace(line_ref, &re2, not_preceded_by_word_or_underscore, ltag);
             } else if line_ref.contains('_') {
                 let re2 = self.re(r#"_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#).clone();
                 *line_ref =
@@ -1722,7 +1730,7 @@ impl Converter {
             let db = class_body(delim);
             let dch = delim.chars().next().unwrap();
             let re1 = self.re(&format!(r"[{db}]([A-Za-z])[{db}]")).clone();
-            self.delim_replace(line_ref, &re1, non_boundary(dch), &ltag);
+            self.delim_replace(line_ref, &re1, non_boundary(dch), ltag);
             // `delim ... delim` where the content is one or more non-delimiter
             // characters ending in a "word/punctuation" character. The Perl
             // pattern's leading `(?<!delim)` is applied in code (`accept`)
@@ -1732,7 +1740,7 @@ impl Converter {
                     r"[{db}]([^{db}]+?[A-Za-z0-9!-/:-@\[-`{{-~&<>])[{db}]"
                 ))
                 .clone();
-            self.delim_replace(line_ref, &re2, not_preceded_by(dch), &ltag);
+            self.delim_replace(line_ref, &re2, not_preceded_by(dch), ltag);
         } else {
             // Perl interpolates `${delim}` straight into these patterns, so a
             // delimiter holding a regex metacharacter (`**` being the
@@ -1754,7 +1762,7 @@ impl Converter {
                 ))
                 .clone();
             if line_ref.contains(delim) {
-                self.delim_replace(line_ref, &re1, not_preceded_by_str(d.to_string()), &ltag);
+                self.delim_replace(line_ref, &re1, not_preceded_by_str(d.to_string()), ltag);
             }
             let re2 = self.re(&format!(r"{d}\]([A-Za-z]){d}"));
             *line_ref = re2.replace_all_captures(line_ref, |c| ltag(c.get(1).unwrap().as_str()));
@@ -1993,8 +2001,7 @@ impl Converter {
                 let mut para_line_len: Vec<usize> = Vec::new();
                 let mut para_line_indent: Vec<usize> = Vec::new();
                 let mut para_line_action: Vec<u32> = Vec::new();
-                let mut i = 0;
-                for line in &mut para_lines {
+                for (i, line) in para_lines.iter_mut().enumerate() {
                     // tabs -> spaces
                     while let Some(tab) = line.find('\t') {
                         let tw = self.opts.tab_width;
@@ -2009,7 +2016,6 @@ impl Converter {
                         para_line_indent.push(ws);
                     }
                     para_line_action.push(NONE);
-                    i += 1;
                 }
 
                 // structural detection
@@ -2089,10 +2095,11 @@ impl Converter {
                 }
 
                 // tables
-                if self.opts.make_tables && is_table {
-                    if self.tablestuff(table_type, &mut para_lines, para_len) {
-                        done_lines.append(&mut para_lines);
-                    }
+                if self.opts.make_tables
+                    && is_table
+                    && self.tablestuff(table_type, &mut para_lines, para_len)
+                {
+                    done_lines.append(&mut para_lines);
                 }
 
                 // mailheader
@@ -2142,10 +2149,8 @@ impl Converter {
                 para = done_lines.join("");
 
                 // XHTML: close an open paragraph
-                if self.opts.xhtml {
-                    if self.tags.last().map(|t| t == "p").unwrap_or(false) {
-                        para.push_str(&self.close_tag("p"));
-                    }
+                if self.opts.xhtml && self.tags.last().map(|t| t == "p").unwrap_or(false) {
+                    para.push_str(&self.close_tag("p"));
                 }
 
                 if self.opts.unhyphenation
@@ -2193,10 +2198,11 @@ impl Converter {
         para
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_line(
         &mut self,
-        lines: &mut Vec<String>,
-        actions: &mut Vec<u32>,
+        lines: &mut [String],
+        actions: &mut [u32],
         indents: &mut Vec<usize>,
         line_lens: &[usize],
         i: usize,
@@ -2583,7 +2589,7 @@ fn delim_is_word(delim: char) -> bool {
 /// -- so a byte-wise test never rejects anything, and `ééwordé` came out
 /// marked up where Perl leaves it alone.
 fn not_preceded_by(delim: char) -> impl Fn(&str, usize, usize) -> bool {
-    move |t: &str, s: usize, _e: usize| t[..s].chars().next_back() != Some(delim)
+    move |t: &str, s: usize, _e: usize| !t[..s].ends_with(delim)
 }
 
 /// `(?<![_A-Za-z0-9])` from the underscore pattern.
@@ -2670,10 +2676,8 @@ fn is_pgsql_table(rows: &[String]) -> bool {
     }
     let mut r: Vec<&String> = rows.iter().collect();
     // possible caption
-    if !r[0].contains('|') {
-        if table_re(r"^\s*\w+").is_match(r[0]).unwrap_or(false) {
-            r.remove(0);
-        }
+    if !r[0].contains('|') && table_re(r"^\s*\w+").is_match(r[0]).unwrap_or(false) {
+        r.remove(0);
     }
     if r.len() < 4 {
         return false;
@@ -2705,10 +2709,8 @@ fn is_border_table(rows: &[String]) -> bool {
         return false;
     }
     let mut r: Vec<&String> = rows.iter().collect();
-    if !r[0].contains('|') {
-        if table_re(r"^\s*\w+").is_match(r[0]).unwrap_or(false) {
-            r.remove(0);
-        }
+    if !r[0].contains('|') && table_re(r"^\s*\w+").is_match(r[0]).unwrap_or(false) {
+        r.remove(0);
     }
     if r.len() < 5 {
         return false;
@@ -2777,7 +2779,7 @@ fn is_delim_table(rows: &[String]) -> bool {
         return false;
     };
     // There needs to be at least three delimiters in the row
-    let dc = links::ascii_re(&format!("[{}]", &delim));
+    let dc = links::ascii_re(&format!("[{}]", delim));
     let total_num_delims = dc.find_iter(r[0]).flatten().count();
     if total_num_delims < 3 {
         return false;
@@ -3147,7 +3149,7 @@ mod delim_linear_tests {
         let re1_lin = ascii_re(&format!(r"[{db}]([A-Za-z])[{db}]"));
         let expect = orig_replace(&re1_orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, &re1_lin, non_boundary(delim), &ltag);
+        c.delim_replace(&mut got, &re1_lin, non_boundary(delim), ltag);
         assert_eq!(got, expect, "re1 mismatch for {text:?} delim={delim}");
 
         // multi-char content ending in a "word/punct" char, leading
@@ -3160,7 +3162,7 @@ mod delim_linear_tests {
         ));
         let expect = orig_replace(&re2_orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, &re2_lin, not_preceded_by(delim), &ltag);
+        c.delim_replace(&mut got, &re2_lin, not_preceded_by(delim), ltag);
         assert_eq!(got, expect, "re2 mismatch for {text:?} delim={delim}");
     }
 
@@ -3319,9 +3321,9 @@ mod delim_wide_linear_tests {
         let orig = ascii_re_cached(r"#([^\d#](?![^#]*(?:<li>|<LI>|<P>|<p>))[^#]*[^# \t\n])#");
         let lin = ascii_re_cached(r"#([^\d#][^#]*[^# \t\n])#");
         let no_tag = no_list_or_para_tag;
-        let expect = orig_replace(&orig, text, tag);
+        let expect = orig_replace(orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, &lin, no_tag, &ltag);
+        c.delim_replace(&mut got, lin, no_tag, ltag);
         assert_eq!(got, expect, "bold re2 mismatch for {text:?}");
     }
 
@@ -3331,9 +3333,9 @@ mod delim_wide_linear_tests {
         let orig = ascii_re_cached(r#"(?<![_A-Za-z0-9])_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#);
         let lin = ascii_re_cached(r#"_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#);
         let not_word = not_preceded_by_word_or_underscore;
-        let expect = orig_replace(&orig, text, tag);
+        let expect = orig_replace(orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, &lin, not_word, &ltag);
+        c.delim_replace(&mut got, lin, not_word, ltag);
         assert_eq!(got, expect, "under re2 mismatch for {text:?}");
     }
 
@@ -3413,7 +3415,7 @@ mod delim_wide_linear_tests {
         ));
         let expect = orig_replace(&orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, &lin, not_preceded_by_str(d.to_string()), &ltag);
+        c.delim_replace(&mut got, &lin, not_preceded_by_str(d.to_string()), ltag);
         assert_eq!(got, expect, "multi mismatch for {text:?} delim={delim}");
     }
 
