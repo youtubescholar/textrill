@@ -95,13 +95,17 @@ QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
 ```
 
 One test compares the converter's output against the upstream
-`good_table-border.html` and is skipped unless the reference files are
-available:
+`good_table-border.html` and skips itself unless the reference files are
+available. With them set it runs, and it passes:
 
 ```sh
 T2H_TFILES=/path/to/txt2html-3.0/tfiles \
   QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
 ```
+
+The reference is one `make ref` away from the top of the repository, and CI
+runs the suite this way on every push — a skipped test is otherwise
+indistinguishable from a passing one.
 
 ## Licence
 

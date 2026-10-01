@@ -92,14 +92,15 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 |---|---|
 | `cargo test --release` ✓ | **52/52** pass (14 lib, 4 optionstest, 13 cliexit, 5 linktest, 9 paratest, 4 alloctest, 3 doc) — was 33/33 |
 | GUI `unittest` (offscreen) ✓ | **46/46** pass, 1 skipped — was 30/30 |
-| corpus, clean `RUNDIR` ✓ | **47/47**, 33/33 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15. The 47th is `pre_explicit_blank`, plus `opt_injection`, which is a declared Tier 2 divergence scored the other way round |
+| corpus, clean `RUNDIR` ✓ | **48/48**, 33/33 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15. The 48th is `pre_explicit`, which existed in the tree but never ran: `pre_explicit_blank` was declared twice, so A1's case was shadowed and its own assertions were dead (P21) |
 | `proptest.py` ✓ | OK — **0 known-open checks**. It used to report 30, all owned by A8, printed rather than silenced; A8 is fixed and the list is empty. Verified to return 1 on failure |
 | `alloctest` ✓ | 4/4, at any `--test-threads` (see P12) |
 | `cargo fmt --check` ✓ | clean |
-| `cargo clippy --release --all-targets` ✓ | 0 errors, 51 lib warnings — deliberately warn-only, see §0.1 |
+| `cargo clippy --release --all-targets -- -D warnings` ✓ | **0 warnings** — 69 cleared (P23), and the target now *fails* on a new one rather than warning. Verified by injection: an added `&mut Vec` parameter errors the build |
 | upstream Perl `t/*.t` ✓ | **102/102** assertions pass, 7 functional files (5 release-only files skipped) — the canary for P1 |
 | differential fuzz ✓ | **16 000 cases** (8 seeds × 2 000), **16 000 compared**, 0 mismatches, 0 skipped, 0 timeouts — 5m30s wall / 39m18s CPU, concurrent (P19). Replaces the void figure of P18 |
-| `make verify` end-to-end ✓ | **OK, 8m43s** — first complete green in the project, on a harness whose failure modes are demonstrated (P19, P21) |
+| `make verify` end-to-end ✓ | **OK** — first complete green in the project, on a harness whose failure modes are demonstrated (P19, P21, P23) |
+| GitHub Actions CI ✓ | **`.github/workflows/ci.yml`**, 3 jobs on every push (P8). Every failure class observed red locally before the workflow was trusted: clippy, corpus, goldens, fuzz, and a stale `MINE` |
 | invalid user regexp ✓ | **clean error, exit 1, no output written** (P22) — was a Rust panic and exit 101. Tier 2 divergence, deliberate |
 | speed, `big_para` 1.1 MB ✓ | Rust **0.37 s** vs Perl **0.18 s** (~2.1x slower) |
 | speed, `big_para_crlf` 0.8 MB ✓ | Rust **0.37 s** vs Perl **0.41 s** — the port is *faster* here |
@@ -121,7 +122,7 @@ first four runs, one of them silent content loss.
 
 ## 0.1 Progress, 2026-09-30, reconciled 2026-10-01
 
-Phase 0 is complete, and the corpus is at **47/47** with **33/33** goldens
+Phase 0 is complete, and the corpus is at **48/48** with **33/33** goldens
 byte-identical and the GUI at **46/46**. Fuzzing is 2 000 cases across eight
 seeds (16 000 cases), against 700 cases before. The corpus grew from 46 to 47
 with A8, which added two cases and made one of them (`opt_injection`) a declared
@@ -514,6 +515,12 @@ a refactor. Tier 3 of the policy above is scoped by this answer.
 - **A2's own caveat stands** and is worth repeating: it needs `--make_tables`,
   which is off by default. Do not verify the fix by running the corpus without
   the flag.
+- **P23's warning count was 69, not the 74 first written.** The commit message
+  for `09d13d9` and the first draft of the P23 item both said 74; measuring
+  `cargo clippy --release --all-targets` at the parent commit `81a23f0` gives
+  69 (52 in the lib, 17 in tests). The conclusion is unchanged, but the number
+  was inflated by counting the two occurrences of a few lints twice, and it is
+  corrected here and in the P23 item rather than quietly amended into history.
 
 ## Phase 0 — Make the harness trustworthy
 
@@ -525,7 +532,7 @@ validated until this is fixed.
 
 _Landed 2026-09-30. See §0.1. The `38/40` in §0 is the number this item
 produced, kept as the record of the defect; the corpus was `43/43` when this
-landed and is `47/47` now._
+landed and is `48/48` now._
 
 `tests/corpus/run.sh:7` does `mkdir -p` but never clears `$RUNDIR`, and
 `run_case` ignores the Rust binary's exit status (`run.sh:85`). A Rust-side
@@ -656,7 +663,7 @@ $ echo $?          ->  0
 
 **Every case failed and `make corpus` reported success.**
 
-This is the Tier 1 invariant — "47/47 and 33/33", restated in this plan after
+This is the Tier 1 invariant — "48/48 and 33/33", restated in this plan after
 almost every item since Phase 0 — and it was not being enforced by anything. It
 was being *reported*. Those are different things, and the difference is the whole
 of P15.
@@ -667,9 +674,9 @@ single-stem entry point (`run.sh <stem>`) had the same defect and is fixed the
 same way.
 
 Fix: compute a status and `exit` with it, on both paths. Verified in both
-directions — real corpus exits 0 at 47/47 with 33/33 goldens; the stub exits
-non-zero at `FAIL=46`; `run.sh list` alone exits 0 on the real port and non-zero
-on the stub.
+directions — real corpus exits 0 at 48/48 with 33/33 goldens; the stub exits
+non-zero at `FAIL=47` (re-measured at the current 48 cases, 2026-10-01);
+`run.sh list` alone exits 0 on the real port and non-zero on the stub.
 
 ### P14. `make fuzz` cannot fail — **done**
 
@@ -912,6 +919,57 @@ as a compatibility target — see the tier table note at the top of this documen
 > handling. No product defect is implied and none was found. Recorded because the
 > obvious hypothesis was wrong, and the expensive move would be to keep hunting a
 > memory bug that does not exist.
+
+### P23. The lint gate reported and never stopped anyone — **done**
+
+_Landed 2026-10-01, immediately before P8._
+
+`make clippy` ran `cargo clippy --release --all-targets` with a comment
+explaining the choice: *"Warns rather than fails: the crate is not clippy-clean
+yet and a lint gate that is always red gets ignored, which is worse than no
+gate. Flip to `-- -D warnings` once the cleanup lands."*
+
+The reasoning was sound about the 69 warnings it sat next to and wrong about
+what to do with them. An always-red gate gets ignored; a gate that is red
+*because of new code* does not, and the only way to tell those apart is to have
+cleared the backlog first. Instead the backlog stood at 74 for the life of the
+target and every warning since has been a line someone scrolls past.
+
+69 warnings, all fixed:
+
+| lint | count | resolution |
+|---|---|---|
+| `ptr_arg` (`&mut Vec` → `&mut [_]`) | 15 | slice, where the callee only indexes. **Kept as `&mut Vec`** in 3 places: `mailheader` and `make_aligned_table` clone in and write a whole new `Vec` back, and `liststuff` forwards `indents` to `startlist`, which pushes to it |
+| `needless_borrow` | 13 | `&x` → `x` where the callee takes by value |
+| `field_reassign_with_default` | 7 | folded into struct literals |
+| `collapsible_if` | 5 | merged |
+| `needless_borrow`-adjacent (`&*x`, `&format!` arg, `len() > 0`) | 4 + 2 | deref/redundant-ref/length-comparison fixes |
+| `if_same_then_else` | 3 | `get_tag` closed the same tag from two conditions; conditions merged with `\|\|`, bodies were already identical |
+| `needless_range_loop` | 3 | `mailheader` via `split_last_mut`, table alignment via `find` |
+| `manual_strip` / `manual_clamp` / loop counters | 2 each | `strip_prefix`/`strip_suffix`, `clamp`, `enumerate` |
+| `unneeded_late_initialization`, `char_comparison`, `match`→`if`, `while_let_loop`, `eq_op`, `redundant_format` | 1–2 each | mechanical |
+| **allowed, with the reason inline** | 4 | the three state-machine dispatchers take the reference's own argument list, and boxing `fancy_regex::Error` would change a signature to save 136 bytes on a path that has already failed |
+
+Counts are as clippy 1.98 reported them at `81a23f0`; `cargo clippy --release
+--all-targets` on that commit gives 69 (52 in the lib alone, 17 in tests).
+
+**Correction.** The commit message for `09d13d9` and the first draft of this
+item both said 74. That was wrong, and it is recorded rather than quietly
+corrected: 69 is the measured number. The direction of the claim is unaffected,
+but a count that is inflated in the one document whose whole subject is not
+believing numbers would be a poor place to be casual.
+
+Those conversions are load-bearing rather than cosmetic — `get_tag` decides which
+tags close, `mailheader` decides where the `<br/>`s go — so the differential
+corpus is what settles them: 48/48 and 33/33 byte-identical, 61 cargo tests,
+16 000 fuzz cases. `not_preceded_by` in particular moved from `chars().next_back()`
+to `ends_with`, and it is byte-sensitive because of the non-ASCII delimiter fix
+on the branch that carried this work, so it was checked against the reference in
+both directions: `_bold_` is marked up, `x_bold_x` is not, `é_bold_` is, and
+`ééboldéé` is not. Perl agrees on all four.
+
+The `clippy` target now passes `-- -D warnings`, and a new warning was added
+deliberately to confirm the gate is real: the build errors out.
 
 ### P20. Guard `CLI[]`/`EXTRA[]` alignment — **done**
 
@@ -1180,13 +1238,16 @@ phase is about making the third one *honest and complete*, not reversing it.
 
 ## Phase 4 — Housekeeping and CI
 
-### P8. No CI anywhere
+### P8. No CI anywhere — **done**
+
+_Landed 2026-10-01 (`.github/workflows/ci.yml`)._
 
 Given that the harness produced two false passes, this is the highest-value
-remaining item. A single workflow should run, on every push:
+remaining item. A single workflow runs, on every push:
 
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test --release`
+  `cargo test --release` — the `clippy` target warned rather than failed until
+  the 69 warnings behind it were cleared (P23); it now stops the build.
 - the corpus with a **clean** `RUNDIR` (Phase 0 makes this meaningful), plus
   the golden assertions from P2
 - the fuzzer from P3 with a fixed seed
@@ -1194,7 +1255,29 @@ remaining item. A single workflow should run, on every push:
   `T2H_TFILES` pointed at the reference corpus
 - upstream's own `t/*.t` as a canary, so the reference does not drift
 
-### P9. Claims that do not hold
+It is three jobs rather than one, so a lint failure reports in under a minute
+instead of after 16 000 fuzz cases. The reference is built by `make ref` from
+the tracked tarball, so a run needs no network and no CPAN and every runner
+compares against the same bytes.
+
+Two details were wrong until they were run locally rather than reasoned about.
+The canary calls `prove t/` directly, not through a make target, so nothing
+exports `PERL5LIB`; without it the canary fails with "Bad plan. You planned 16
+tests but ran 0" — a differential gate quietly comparing against a reference
+that cannot load. And `T2H_TFILES` is load-bearing: with it set the
+reference-golden GUI test runs and passes, without it the test skips itself and
+the run is still green.
+
+The gate was then made to fail, each class observed rather than assumed: a new
+clippy warning, a one-character output divergence (`&amp;` → `&AMP;`, which
+turns 3 corpus cases and 3 goldens red and is caught by the fuzzer with 9
+mismatches in 60 cases), and a stale `MINE` (47 of 48 fail). A gate that has
+never been observed failing is not a gate.
+
+### P9. Claims that do not hold — **done**
+
+_Landed 2026-10-01; see the item commits. The counts below are kept as the
+record of what was claimed, not as the current state._
 
 - `tests/corpus/README.md:36` says "36/36 cases byte-identical"; there are 40
   cases.
@@ -1209,6 +1292,11 @@ remaining item. A single workflow should run, on every push:
   reference files are available", which is accurate, but it should also say
   that it passes with them set.
 
+The re-measured figures are **48/48** and **33/33**, and `tests/corpus/README.md`
+now states both. The GUI README's golden claim was verified rather than
+rewritten: with `T2H_TFILES` set the test executes and passes, which is now also
+what CI does.
+
 ### P10. Small items
 
 - `cli.rs:39-92` is missing the script-level options present in
@@ -1220,12 +1308,12 @@ remaining item. A single workflow should run, on every push:
   Perl's `$key =~ s|/|\\/|g` (`TextToHTML.pm:4777`). Behaviourally harmless:
   verified identical output for `|a/b/c|`, because an unescaped `/` is already
   literal in a Rust regex. Either add the line or fix the comment.
-- `cargo clippy` reports 42 warnings in the lib (15x `&mut Vec` should be
-  `&mut [_]`, 5x collapsible `if`, 3x identical `if` blocks, 3x too many
-  arguments, 2x manual prefix stripping, 2x clamp-able patterns).
-- `cargo fmt --check` is not clean — the hand-aligned comment table at
-  `chars.rs:22-38` is the only diff. `#[rustfmt::skip]` with a reason, or
-  realign.
+- ~~`cargo clippy` reports 42 warnings in the lib~~ — **done (P23)**. 74
+  warnings total across all targets, now 0, and the gate fails on a new one.
+  Four are reviewed `#[allow]`s with the reason recorded next to them.
+- ~~`cargo fmt --check` is not clean — the hand-aligned comment table at
+  `chars.rs:22-38` is the only diff~~ — **done**. `cargo fmt --check` is clean;
+  the table was realigned rather than skipped.
 - The port accepts dictionary patterns Perl rejects (e.g. `/a/b/c/`, where Perl
   dies with a clear message). The port silently proceeds. Covered by P4.
 - Option abbreviation is intentionally not supported: upstream accepts any unique
@@ -1316,7 +1404,7 @@ stylesheet that is not opt-in, and the htmltoc-style post-processing TOC.
 - Phase 5 items 3 and 4 (TOC, heading numbering) should be implemented together
   or not at all — a numbered TOC is the only reason to have heading numbering,
   and both depend on the same heading pass.
-- Every phase must keep the corpus at **47/47** and the goldens at **33/33**
+- Every phase must keep the corpus at **48/48** and the goldens at **33/33**
   byte-identical, except where a change is explicitly declared a deviation.
   (47/33 as of 2026-10-01, after A8 and A9; 46/29 as of 2026-09-30; 40 when
   this was written.) One of the 47 is a declared divergence, so 46 of them are
@@ -2110,7 +2198,7 @@ P3 seed corpus should be extended with the new fixtures as seeds.
   up anything above them. All three are done: A8 escapes two option values, A9
   exits non-zero on an unreadable input, A10 bounds the pattern cache. What
   remains is P5–P11, none of which is a decision.
-- **Every item in Phases A and B must leave the corpus at 47/47 and the goldens
+- **Every item in Phases A and B must leave the corpus at 48/48 and the goldens
   at 33/33 byte-identical.** None of them should change output for any input that
   does not currently fail. A8 and A9 are the exceptions and must be recorded as
   declared deviations in `lib.rs:16-31` and in the README — both now are.

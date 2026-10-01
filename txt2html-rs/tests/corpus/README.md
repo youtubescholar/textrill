@@ -64,8 +64,8 @@ reports success wrongly" below.
   * `pre2` — the golden file has a trailing newline the reference output does
     not. Upstream's own comparison strips CR and LF before diffing.
 
-Current status: **48/48 cases byte-identical**, and 33 of the 32 upstream
-goldens reproduce byte for byte across 29 distinct files (the `empty1`–`empty4`
+Current status: **48/48 cases byte-identical**, and all 33 upstream golden
+checks reproduce byte for byte across 29 distinct files (the `empty1`–`empty4`
 cases all compare against the one `good_empty.html`, which is why the count of
 checks exceeds the count of files; the other skipped cases are the `NOGOLDEN`
 ones above). `tests/paratest.rs` additionally mirrors `t/10para.t`,
