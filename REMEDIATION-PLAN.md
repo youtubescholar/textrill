@@ -3,11 +3,12 @@
 Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
-**Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P19, P21, E1–E3, A1,
-A1b, A2–A7. Open: A8, A9, A10, P4–P11, P13, P20, P22.** Every High and Medium item
-from the attack pass is closed. The Phase 0b gate audit is finished: all four
-defects it found are fixed, and the two open items it left (P20, P22) are the
-alignment guard and a new panic divergence found while confirming P18.
+**Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P19, P21, P22, E1–E3, A1,
+A1b, A2–A7. Open: A8, A9, A10, P5–P11, P13, P20.** Every High and Medium item
+from the attack pass is closed. The Phase 0b gate audit is finished:
+all four defects it found are fixed, and the panic divergence it surfaced (P22) is
+closed too. What remains is P20's three-line alignment guard and the ordinary
+backlog.
 
 > **Read Phase 0b before trusting any result in this document.** Checks in
 > `make verify` were found on 2026-10-01 to be structurally incapable of reporting
@@ -90,8 +91,8 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 
 | Check | Result |
 |---|---|
-| `cargo test --release` ✓ | **45/45** pass (14 lib, 5 linktest, 7 optionstest, 9 paratest, 4 alloctest, 6 cliexit) — was 33/33 |
-| GUI `unittest` (offscreen) ✓ | **45/45** pass, 1 skipped — was 30/30 |
+| `cargo test --release` ✓ | **52/52** pass (14 lib, 4 optionstest, 13 cliexit, 5 linktest, 9 paratest, 4 alloctest, 3 doc) — was 33/33 |
+| GUI `unittest` (offscreen) ✓ | **46/46** pass, 1 skipped — was 30/30 |
 | corpus, clean `RUNDIR` ✓ | **46/46** byte-identical, 29/29 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15 |
 | `proptest.py` ✓ | OK — 30 known-open checks, all owned by A8 and printed, not silenced. Verified to return 1 on failure |
 | `alloctest` ✓ | 4/4, at any `--test-threads` (see P12) |
@@ -99,7 +100,8 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 | `cargo clippy --release --all-targets` ✓ | 0 errors, 51 lib warnings — deliberately warn-only, see §0.1 |
 | upstream Perl `t/*.t` ✓ | **102/102** assertions pass, 7 functional files (5 release-only files skipped) — the canary for P1 |
 | differential fuzz ✓ | **16 000 cases** (8 seeds × 2 000), **16 000 compared**, 0 mismatches, 0 skipped, 0 timeouts — 5m30s wall / 39m18s CPU, concurrent (P19). Replaces the void figure of P18 |
-| `make verify` end-to-end ✓ | **OK, 7m49s** — first complete green in the project, on a harness whose failure modes are demonstrated (P19, P21) |
+| `make verify` end-to-end ✓ | **OK, 9m46s** — first complete green in the project, on a harness whose failure modes are demonstrated (P19, P21) |
+| invalid user regexp ✓ | **clean error, exit 1, no output written** (P22) — was a Rust panic and exit 101. Tier 2 divergence, deliberate |
 | speed, `big_para` 1.1 MB ✓ | Rust **0.37 s** vs Perl **0.18 s** (~2.1x slower) |
 | speed, `big_para_crlf` 0.8 MB ✓ | Rust **0.37 s** vs Perl **0.41 s** — the port is *faster* here |
 
@@ -121,7 +123,7 @@ first four runs, one of them silent content loss.
 ## 0.1 Progress, 2026-09-30, reconciled 2026-10-01
 
 Phase 0 is complete, and the corpus is at **46/46** with **29/29** goldens
-byte-identical and the GUI at **45/45**. Fuzzing is 2 000 cases across eight
+byte-identical and the GUI at **46/46**. Fuzzing is 2 000 cases across eight
 seeds (16 000 cases), against 700 cases before.
 
 E3 landed on 2026-10-01, which was the last item on the agreed sequence below
@@ -150,7 +152,7 @@ apart from P13.
 | P16–P17 | **done** | an uncaught `TimeoutExpired` killed a fuzz seed silently; `run.sh <stem>` died on an unbound `GOLDEN_N` after printing PASS |
 | P18–P19, P21 | **done** | fuzz figure re-established on the fixed harness (16 000 compared, 0 mismatches); 8 seeds now concurrent, 99 min → 5m30s; and the fuzzer's missing `compared` counter closed, which had let a run that checked nothing exit 0 |
 | P20 | **open** | guard `CLI[]`/`EXTRA[]` alignment |
-| P22 | **open** | an invalid user regexp panics the CLI (exit 101, no output). **Tier 2 decides it**: validate up front, fail cleanly, non-zero. Not a judgement call |
+| P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
 | P13 | **open** | packaging decision, blocks the scope of Tier 3 |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
@@ -208,8 +210,8 @@ Recommended order from here:
 3. **P13** — the packaging decision. Blocks Tier 3 scoping only.
 4. **A8** — escape `--title` / `--style_url`. Sole owner of the 30 known-open
    `proptest` checks.
-5. **A9, A10**, then the Phase 2–4 items **P4–P11** in the order §0.1 gives them.
-   Note that P4 is what keeps the GUI's panic handler honest, and P22 is the same
+5. **A9, A10**, then the Phase 2–4 items **P5–P11** in the order §0.1 gives them.
+   Note that P4/P22 was what kept the GUI's panic handler honest, and it is the same
    panic seen from the CLI, where nothing catches it.
 
 Two lessons worth carrying to the next item, because both cost time here: a
@@ -783,7 +785,7 @@ timeout is the defect. The oracle hanging would have failed the gate and blamed
 the port — and would have wasted a 5-minute sweep doing it. Port and reference
 timeouts are now counted and printed separately, and only a port timeout fails.
 
-### P22. An invalid user regexp panics the port — **open, and Tier 2 decides it**
+### P22. An invalid user regexp panicked the port — **done**
 
 Found in the `make verify` output while confirming P18. Originally written up as
 an undecided judgement call, which was wrong: the tier table settles it (see "How
@@ -833,11 +835,62 @@ cleanly:
 | warn and carry on (the reference) | not *worse*, but silently ignores the user's pattern and still writes a document that does not do what was asked |
 | validate patterns up front, then fail cleanly with a diagnostic and non-zero exit | **better** — satisfies the tier |
 
-So: **validate every user-supplied pattern before conversion starts, and report
-the offending pattern and the parser's complaint on a diagnostic, exiting
-non-zero without writing a partial file.** This is the same shape as A3's
-`tab_width=0` fix, which is the precedent — validated before any conversion
-begins, so a GUI user gets a message instead of a dead thread.
+Implemented as specified: **validate every user-supplied pattern before
+conversion starts, and report the offending pattern and the parser's complaint,
+exiting non-zero without writing a partial file.** The same shape as A3's
+`tab_width=0` fix, which is the precedent.
+
+```
+$ txt2html --custom_heading_regexp 'a(' --infile in.txt
+txt2html: custom_heading_regexp: invalid regular expression "a(":
+          Parsing error at position 6: Opening parenthesis without closing parenthesis
+exit 1, no output file
+```
+
+Three parts to the change, and the third is the one that matters for staying
+fixed:
+
+1. **`links::try_compile_pattern`** is now the only place a pattern becomes a
+   `Regex`, and both `Options::validate` and `Convert::re` call it. Two orderings
+   of "add the flags" and "translate" had coexisted in the crate — `Convert::re`
+   prefixed before translating, `links::compile_pattern` translated before
+   prefixing — and they happened to agree. Now they cannot stop agreeing.
+2. **`Options::user_patterns`** returns the three user-facing options, and
+   `validate` compiles each. Both entry points already called `validate`, so the
+   CLI (`main.rs:52`) and the bindings (`python.rs:99`, a `ValueError`) are both
+   covered by construction.
+3. **A test that keeps the list honest.** The list is hand-written, and the
+   failure mode of a hand-written list is not being wrong today, it being right
+   today and wrong after the next person adds a regexp option. So
+   `Options::REGEXP_OPTIONS` is compared against the CLI option table in
+   `every_regexp_option_is_validated`, and that test also checks each declared
+   option really does reject a bad pattern. Demonstrated: adding a fourth name
+   to the table without adding it to `user_patterns` fails two tests.
+
+**One flake found and fixed, in the new tests themselves.** `cliexit.rs` pipes
+a document into the child, and a pattern rejected up front means the child exits
+before reading it — so the parent's `write_all` got EPIPE and failed the test.
+It was intermittent, 1 run in 12, and the first full `make verify` after these
+changes was the run that caught it. Worth recording because the interesting part
+is *why* it was only 1 in 12: it is a race between the parent's write and the
+child's exit, and the child wins more often on an idle machine and less often
+under the parallel load `make verify` puts on the box. So a test added under
+`make test` alone would have been red roughly one time in twelve, which is
+exactly the rate at which a team learns to re-run rather than read. Now 20/20
+consecutive runs green, and `cargo fmt` is in the loop because `fmt-check` is
+the first thing `verify` does and caught a formatting slip in the fix.
+
+**Also closes P4 part 2.** While testing, a second live panic turned up in a
+different code path: a link-dictionary entry in `/pattern/` form
+(`/a(/ --> http://example.com/`) aborted at `links.rs:151` with the same exit
+101, because it reaches the engine through `LinkParser::add_regexp` rather than
+through `Options::validate`. That route is now reported and skipped rather than
+being fatal — `Convert::convert_text` returns `String`, so turning it into a
+`Result` is a much larger change than the defect, and warn-and-skip is what the
+reference does anyway. Narrower than it looks: `add_literal` and `add_glob` both
+escape their input before compiling, so `/pattern/` was the only dictionary form
+that could fail. `LinkParser::rejected_patterns` records the skips for a front
+end to report.
 
 The earlier draft of this item argued that warn-and-skip "keeps the Tier 1 corpus
 byte-identical". That was vacuous and is retracted: all five corpus cases that pass
@@ -876,36 +929,69 @@ product looks fine.
 
 ## Phase 1 — Turn crashes into errors
 
-### P4. Invalid user-supplied regexps panic
+### P4. Invalid user-supplied regexps panic — **done, as part of P22**
 
-`links.rs:144`, `links.rs:168`, `links.rs:184` (`.expect("valid pattern")`) and
-`convert.rs:164`, `convert.rs:174` (`panic!("bad regex {pat:?}")`),
-`convert.rs:2323` (`table_re`).
+Originally six panic sites: `links.rs:144`, `links.rs:168`, `links.rs:184`
+(`.expect("valid pattern")`), `convert.rs:164` and `convert.rs:174`
+(`panic!("bad regex {pat:?}")`), and `convert.rs:2323` (`table_re`).
 
 One character of typo in a link-dictionary pattern or in
 `custom_heading_regexp` — which the GUI exposes as a free-text list at
-`optionspanel.py:135` — aborts the CLI with `exit 101` and a Rust backtrace
+`optionspanel.py:135` — aborted the CLI with `exit 101` and a Rust backtrace
 note. Perl prints `Unmatched ( in regex; marked by <-- HERE in m/a( <-- HERE /
 at .../TextToHTML.pm line 4298` and carries on.
 
-In the GUI it does not crash (`worker.py:51` catches it) but the user sees a
+In the GUI it did not crash (`worker.py:51` catches it) but the user saw a
 `PanicException` in the preview, and the raw `thread '<unnamed>' panicked` line
-still reaches stderr.
+still reached stderr.
 
-Fix, in three parts:
+This was written as three parts, and the third turned out to be unnecessary
+once the first was done properly. The parts:
 
-1. Add `links::validate_pattern(pat: &str) -> Result<(), String>` that runs
-   `translate_pattern` + `Regex::new` and returns a readable diagnostic naming
-   the offending pattern and position.
-2. Validate up front, once, at configuration time — `custom_heading_regexp` in
-   `Options::deal_with_options` (`options.rs:147`) and every dictionary pattern
-   in `LinkParser::parse_dict` (`links.rs:398`). Bad input is then reported
-   before any output is produced.
-3. Replace the remaining `expect`/`panic!` with a skip-and-warn so an
-   unforeseen pattern can never take the process down.
+1. ~~Add `links::validate_pattern`~~ — done as `links::try_compile_pattern`,
+   which returns the engine's own `fancy_regex::Error` rather than a `String`,
+   so the parser's wording and position are preserved instead of paraphrased.
+   It is now the only function in the crate that turns a pattern into a `Regex`.
+2. **Validate up front, once.** Done for the three option-level patterns in
+   `Options::validate`, which both entry points already call, so the CLI and the
+   bindings are covered by construction. Done for dictionary patterns in
+   `LinkParser::add_regexp`, which is now the only dictionary form that reaches
+   the engine verbatim: `add_literal` and `add_glob` both escape first. A bad
+   `/pattern/` entry is reported and skipped rather than being fatal, because
+   `Convert::convert_text` returns `String`; see P22 for the reasoning.
+3. **Replace the remaining `expect`/`panic!` with skip-and-warn.** *Not done, on
+   purpose.* What remains is `links.rs:151` (`compile_pattern`, a thin wrapper
+   over `try_compile_pattern` for callers that have already validated),
+   `links.rs:169` and `links.rs:205` (`ascii_re`, `ascii_re_cached`), and
+   `convert.rs:214` and `convert.rs:224` (`Convert::re`, `re_i`). Every pattern
+   reaching any of them is a literal in the source or an internal invariant now
+   guarded by the list in `Options::REGEXP_OPTIONS`, and a panic is the right
+   answer to "a literal in this crate does not compile" — that is a bug in the
+   port, and turning it into a warning would let the port quietly do less than
+   its own source says it should. Converting them to warnings would also have
+   meant deciding what the converter should do when its table-detection pattern
+   fails, and the answer is "nothing sensible".
 
-Add regression tests: one per panic site, plus a GUI test that a bad regexp
-typed into the list editor shows a message rather than a backtrace.
+Checked rather than assumed, since the argument above is the kind that ages
+badly: the one remaining site that builds a pattern out of *document* text is
+`convert.rs:2650`, where a table delimiter from the input is interpolated into a
+character class. The delimiter is captured one character at a time
+(`table_re(r"^\s*([^A-Za-z0-9])")`) and stripped of `^ [ ] \` before use, so no
+input can close the class. A sweep of 36 delimiter characters through the table
+path produced no panic, and no fuzz case has ever hit one.
+
+Regression tests, one per reachable route: `no_regexp_option_can_crash_the_process`
+and `a_bad_pattern_is_a_clean_error_naming_the_option_and_the_pattern` (CLI),
+`a_rejected_pattern_writes_no_output`, `every_regexp_option_is_validated` (the
+guard on the guard), and `a_bad_link_dictionary_pattern_is_reported_and_skipped`.
+The GUI test was rewritten rather than deleted, and the rewrite is the more
+interesting part: it used to provoke a real panic, and its own docstring had
+predicted that it would have to be given an injected fault once the last
+reachable panic closed. It now raises `PanicException` directly to test the
+worker handler, with a second test asserting the new clean-error wording —
+because the thing A4 verifies is the handler, and reaching for a new crashing
+input each time a fix lands meant the test was really verifying whichever defect
+happened to be open that week.
 
 ### P5. Guard the inherited hang
 
@@ -1147,7 +1233,8 @@ stylesheet that is not opt-in, and the htmltoc-style post-processing TOC.
 ## Sequencing notes
 
 - P1 and P2 gate everything. Nothing else can be trusted until they land.
-- P4 is independent of P1/P2 and can run in parallel; it is the highest
+- P4 is done (as part of P22), so this ordering note is spent: it was
+  independent of P1/P2 and was the highest
   user-visible robustness win.
 - P6 should be measured before and after each of the two changes, separately,
   so it is clear what actually helped.

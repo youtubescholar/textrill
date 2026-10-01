@@ -205,6 +205,19 @@ impl Options {
     ///
     /// 999 is the ceiling the GUI already assumed, so the two agree without
     /// inventing a second number.
+    ///
+    /// The second loop compiles each caller-supplied regular expression
+    /// ([`Options::user_patterns`]). An uncompilable pattern was the last way a
+    /// caller could take the process down: the engine compiled it lazily, so a
+    /// bad `custom_heading_regexp` panicked part-way through a conversion rather
+    /// than being rejected, and a GUI user could type one in. Compiling it here
+    /// reports it before any output exists, which is the same contract as the
+    /// bounds above -- and it diverges from the reference on purpose, since Perl
+    /// interpolates the pattern into a match, warns, and carries on with the
+    /// pattern silently inactive.
+    ///
+    /// The list is kept honest by `every_regexp_option_is_validated` in
+    /// `tests/cliexit.rs`, which compares it against the CLI option table.
     pub fn validate(&self) -> Result<(), String> {
         for (name, value) in self.numeric_values() {
             if let Some((low, high)) = numeric_range(name) {
@@ -215,8 +228,54 @@ impl Options {
                 }
             }
         }
+        for (name, pattern) in self.user_patterns() {
+            crate::links::try_compile_pattern(pattern, false)
+                .map_err(|e| format!("{name}: invalid regular expression {pattern:?}: {e}"))?;
+        }
         Ok(())
     }
+
+    /// The options whose value is a regular expression supplied by the caller,
+    /// as `(option, pattern)`.
+    ///
+    /// These three, and no others: every other pattern the engine compiles is
+    /// either a literal in the source or derived from a delimiter option, and
+    /// validating those here would mean duplicating the construction rules in a
+    /// second place. The list is explicit rather than derived because a list
+    /// that silently falls behind the code is worse than no list -- it reads as
+    /// coverage. [`Options::REGEXP_OPTIONS`] exists so a test can check the two
+    /// against the CLI option table, and it does.
+    ///
+    /// A pattern reaches [`compile_user_pattern`] on its way to the engine, so a
+    /// caller cannot smuggle an uncompilable one past validation. See
+    /// `Convert::re`, which used to panic on a bad pattern instead.
+    pub fn user_patterns(&self) -> Vec<(&'static str, &str)> {
+        let mut v: Vec<(&'static str, &str)> = Vec::new();
+        for pattern in &self.custom_heading_regexp {
+            v.push(("custom_heading_regexp", pattern.as_str()));
+        }
+        v.push((
+            "preformat_start_marker",
+            self.preformat_start_marker.as_str(),
+        ));
+        v.push(("preformat_end_marker", self.preformat_end_marker.as_str()));
+        v
+    }
+
+    /// The canonical long name of every option that takes a regular expression.
+    ///
+    /// Hand-maintained so `tests/cliexit.rs` can assert that
+    /// [`Options::user_patterns`] covers all of it. That assertion is the point:
+    /// a new regexp option added to the CLI table and wired into `Options`, but
+    /// forgotten in `user_patterns`, is a pattern that panics the process again --
+    /// the bug P22 fixed, reintroduced by the next person to add an option.
+    /// Aliases such as `heading` and `H` are not listed; they name the same
+    /// field, and only the canonical name has a field to validate.
+    pub const REGEXP_OPTIONS: &[&str] = &[
+        "custom_heading_regexp",
+        "preformat_start_marker",
+        "preformat_end_marker",
+    ];
 
     /// The numeric options and their current values, for validation and for
     /// reporting.

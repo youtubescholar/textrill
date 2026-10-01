@@ -127,6 +127,30 @@ fn expand_ascii_escapes(pat: &str) -> String {
     out
 }
 
+/// Compile a Perl-style pattern with the /s (dotall) flag, ASCII semantics,
+/// and optional /i, reporting a pattern that does not compile.
+///
+/// This is the single place a pattern becomes a `Regex`. Both orderings of
+/// "add the flags" and "translate" existed here and in `Convert::re`, and they
+/// happened to agree; having one function means they cannot stop agreeing. The
+/// flags go on first and the translation second, which is the order `Convert`
+/// used and therefore the order the engine's behaviour is defined by.
+pub fn try_compile_pattern(pat: &str, nocase: bool) -> Result<Regex, fancy_regex::Error> {
+    let full = if nocase {
+        format!("(?s)(?i){pat}")
+    } else {
+        format!("(?s){pat}")
+    };
+    Regex::new(&translate_pattern(&full))
+}
+
+/// [`try_compile_pattern`] for callers that have already validated, or that are
+/// compiling a pattern this crate wrote. A failure here is an internal bug, so
+/// it panics rather than being threaded through every call site.
+pub fn compile_pattern(pat: &str, nocase: bool) -> Regex {
+    try_compile_pattern(pat, nocase).expect("valid pattern")
+}
+
 /// Translate Perl POSIX classes and `\W\d`-style shortcuts to ASCII.
 pub fn translate_pattern(pat: &str) -> String {
     let ascii = expand_ascii_escapes(pat);
@@ -183,18 +207,6 @@ pub fn ascii_re_cached(pat: &'static str) -> &'static Regex {
         cache.insert(pat.to_string(), re);
         re
     })
-}
-
-/// Compile a Perl-style pattern with the /s (dotall) flag,
-/// ASCII semantics, and optional /i, into a fancy_regex::Regex.
-pub fn compile_pattern(pat: &str, nocase: bool) -> Regex {
-    let translated = translate_pattern(pat);
-    let full = if nocase {
-        format!("(?s)(?i){translated}")
-    } else {
-        format!("(?s){translated}")
-    };
-    Regex::new(&full).expect("valid pattern")
 }
 
 /// Expand a replacement template containing `$0`, `$1`, ... and `$&`.
@@ -321,6 +333,10 @@ pub struct LinkParser {
     pub lower_case_tags: bool,
     pub once_done: Vec<bool>,
     pub sect_once_done: Vec<bool>,
+    /// Dictionary patterns that did not compile and were skipped, so a front
+    /// end can report them rather than leaving the user with output that
+    /// silently lost a link. See `add_regexp`.
+    pub rejected_patterns: Vec<String>,
 }
 
 impl LinkParser {
@@ -331,6 +347,7 @@ impl LinkParser {
             lower_case_tags,
             once_done: Vec::new(),
             sect_once_done: Vec::new(),
+            rejected_patterns: Vec::new(),
         }
     }
 
@@ -367,6 +384,25 @@ impl LinkParser {
     }
 
     fn add_regexp(&mut self, label: &str, pattern: &str, url: &str, switches: u8) {
+        // A `/pattern/` entry is the one dictionary form that reaches the regex
+        // engine verbatim, so it is the one that can fail to compile. It used to
+        // abort the process here via `.expect("valid pattern")`.
+        //
+        // Reported and skipped rather than fatal, because `Convert::convert_text`
+        // returns `String` and turning it into a `Result` is a much larger change
+        // than this defect. That is also what the reference does, so this is not
+        // a compromise on behaviour -- but the message is better than the
+        // reference's, which is Perl's own "Unmatched ( in regex" with no
+        // indication of which dictionary line was at fault.
+        //
+        // The three option-level patterns are validated up front instead, in
+        // `Options::validate`, where a `Result` already exists. See P22.
+        if let Err(e) = try_compile_pattern(pattern, switches & LINK_NOCASE != 0) {
+            let msg = format!("txt2html: ignoring link-dictionary pattern {pattern:?}: {e}");
+            eprintln!("{msg}");
+            self.rejected_patterns.push(msg);
+            return;
+        }
         self.add_rule(label, pattern, url, switches);
     }
 

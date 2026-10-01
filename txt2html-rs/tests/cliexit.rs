@@ -84,12 +84,27 @@ fn run(args: &[&str]) -> Run {
         .stderr(Stdio::piped())
         .spawn()
         .expect("failed to run txt2html");
-    child
+    // Dropping the stdin handle at all, let alone writing to it, races the
+    // child. An option the engine rejects is reported before it reads any
+    // input, so the child can legitimately be gone by the time this runs, and
+    // the write then fails with EPIPE. That is the product behaving correctly,
+    // so a broken pipe here is ignored: what these tests assert is the child's
+    // exit code and diagnostic, and a child that exited on our input before
+    // reading it has still told us what we asked about. Only a genuine I/O
+    // error is worth failing over.
+    match child
         .stdin
         .as_mut()
         .expect("stdin")
         .write_all(b"a\tb\n\none two\n")
-        .expect("write stdin");
+    {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+        Err(e) => panic!("write stdin: {e}"),
+    }
+    // Close the pipe so a child that *does* read input sees EOF and does not
+    // block waiting for a writer that will never come.
+    drop(child.stdin.take());
     let out = child.wait_with_output().expect("wait");
     Run {
         // 128 + signal, the way a shell reports it, so an abort is visible as
@@ -240,6 +255,231 @@ fn comparison_only_options_are_not_bounded() {
         all, expected,
         "a numeric option is neither bounded nor known harmless"
     );
+}
+
+// ---------------------------------------------------------------- P22
+//
+// A user-supplied regular expression that does not compile used to abort the
+// process with a panic and exit 101. `--custom_heading_regexp 'a('` is the
+// smallest reproduction, and the GUI exposed that option as a free-text list,
+// so one character of typo was a crash rather than a message.
+//
+// These assert the property, not the individual values: *no value of an option
+// that takes a regular expression may take the process down*, and a rejected
+// pattern is reported before any output exists.
+
+/// The options whose value is a regular expression, as the CLI spells them.
+const REGEXP_OPTIONS: &[&str] = txt2html::options::Options::REGEXP_OPTIONS;
+
+/// The CLI's own option table, which is the source of truth for which options
+/// take a regexp. Kept in sync with `Options::user_patterns` by
+/// `every_regexp_option_is_validated`, and deliberately not hand-copied here:
+/// a list that quietly falls behind the code reads as coverage when it is
+/// nothing of the kind.
+const CLI_REGEXP_OPTIONS: &[&str] = &[
+    "custom_heading_regexp",
+    "preformat_start_marker",
+    "preformat_end_marker",
+];
+
+/// Patterns that fail to compile, plus the parse error each should report.
+const BAD_PATTERNS: &[(&str, &str)] = &[
+    ("a(", "Opening parenthesis"),
+    ("[", "Invalid character class"),
+    ("*", "Target of repeat operator"),
+    ("(?P<n>x)(", "Opening parenthesis"),
+    // An inverted repetition range reaches the engine's "Error compiling regex"
+    // path rather than a parse error. Both are covered because the point is that
+    // a diagnostic naming the pattern arrives, not which of the two produces it.
+    ("a{2,1}", "Error compiling regex"),
+];
+
+/// Every option the CLI describes as taking a regular expression must be
+/// validated by `Options::validate`.
+///
+/// This is the guard on the guard. The P22 fix is a hand-written list of three
+/// options, and the failure mode of a hand-written list is not that it is wrong
+/// today but that the next regexp option is added and not added to it -- which
+/// reinstates the panic P22 removed, with nothing failing. So the list is
+/// compared against the option table here.
+#[test]
+fn every_regexp_option_is_validated() {
+    let declared: Vec<&str> = REGEXP_OPTIONS.to_vec();
+    let mut expected = CLI_REGEXP_OPTIONS.to_vec();
+    expected.sort_unstable();
+    let mut got = declared.clone();
+    got.sort_unstable();
+    assert_eq!(
+        got, expected,
+        "Options::REGEXP_OPTIONS and the CLI option table disagree; a regexp \
+         option that is not validated will panic the process"
+    );
+
+    // And the list is not merely present but wired up: a bad pattern on each
+    // declared option must actually be rejected.
+    for opt in &declared {
+        let r = run(&[&arg(opt, "a(")]);
+        assert_eq!(
+            r.code, 1,
+            "--{opt}: declared as taking a regexp but a bad one is accepted"
+        );
+    }
+}
+
+/// A pattern that compiles must still be accepted. Without this, "reject
+/// everything" would pass every test above.
+const GOOD_PATTERNS: &[&str] = &[
+    "^\\d+\\. +\\w+",
+    "a\\(",
+    "[A-Za-z]+",
+    "^(:?(:?&lt;)|<)PRE(:?(:?&gt;)|>)$",
+    r"\s*\n\s*\n",
+    "(?i)hello",
+    "^$",
+    "a{2}",
+];
+
+#[test]
+fn no_regexp_option_can_crash_the_process() {
+    for opt in REGEXP_OPTIONS {
+        for (pat, _) in BAD_PATTERNS {
+            let what = format!("--{opt}={pat:?}");
+            let r = run(&[&arg(opt, pat)]);
+            assert_not_crash(&r, &what);
+        }
+    }
+}
+
+#[test]
+fn a_bad_pattern_is_a_clean_error_naming_the_option_and_the_pattern() {
+    for opt in REGEXP_OPTIONS {
+        for (pat, expect) in BAD_PATTERNS {
+            let r = run(&[&arg(opt, pat)]);
+            assert_eq!(
+                r.code, 1,
+                "--{opt}={pat:?}: expected a clean exit 1, got {}",
+                r.code
+            );
+            assert!(
+                r.stderr.contains(opt),
+                "--{opt}={pat:?}: diagnostic does not name the option: {}",
+                r.stderr.trim()
+            );
+            assert!(
+                r.stderr.contains(pat),
+                "--{opt}={pat:?}: diagnostic does not quote the pattern: {}",
+                r.stderr.trim()
+            );
+            assert!(
+                r.stderr.contains(expect),
+                "--{opt}={pat:?}: expected the parser's complaint about {expect:?}, got: {}",
+                r.stderr.trim()
+            );
+        }
+    }
+}
+
+#[test]
+fn valid_patterns_are_still_accepted() {
+    for opt in REGEXP_OPTIONS {
+        for pat in GOOD_PATTERNS {
+            let what = format!("--{opt}={pat:?}");
+            let r = run(&[&arg(opt, pat)]);
+            assert_eq!(
+                r.code,
+                0,
+                "{what}: rejected a valid pattern: {}",
+                r.stderr.trim()
+            );
+        }
+    }
+}
+
+/// The defaults must validate, or every bare invocation would fail.
+#[test]
+fn the_default_patterns_validate() {
+    let r = run(&[]);
+    assert_eq!(r.code, 0, "a bare run failed: {}", r.stderr.trim());
+}
+
+/// A rejected pattern must be reported before any output is written, so a
+/// caller reading stdout never sees a half-converted document.
+#[test]
+fn a_rejected_pattern_writes_no_output() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_txt2html"))
+        .args(["--custom_heading_regexp", "a(", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"one two\n")
+        .expect("write");
+    let out = child.wait_with_output().expect("wait");
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        out.stdout.is_empty(),
+        "wrote {} bytes to stdout despite rejecting the pattern",
+        out.stdout.len()
+    );
+}
+
+/// A link-dictionary pattern that does not compile is a different path: it
+/// reaches the engine through `LinkParser::add_regexp`, not `Options::validate`,
+/// and it aborted the same way. It is reported and skipped rather than fatal,
+/// because `convert_text` returns `String`.
+#[test]
+fn a_bad_link_dictionary_pattern_is_reported_and_skipped() {
+    let dir = std::env::temp_dir().join("txt2html-cliexit-dict");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let dict = dir.join("bad.dict");
+    // The /pattern/ form is the one that reaches the regex engine verbatim.
+    std::fs::write(&dict, "/a(/ --> http://example.com/\n").expect("write dict");
+    let out_path = dir.join("out.html");
+    let _ = std::fs::remove_file(&out_path);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_txt2html"))
+        .args([
+            "--links_dictionaries",
+            dict.to_str().expect("path"),
+            "--outfile",
+            out_path.to_str().expect("path"),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(b"a( heading here\n")
+        .expect("write");
+    let out = child.wait_with_output().expect("wait");
+    let code = out.status.code().unwrap_or_else(|| {
+        use std::os::unix::process::ExitStatusExt;
+        128 + out.status.signal().expect("killed by an unhandled signal")
+    });
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert_ne!(code, 101, "a bad dictionary pattern panicked: {stderr}");
+    assert_ne!(code, 134, "a bad dictionary pattern aborted: {stderr}");
+    assert_eq!(code, 0, "expected 0 with the pattern skipped, got {code}");
+    assert!(
+        stderr.contains("a(") && stderr.to_lowercase().contains("pattern"),
+        "diagnostic does not identify the offending pattern: {}",
+        stderr.trim()
+    );
+    assert!(
+        out_path.exists(),
+        "the rest of the dictionary should still have been applied"
+    );
+    let _ = std::fs::remove_file(&out_path);
 }
 
 /// A rejected value must be reported before any output is written, so a caller

@@ -205,7 +205,12 @@ impl Converter {
     fn re(&mut self, pat: &str) -> &Regex {
         let key = format!("(?s){pat}");
         if !self.re_cache.contains_key(&key) {
-            let re = Regex::new(&links::translate_pattern(&key))
+            // A pattern the caller supplied is compiled by `Options::validate`
+            // before conversion starts and reported as a clean error, so getting
+            // here with a bad one means validation was bypassed -- an internal
+            // bug, and a panic is the right response to an internal bug. Every
+            // other pattern reaching this line is a literal in this file.
+            let re = links::try_compile_pattern(pat, false)
                 .unwrap_or_else(|e| panic!("bad regex {pat:?}: {e}"));
             self.re_cache.insert(key.clone(), re);
         }
@@ -215,7 +220,7 @@ impl Converter {
     fn re_i(&mut self, pat: &str) -> &Regex {
         let key = format!("(?s)(?i){pat}");
         if !self.re_cache.contains_key(&key) {
-            let re = Regex::new(&links::translate_pattern(&key))
+            let re = links::try_compile_pattern(pat, true)
                 .unwrap_or_else(|e| panic!("bad regex {pat:?}: {e}"));
             self.re_cache.insert(key.clone(), re);
         }

@@ -438,20 +438,26 @@ class GuiTests(unittest.TestCase):
         emitted, the status bar stayed on "converting…", and the user got a dead
         preview with no message. This asserts a message actually appears.
 
-        The provocation is a `custom_heading_regexp` that does not compile, which
-        the engine turns into a `PanicException` (P4, still open). It used to be
-        `tab_width=0`, which divided by zero, until A3 made that a clean
-        validation error before any conversion starts -- a good sign for the fix
-        and a problem for this test, since A4 needs a panic to catch. When P4
-        closes the last reachable panic this test will need a fault injected
-        rather than a documented defect, because the thing it verifies is the
-        handler, not the defect.
+        The fault is injected, and that is a deliberate change. This test used to
+        provoke a real engine panic with a `custom_heading_regexp` that does not
+        compile, then with `tab_width=0` before A3 made that a clean validation
+        error. P22 has now closed the regexp route too, so there is no documented
+        defect left to provoke -- and the thing under test is the *handler*, not
+        the defect. Reaching for a new crashing input each time a fix lands meant
+        this test kept verifying whatever happened to be broken that week, and
+        would have gone away silently with the last one.
         """
+        real_convert = txt2html.convert
+
+        def panicking_convert(text, options):
+            raise txt2html.PanicException("injected for the A4 handler test")
+
         self.window.editor.setPlainText("hello\n\tworld\n")
-        self.window.options.set_value("custom_heading_regexp", ["a("])
+        txt2html.convert = panicking_convert
         try:
             html = drain(self.app, self.window)
         finally:
+            txt2html.convert = real_convert
             self.window.options.reset_all()
         self.assertNotEqual(
             html.strip(), "", "the preview went blank with nothing to show for it"
@@ -459,6 +465,35 @@ class GuiTests(unittest.TestCase):
         self.assertIn("stopped on invalid input", html)
         self.assertEqual(self.window.status_label.text(), "error")
         # and the window is usable again rather than wedged
+        self.assertGreaterEqual(self.window._completed, self.window._latest)
+
+    def test_an_invalid_pattern_is_a_clean_message_not_a_panic(self):
+        """P22: a pattern that does not compile is a message, not a crash.
+
+        This is the same input that used to drive the panic above. The engine now
+        validates the pattern before converting, so the user gets a diagnostic
+        naming the option and the pattern instead of "this is a bug in txt2html"
+        and a dead preview. The wording matters: the old message told the user
+        their input was probably at fault, when the input was fine and the port
+        was not.
+        """
+        self.window.editor.setPlainText("hello\n\tworld\n")
+        self.window.options.set_value("custom_heading_regexp", ["a("])
+        try:
+            html = drain(self.app, self.window)
+        finally:
+            self.window.options.reset_all()
+        self.assertEqual(self.window.status_label.text(), "error")
+        self.assertIn("custom_heading_regexp", html)
+        self.assertIn("invalid regular expression", html)
+        # The pattern is quoted back, so the user can see which one was rejected
+        # when they supplied several.
+        self.assertIn("a(", html)
+        self.assertNotIn(
+            "stopped on invalid input",
+            html,
+            "reported as an engine panic; P22 should make this a validation error",
+        )
         self.assertGreaterEqual(self.window._completed, self.window._latest)
 
     def test_panic_exception_is_importable_and_is_a_base_exception(self):
