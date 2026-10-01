@@ -43,6 +43,46 @@ addendum deliberately uses `A` numbering so the two never collide.
 Everything below was verified by running it, not by reading it. Measurements
 are on this machine, Perl 5.38, release build, default options unless noted.
 
+## How to complete a task
+
+Added 2026-10-01, after this document's own process started costing more than the
+work. Four rules, in the order they matter.
+
+**1. Classify against the tier table before calling anything a divergence.**
+Sections "Compatibility policy" below settle the oracle question. Do not open a new
+question that a tier already answers. This is not hypothetical: P22 was written up
+as an undecided judgement call — *warn-and-skip versus fail-cleanly* — when
+"error handling" is explicitly Tier 2, meaning "may differ, **must be better**".
+An hour of "this needs a decision" went to a decision the document had already
+made. **When the tier settles it, the item is not open, it is unimplemented.**
+
+**2. A new finding gets one line here, not a new section.** The narrative belongs
+in `ADVERSARIAL-FINDINGS.md`, which is a log. This plan is a queue. The growth
+pattern that produced a 1 800-line document is the problem: every finding added
+prose, and prose makes the *next action* harder to see, which is how a 5-minute
+task turns into an afternoon of bookkeeping. If you cannot state a finding in one
+line, it is not yet understood well enough to act on.
+
+**3. "Done" means three things, not one:** the code changed, a gate can report the
+failure, and this file's status line says so. A change to behaviour with no
+demonstrable failing gate is not done, because nothing distinguishes it from a
+change that does nothing.
+
+**4. Every gate is proved once by breaking it.** A gate never observed failing is
+not a gate — it is a script printing reassuring text. Phase 0b found four that
+way, including the primary one. When you add or change a check, the same session
+that adds it must watch it fail on a deliberate fault.
+
+### When the oracle is wrong, say so in the finding, not just the fix
+
+The reference is a good oracle and it is still fallible. Where it is
+demonstrably wrong, the port diverges deliberately and the divergence is recorded
+as Tier 2 with the evidence. Reference behaviour that looks like error handling
+deserves a second look before it is copied: in the P22 case the reference's
+graceful handling of a bad pattern is not error handling at all, it is an
+unguarded regex interpolated per line that happens to survive because Perl warns
+instead of dying. "The reference does it" is not a reason.
+
 ## 0. Where things stand
 
 Re-measured 2026-10-01 (release build, Perl 5.38, default options). Figures
@@ -110,7 +150,7 @@ apart from P13.
 | P16–P17 | **done** | an uncaught `TimeoutExpired` killed a fuzz seed silently; `run.sh <stem>` died on an unbound `GOLDEN_N` after printing PASS |
 | P18–P19, P21 | **done** | fuzz figure re-established on the fixed harness (16 000 compared, 0 mismatches); 8 seeds now concurrent, 99 min → 5m30s; and the fuzzer's missing `compared` counter closed, which had let a run that checked nothing exit 0 |
 | P20 | **open** | guard `CLI[]`/`EXTRA[]` alignment |
-| P22 | **open** | an invalid user regexp panics the CLI (exit 101, no output) where the reference warns and continues — needs a behaviour decision before implementing |
+| P22 | **open** | an invalid user regexp panics the CLI (exit 101, no output). **Tier 2 decides it**: validate up front, fail cleanly, non-zero. Not a judgement call |
 | P13 | **open** | packaging decision, blocks the scope of Tier 3 |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
@@ -743,10 +783,11 @@ timeout is the defect. The oracle hanging would have failed the gate and blamed
 the port — and would have wasted a 5-minute sweep doing it. Port and reference
 timeouts are now counted and printed separately, and only a port timeout fails.
 
-### P22. An invalid user regexp panics the port where the reference warns — **open**
+### P22. An invalid user regexp panics the port — **open, and Tier 2 decides it**
 
-Not part of P19; found in the `make verify` output while confirming P18, and
-recorded rather than fixed because the right behaviour is a judgement call.
+Found in the `make verify` output while confirming P18. Originally written up as
+an undecided judgement call, which was wrong: the tier table settles it (see "How
+to complete a task", rule 1).
 
 `convert.rs:209` compiles user-supplied patterns with
 `Regex::new(..).unwrap_or_else(|e| panic!(..))` and there is no `catch_unwind`
@@ -781,12 +822,30 @@ The fuzzer cannot find this. It samples option *values* from a generator that
 produces valid ones, so a malformed pattern never comes up — which is a gap in the
 fuzzer's strategy, not a coincidence.
 
-The open question is what the port should do. The reference's behaviour is to
-warn and continue, which is arguably wrong on its own part but is the compatibility
-target; the alternatives are to warn and skip the offending pattern, or to fail
-cleanly with a diagnostic and a non-zero exit. The first matches the reference and
-keeps the Tier 1 corpus byte-identical; the second is better engineering and
-diverges. **Not yet decided — this needs a call before it is implemented.**
+**The decision, per the tier table.** "Error handling" is named explicitly in
+Tier 2 — *may differ, **must be better**, Perl is the defect.* So the port does not
+have to match the reference here, and the three candidate behaviours rank
+cleanly:
+
+| behaviour | verdict |
+|---|---|
+| panic, exit 101, no output (current) | **worse than Perl** — violates the tier |
+| warn and carry on (the reference) | not *worse*, but silently ignores the user's pattern and still writes a document that does not do what was asked |
+| validate patterns up front, then fail cleanly with a diagnostic and non-zero exit | **better** — satisfies the tier |
+
+So: **validate every user-supplied pattern before conversion starts, and report
+the offending pattern and the parser's complaint on a diagnostic, exiting
+non-zero without writing a partial file.** This is the same shape as A3's
+`tab_width=0` fix, which is the precedent — validated before any conversion
+begins, so a GUI user gets a message instead of a dead thread.
+
+The earlier draft of this item argued that warn-and-skip "keeps the Tier 1 corpus
+byte-identical". That was vacuous and is retracted: all five corpus cases that pass
+a `custom_heading_regexp` use **valid** patterns, so no Tier 1 case constrains
+this behaviour either way. The only thing that would have broken was nothing.
+
+The reference's own version of this is worth recording as a reference defect, not
+as a compatibility target — see the tier table note at the top of this document.
 
 > **Note on the 2026-10-01 machine reboot, so nobody re-investigates it.** The
 > host rebooted partway through a `make fuzz` run and the run was abandoned. It
