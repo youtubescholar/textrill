@@ -66,11 +66,14 @@ fmt:
 fmt-check:
 	cd $(RS) && $(CARGO) fmt --check
 
-# Warns rather than fails: the crate is not clippy-clean yet and a lint gate
-# that is always red gets ignored, which is worse than no gate. Flip to
-# `-- -D warnings` once the cleanup lands.
+# Fails, not warns. This target deliberately only warned, on the reasoning that
+# a lint gate that is always red gets ignored. That reasoning was right about
+# the 74 warnings it was written next to and wrong about what to do with them:
+# 09d13d9 cleared them, and a gate that reports without stopping anyone is not a
+# gate. The four remaining `#[allow]`s are reviewed exceptions with the reason
+# next to them, not a backlog.
 clippy: build
-	cd $(RS) && $(CARGO) clippy --release --all-targets
+	cd $(RS) && $(CARGO) clippy --release --all-targets -- -D warnings
 
 test: build
 	cd $(RS) && $(CARGO) test --release

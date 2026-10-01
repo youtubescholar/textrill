@@ -1,0 +1,222 @@
+# P8. There was no CI anywhere, and this project's own history is why that is
+# not a gap but a hazard: the differential harness reported two false passes
+# (A1: a stale debug binary; P1: a fuzz target that piped to `tail -1` and so
+# could not fail). Both shipped. A gate that has never been observed failing is
+# not a gate, so this file is deliberately written to be the fourth place those
+# shapes could hide, and each one is called out below at the line that closes it.
+#
+# What runs, and why each step is here:
+#
+#   fmt / clippy  -D warnings / test --release. The lints and the unit tests.
+#   corpus        - the differential comparison against the Perl reference,
+#                   which is the only thing that can say "behaves like upstream".
+#   fuzz          - randomised input against the same reference, fixed seeds so
+#                   a failure is reproducible and a pass is a real statement.
+#   gui           - the Qt path, offscreen, with T2H_TFILES set so the golden
+#                   test actually runs instead of skipping itself silently.
+#   upstream canary - the reference's own t/*.t. This is the step that is easy
+#                   to leave out and expensive to miss: if the Perl side breaks,
+#                   every differential comparison above is comparing against
+#                   something wrong, and they would all still pass.
+#
+# The reference is built here from the tracked tarball by `make ref` rather than
+# cloned or downloaded, so the job needs no network and no CPAN and the oracle
+# is the same bytes on every machine (P22).
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel a superseded run on the same ref. A stale red on an old commit is
+# noise that trains people to ignore red.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The Rust crate on its own. Split out from the slow jobs so a lint failure
+  # reports in under a minute instead of after the fuzzer.
+  rust:
+    name: rust (fmt, clippy, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      # Caching cargo's registry and build directory. The key includes the
+      # lockfile so a dependency change starts cold rather than building against
+      # a stale cache and reporting a result nobody reproduced.
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            txt2html-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('txt2html-rs/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Formatting
+        run: make fmt-check
+
+      # Strict, not advisory. `make clippy` only warned while 74 warnings stood;
+      # 09d13d9 cleared them and the target now passes -- -D warnings, so a new
+      # warning fails the build instead of scrolling past in a log.
+      - name: Lints
+        run: make clippy
+
+      - name: Unit, property and allocation tests
+        run: |
+          make test
+          make proptest
+          make alloctest
+
+  # The differential gate. This is the job that would have caught A1 and P1.
+  differential:
+    name: differential (corpus, goldens, fuzz)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          sudo apt-get update && sudo apt-get install -y perl
+          perl --version | head -2
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            txt2html-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('txt2html-rs/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # The oracle. Built from the tracked tarball and stub, offline, so the
+      # reference is identical on every runner and a green run is comparable
+      # with a green run anywhere else.
+      - name: Materialise the reference
+        run: make ref
+
+      # A clean RUNDIR, not a leftover. Phase 0 made this meaningful: the runner
+      # compares against whatever is in its output directory, so a stale file
+      # from a previous run is a comparison against the wrong thing. Pointing
+      # it at a fresh path under the job's workspace is stronger than relying
+      # on the runner to have cleaned it.
+      - name: Differential corpus and goldens
+        env:
+          RUNDIR: ${{ runner.temp }}/txt2html-corpus
+        run: make corpus
+
+      # Fixed seeds, and the fuzzer's own exit status reaches make (P1 fixed the
+      # `| tail -1` that made this target incapable of failing). The case count
+      # is reduced from the local 2000: 8 seeds x 2000 takes ~13 minutes on 20
+      # cores, and a GitHub runner has 4. The seeds are the same ones the local
+      # gate uses, so a divergence found here reproduces locally.
+      - name: Fuzzer against the reference
+        env:
+          FUZZ_CASES: ${{ github.event_name == 'push' && 2000 || 500 }}
+        run: make fuzz
+
+      # P8 also asks for upstream's own suite. Without this, a break in the Perl
+      # side turns every comparison above into a comparison against something
+      # wrong, and they would all still be green.
+      #
+      # PERL5LIB is set explicitly rather than inherited from the Makefile: this
+      # step runs `prove` directly in the reference directory, not through a make
+      # target, so nothing exports it. Verified locally -- without it, `prove t/`
+      # fails with "Bad plan. You planned 16 tests but ran 0", because the
+      # reference cannot load without the stub. That is the failure mode a
+      # silently missing oracle would produce.
+      - name: Upstream test suite as a canary
+        working-directory: ref/txt2html-3.0
+        env:
+          PERL5LIB: ${{ github.workspace }}/ref/stubs:${{ github.workspace }}/ref/txt2html-3.0/lib
+        run: prove t/
+
+  # The Qt path. Offscreen, because there is no display on a runner, and the
+  # golden test gets T2H_TFILES so it runs instead of skipping: a skipped test
+  # in CI is indistinguishable from a passing one unless you know to look.
+  gui:
+    name: gui (offscreen, goldens)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          python3 --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            txt2html-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('txt2html-rs/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      # The venv is built here rather than cached, because the extension is
+      # installed into it by `maturin develop` and a cached venv with a stale
+      # `.so` in it would test the wrong binary -- the same mistake as A1's
+      # stale debug build, one layer up.
+      - name: Build the venv
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip maturin PySide6
+
+      - name: Reference
+        run: make ref
+
+      # One run, and its output is kept. The GUI suite prints a libshiboken
+      # error during shutdown; it does not fail the run, and quietly dropping
+      # that output is the P1 shape again, so the log is kept and the warning
+      # is reported as a known defect rather than left for someone to
+      # rediscover. The defect is BacklogTests dropping its window reference
+      # (see tests/test_gui.py).
+      - name: GUI suite
+        env:
+          # No display on a runner; Qt needs to be told rather than left to
+          # find out.
+          QT_QPA_PLATFORM: offscreen
+          # Pointed at the reference's own tfiles so the golden comparison runs.
+          # Verified locally: with this set the reference-golden test executes
+          # and passes, without it the test skips itself and the run is still
+          # green. A skip in CI looks exactly like a pass.
+          T2H_TFILES: ${{ github.workspace }}/ref/txt2html-3.0/tfiles
+        run: |
+          set -o pipefail
+          make gui 2>&1 | tee "$RUNNER_TEMP/gui.log"
+          if grep -q "already deleted" "$RUNNER_TEMP/gui.log"; then
+            echo "::notice title=Known defect::The libshiboken teardown warning is" \
+              "present. BacklogTests drops its window reference, so the C++" \
+              "object outlives the Python one. Not a failure, and not ignored:" \
+              "it is asserted here so a change in its status is visible."
+          fi
+
+      # Upload the log either way. If the GUI job ever goes red, the reason is
+      # in here rather than only in the scrollback of a log line.
+      - name: Keep the GUI log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-suite-log
+          path: ${{ runner.temp }}/gui.log
+          if-no-files-found: ignore
