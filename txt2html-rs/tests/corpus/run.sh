@@ -4,9 +4,25 @@ set -u
 # Directory holding this script, so regression fixtures in tests/corpus/inputs
 # can be referenced by absolute path from cases.sh.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REFDIR="${REFDIR:-/home/vicpu/build/ref/txt2html-3.0}"
-MINE="${MINE:-/home/vicpu/build/txt2html-rs/target/debug/txt2html}"
-RUNDIR="${RUNDIR:-/tmp/opencode/corpus}"
+# P22. Every path below used to be the absolute path of the machine that
+# happened to develop this port, so a fresh clone had no working differential
+# gate at all: `git archive HEAD` contains no ref/ tree, because ref/ is
+# gitignored, and the defaults pointed into a home directory that does not exist
+# elsewhere. They are now derived from $HERE, and every one of them is still
+# overridable from the environment, so nothing here is load-bearing.
+#
+# $HERE is .../txt2html-rs/tests/corpus, so ROOT is the crate and REPO the
+# checkout holding ref/ and the tracked upstream archives.
+ROOT="$(cd "$HERE/../.." && pwd)"
+REPO="$(cd "$ROOT/.." && pwd)"
+# `make ref` materialises the reference from txt2html-3.0.tar.gz and writes the
+# YAML::Syck stub; see the `ref` target in the top-level Makefile.
+REFDIR="${REFDIR:-$REPO/ref/txt2html-3.0}"
+STUBS="${STUBS:-$REPO/ref/stubs}"
+MINE="${MINE:-$ROOT/target/debug/txt2html}"
+# Scratch directory for the two output sets. Derived from TMPDIR rather than
+# hardcoded, so it works on a machine that keeps its temporary files elsewhere.
+RUNDIR="${RUNDIR:-${TMPDIR:-/tmp}/txt2html-corpus}"
 # Both halves of PERL5LIB live under ref/ in the repo.  An earlier version kept
 # the reference module tree and the YAML::Syck stub in /tmp, and a machine
 # reboot wiped them mid-run: every case still "passed" because both converters
@@ -16,12 +32,29 @@ _refdir_lib="$REFDIR/lib"
 # be compared by cmp.py and could report PASS for a case that just crashed.
 rm -rf "$RUNDIR/ref" "$RUNDIR/mine"
 mkdir -p "$RUNDIR"/ref "$RUNDIR"/mine
-export PERL5LIB="${PERL5LIB:-/home/vicpu/build/ref/stubs:$_refdir_lib}"
+export PERL5LIB="${PERL5LIB:-$STUBS:$_refdir_lib}"
+
+# The reference is a Perl checkout that has to be built from the tracked archive
+# by `make ref`; it is not in version control.  Without it the harness cannot
+# run, and the failure it used to produce was silent: both halves of every case
+# failed identically and cmp.py compared two empty files, so the corpus reported
+# a clean pass. Refuse to start, loudly, rather than report that.
+if [ ! -f "$REFDIR/lib/HTML/TextToHTML.pm" ]; then
+  echo "ERROR: no reference checkout at $REFDIR" >&2
+  echo "       Run 'make ref' (it extracts the tracked txt2html-3.0.tar.gz" >&2
+  echo "       and writes the YAML::Syck stub), or set REFDIR." >&2
+  exit 1
+fi
+if [ ! -d "$STUBS/YAML" ]; then
+  echo "ERROR: no YAML::Syck stub at $STUBS/YAML" >&2
+  echo "       Run 'make ref', or set STUBS." >&2
+  exit 1
+fi
 
 # Guard against comparing a stale binary: it silently "passes" cases that the
 # current sources would fail, which is how the link-in-URL regression got
 # through once already.
-_mine_src=/home/vicpu/build/txt2html-rs/src
+_mine_src="$ROOT/src"
 if [ -d "$_mine_src" ] && [ -x "$MINE" ]; then
   if [ -n "$(find "$_mine_src" "$_mine_src/../src" -name '*.rs' -newer "$MINE" 2>/dev/null | head -1)" ]; then
     echo "WARNING: $MINE is older than the sources in $_mine_src." >&2
@@ -201,8 +234,10 @@ golden_check() {
   GOLDEN_N=$((GOLDEN_N + 1))
 }
 
+CASES="${CASES:-$HERE/cases.sh}"
+# shellcheck source=tests/corpus/cases.sh
 # shellcheck disable=SC1091
-. "$(dirname "$0")/cases.sh"
+. "$CASES"
 
 # P20. The full run iterates "${!EXTRA[@]}" and reads CLI[$stem] for each, so
 # the two arrays have to name the same cases. They do today -- 46 and 46 -- but
@@ -217,6 +252,43 @@ golden_check() {
 # the script mid-run -- loud, but only because of an unrelated line of shell,
 # and the message names a variable rather than a case. So both directions are
 # checked by name.
+duplicate_key_check() {
+  # P21. `alignment_check` compares key *sets*, so it cannot see a key that was
+  # assigned twice: by the time it runs, the second assignment has already won
+  # and the array looks perfectly consistent. That is not a hypothetical. A8 added
+  # a new `pre_explicit_blank` case without noticing the stem was taken, and the
+  # older case it displaced vanished -- silently, because both happened to agree
+  # with the reference, so the corpus stayed at 47/47 with one case never running.
+  # A case that does not run cannot fail, which is the P2 shape one level down.
+  #
+  # So the check has to run against the *source text*, where both assignments are
+  # still visible, not against the sourced arrays where one has been lost. Any
+  # array a case is defined in, not just CLI[]: a duplicate EXTRA[] or INPUT[] is
+  # the same silent loss.
+  local f line arr stem seen dups
+  dups=0
+  for f in "$@"; do
+    seen=$(grep -oE '^(CLI|EXTRA|INPUT|GOLDEN|NOGOLDEN)\[[A-Za-z0-9_-]+\]=' "$f" \
+           | sort | uniq -d)
+    if [ -n "$seen" ]; then
+      while read -r line; do
+        [ -n "$line" ] || continue
+        arr="${line%%[*}"; stem="${line#*[}"; stem="${stem%%]*}"
+        echo "ALIGN: ${arr}[${stem}] is assigned more than once in $(basename "$f")"
+        echo "      bash keeps the last assignment, so an earlier case for this"
+        echo "      stem never runs -- and the run still reports a clean pass."
+        dups=$((dups + 1))
+      done <<< "$seen"
+    fi
+  done
+  if [ "$dups" -gt 0 ]; then
+    echo "ALIGN: $dups duplicate case key(s); every one is a case that silently"
+    echo "      stopped running. Give each case its own stem."
+    return 1
+  fi
+  return 0
+}
+
 alignment_check() {
   local only_cli only_extra n=0
   mapfile -t only_cli < <(
@@ -238,11 +310,8 @@ alignment_check() {
     return 1
   fi
   # A NOGOLDEN entry is a suppression, and a suppression that suppresses nothing
-  # is a lie in a file whose whole job is being believed. Each one has to name a
-  # case that exists and that actually has a golden to skip.
-  # A NOGOLDEN entry is a suppression, and a suppression that suppresses nothing
-  # is a lie in a file whose whole job is being believed. Each one has to name a
-  # case that exists, and it has to be honest about *which* oracle it is
+  # is a lie in a file whose whole job is being believed. Each one has to name
+  # a case that exists, and it has to be honest about *which* oracle it is
   # standing in for.
   #
   # Two kinds, distinguished by NOGOLDEN_REASON[], which the entry must use:
@@ -314,6 +383,11 @@ if [ "$#" -gt 0 ]; then
   # and the misalignment is exactly the kind of thing that happens while writing
   # one. Cheap, and it names the case rather than dying on a variable.
   alignment_check || rc=1
+  # And the duplicate-key check, for the same reason: renaming or adding a case
+  # is what you do while working on one, and a collision is the cheapest mistake
+  # in the file to make. It has to be visible in this mode too, or the mode used
+  # to develop cases is the one place it can be introduced unnoticed.
+  duplicate_key_check "$CASES" || rc=1
   exit "$rc"
 else
   pass=0; fail=0; failnames=()
@@ -327,6 +401,18 @@ else
   # reporting one here is reporting on a subset while implying it is the whole.
   # Continuing would also turn one fault into two errors, since the EXTRA-only
   # case then trips `set -u` on "${CLI[$stem]}" a few lines below.
+  #
+  # duplicate_key_check runs first, and for the same reason: a stem assigned twice
+  # is a case that will not run, and the whole point of reporting the count after
+  # the loop rather than before is that the count has to describe cases that
+  # actually ran. A duplicate means the count is silently one short of the file.
+  if ! duplicate_key_check "$CASES"; then
+    echo
+    echo "PASS=0 FAIL=0"
+    echo "  run aborted: duplicate case keys, so a declared case is not running"
+    echo "  and no count would mean anything"
+    exit 1
+  fi
   if ! alignment_check; then
     echo
     echo "PASS=0 FAIL=0"

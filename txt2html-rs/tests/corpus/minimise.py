@@ -9,13 +9,19 @@ fuzz case (tests/corpus/fuzz.py --dump N) to something small enough to read.
 import os
 import subprocess
 import sys
+import tempfile
 
-REFDIR = os.environ.get("REFDIR", "/home/vicpu/build/ref/txt2html-3.0")
-MINE = os.environ.get("MINE", "/home/vicpu/build/txt2html-rs/target/debug/txt2html")
-TMP = "/tmp/opencode/minimise"
+# Derived from __file__; see the note in run.sh. `make ref` builds the reference.
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+REPO = os.path.dirname(ROOT)
+REFDIR = os.environ.get("REFDIR", os.path.join(REPO, "ref", "txt2html-3.0"))
+STUBS = os.environ.get("STUBS", os.path.join(REPO, "ref", "stubs"))
+MINE = os.environ.get("MINE", os.path.join(ROOT, "target", "debug", "txt2html"))
+TMP = os.path.join(tempfile.gettempdir(), "txt2html-minimise")
 os.makedirs(TMP, exist_ok=True)
 env = dict(os.environ, PERL5LIB=os.environ.get(
-    "PERL5LIB", f"/home/vicpu/build/ref/stubs:{REFDIR}/lib"))
+    "PERL5LIB", f"{STUBS}:{REFDIR}/lib"))
 
 
 def differs(text, flags):

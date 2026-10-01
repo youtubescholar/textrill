@@ -33,7 +33,9 @@ Usage:
 if they share a directory, but a caller running several seeds at once should
 still give each one its own directory. ``make fuzz`` does exactly that.
 
-Environment overrides match ``run.sh``: REFDIR, MINE, RUNDIR, PERL5LIB.
+Environment overrides match ``run.sh``: REFDIR, MINE, RUNDIR, STUBS, PERL5LIB.
+All of them default to paths derived from this file, so a fresh checkout works
+once ``make ref`` has built the reference.
 """
 
 import argparse
@@ -44,15 +46,33 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REFDIR = os.environ.get("REFDIR", "/home/vicpu/build/ref/txt2html-3.0")
-MINE = os.environ.get("MINE", "/home/vicpu/build/txt2html-rs/target/debug/txt2html")
-RUNDIR = os.environ.get("RUNDIR", "/tmp/opencode/corpus")
+# Derived from __file__, not hardcoded: see the note in run.sh. A fresh clone has
+# to be able to run this. `make ref` materialises the reference checkout.
+ROOT = os.path.dirname(os.path.dirname(HERE))
+REPO = os.path.dirname(ROOT)
+REFDIR = os.environ.get("REFDIR", os.path.join(REPO, "ref", "txt2html-3.0"))
+STUBS = os.environ.get("STUBS", os.path.join(REPO, "ref", "stubs"))
+MINE = os.environ.get("MINE", os.path.join(ROOT, "target", "debug", "txt2html"))
+RUNDIR = os.environ.get("RUNDIR", os.path.join(tempfile.gettempdir(), "txt2html-corpus"))
 # Both halves live under ref/ in the repo.  An earlier version kept them in
 # /tmp, and a reboot wiped them: the reference then exited non-zero on every
 # case, which this fuzzer counts as "reference refused" and skips, so the run
 # reported 0 mismatches having actually checked nothing.
-os.environ.setdefault(
-    "PERL5LIB", f"/home/vicpu/build/ref/stubs:{REFDIR}/lib")
+os.environ.setdefault("PERL5LIB", f"{STUBS}:{REFDIR}/lib")
+
+# Refuse to run rather than report 0 mismatches having checked nothing. The
+# failure this guards against is not hypothetical: a missing reference is
+# exactly the state every fresh clone was in until `make ref` existed.
+if not os.path.isfile(os.path.join(REFDIR, "lib", "HTML", "TextToHTML.pm")):
+    sys.exit(
+        f"ERROR: no reference checkout at {REFDIR}\n"
+        f"       Run 'make ref', or set REFDIR."
+    )
+if not os.path.isdir(os.path.join(STUBS, "YAML")):
+    sys.exit(
+        f"ERROR: no YAML::Syck stub at {STUBS}/YAML\n"
+        f"       Run 'make ref', or set STUBS."
+    )
 
 SEED_FILES = [
     "list.txt",

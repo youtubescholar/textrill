@@ -158,6 +158,82 @@ fuzz: build
 	if [ $$rc -ne 0 ]; then echo "fuzz: FAILED"; exit 1; fi; \
 	echo "fuzz: OK"
 
+# --- the reference checkout (P22) ---------------------------------------------
+
+# The differential corpus compares this port against the Perl original, so the
+# gate needs that original. It is not in version control -- `ref/` is gitignored
+# because it is derived -- which until now meant a fresh clone had no way to
+# produce it: the two tarballs are tracked but nothing extracted them, and the
+# stub module the reference `use`s at load time existed only on the machine that
+# wrote it. Every other default in this Makefile was that machine's absolute
+# path, so `make corpus` on a new checkout had nothing to run against.
+#
+# This target closes that: extract the tracked archive, then write the one stub
+# the reference needs. It is idempotent and offline -- no network, no CPAN, no
+# package installs. The reference turns out to need nothing but a core Perl:
+# Getopt::ArgvFile is an optional `eval require`, and YAML::Syck is `use`d at
+# load time but never called.
+#
+# The stub is a tracked file copied into place rather than a heredoc here, so
+# its provenance and reasoning live in a file you can read and diff.
+REF_TARBALL := $(ROOT)/txt2html-3.0.tar.gz
+REF_SRC     := $(ROOT)/ref/txt2html-3.0
+REF_STUB    := $(ROOT)/ref/stubs/YAML/Syck.pm
+STUB_SOURCE := $(ROOT)/tests/refstub/YAML/Syck.pm
+
+# Phony, deliberately. A directory target that make considers "up to date" is a
+# trap here: delete ref/stubs but leave ref/txt2html-3.0 and a non-phony `ref`
+# does nothing at all, silently reinstating the unreproducible gate. The recipe
+# is already idempotent and cheap -- a tar test and one perl -e -- so running it
+# unconditionally is the honest default. Every other target in this Makefile is
+# a real file, which is why this needs saying out loud.
+.PHONY: ref distclean
+
+ref:
+	@test -f "$(REF_TARBALL)" || { \
+	  echo "ERROR: $(REF_TARBALL) is missing; it is tracked in git." >&2; exit 1; }
+	@if [ ! -f "$(REF_SRC)/lib/HTML/TextToHTML.pm" ]; then \
+	  echo "ref: extracting $(notdir $(REF_TARBALL))"; \
+	  mkdir -p "$(ROOT)/ref"; \
+	  tar -xzf "$(REF_TARBALL)" -C "$(ROOT)/ref"; \
+	else \
+	  echo "ref: $(REF_SRC) already present, not re-extracting"; \
+	fi
+	@if [ ! -f "$(REF_STUB)" ]; then \
+	  echo "ref: writing YAML::Syck stub"; \
+	  mkdir -p "$(dir $(REF_STUB))"; \
+	  cp "$(STUB_SOURCE)" "$(REF_STUB)"; \
+	fi
+	@PERL5LIB="$(STUBS):$(REFDIR)/lib" perl -e 'use HTML::TextToHTML; print "ref: reference loads OK\n"' \
+	  || { echo "ERROR: the reference does not load; check the stub" >&2; exit 1; }
+
+# The 26 MB scale fixture, split off from `ref` because it is large and only
+# one test wants it. `make test` runs without it and reports the skip; this is
+# for when that test is the thing being worked on.
+REF_LARGE_DIR := $(ROOT)/ref/txt2html-master
+LARGE_ZIP     := $(ROOT)/txt2html-master.zip
+
+.PHONY: ref-large
+ref-large:
+	@test -f "$(LARGE_ZIP)" || { \
+	  echo "ERROR: $(LARGE_ZIP) is missing; it is tracked in git." >&2; exit 1; }
+	@if [ -f "$(REF_LARGE_DIR)/test2.txt" ]; then \
+	  echo "ref-large: already present, not re-extracting"; \
+	else \
+	  echo "ref-large: extracting $(notdir $(LARGE_ZIP))"; \
+	  mkdir -p "$(ROOT)/ref"; \
+	  unzip -q -o "$(LARGE_ZIP)" -d "$(ROOT)/ref"; \
+	fi
+	@test -f "$(REF_LARGE_DIR)/test2.txt" \
+	  || { echo "ERROR: test2.txt not found in $(REF_LARGE_DIR)" >&2; exit 1; }
+	@echo "ref-large: fixture ready ($$(du -h "$(REF_LARGE_DIR)/test2.txt" | cut -f1))"
+
+# Remove the derived reference. `make clean` leaves it alone on purpose: it is
+# 1 MB of extracted Perl, it takes one `make ref` to rebuild, and deleting it on
+# every clean is a good way to make the gate mysteriously unavailable.
+distclean: clean
+	rm -rf "$(ROOT)/ref"
+
 # --- scale probes ------------------------------------------------------------
 
 scale: build

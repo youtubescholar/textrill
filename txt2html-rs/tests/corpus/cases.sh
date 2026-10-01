@@ -204,9 +204,17 @@ INPUT[table_type_named]="$HERE/inputs/border_table.txt"
 # An explicit-quote PRE block swallowed everything after its first blank line:
 # the continuation text is buffered by split_end_explicit_preformat and only
 # joined back inside the block that runs when text remains.
-EXTRA[pre_explicit_blank]='extract=>1,use_preformat_marker=>1'
-CLI[pre_explicit_blank]='--extract --use_preformat_marker'
-INPUT[pre_explicit_blank]="$HERE/inputs/pre_explicit.txt"
+#
+# The stem is `pre_explicit`, matching the input. It was `pre_explicit_blank`
+# until A8 added a second, different case under that same stem later in this
+# file, and bash's associative arrays take the last write -- so A8 silently
+# overwrote this one. It was not red for a year: both variants are byte-identical
+# to the reference, so the corpus still reported 47/47 with the case simply never
+# running. Renaming is the fix; `duplicate_key_check` in run.sh is the guard that
+# makes the next one loud. See that function for why the count could not catch it.
+EXTRA[pre_explicit]='extract=>1,use_preformat_marker=>1'
+CLI[pre_explicit]='--extract --use_preformat_marker'
+INPUT[pre_explicit]="$HERE/inputs/pre_explicit.txt"
 
 # --- A1: a paragraph far larger than any real-world use of the tool -------
 #

@@ -115,11 +115,32 @@ fn conversions_are_independent_across_threads() {
 /// The 26 MB lorem-markdownum corpus from the separate C `txt2html` project is
 /// a useful scale check: ~500k non-blank lines of headings, ordered and
 /// unordered lists.  It must finish without quadratic blowup.
+///
+/// The fixture is the 26 MB `test2.txt` from the tracked `txt2html-master.zip`,
+/// extracted by `make ref-large` into `ref/txt2html-master/`. It is not tracked
+/// itself -- 26 MB of lorem ipsum does not belong in git -- and this test skips
+/// when it is absent, which is the only reason the path is derived rather than
+/// assumed. A skip here is a test that did not run, so it says so on stderr
+/// rather than passing in silence.
 #[test]
 fn large_heading_list_document_is_not_quadratic() {
-    let path = "/home/vicpu/build/ref/txt2html-master/test2.txt";
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return; // fixture not present
+    // CARGO_MANIFEST_DIR is .../txt2html-rs, so the checkout root is one up.
+    // Overridable, because a 26 MB fixture is the kind of thing a CI job may
+    // want to place elsewhere.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("crate dir has a parent");
+    let path = match std::env::var("LARGE_FIXTURE") {
+        Ok(p) => std::path::PathBuf::from(p),
+        Err(_) => root.join("ref").join("txt2html-master").join("test2.txt"),
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        eprintln!(
+            "SKIP large_heading_list_document_is_not_quadratic: no fixture at {} \
+             (run `make ref-large`, or set LARGE_FIXTURE)",
+            path.display()
+        );
+        return;
     };
     // Keep the slice small: these tests run in the unoptimized debug build.
     let Some(text) = text.get(..2_000_000) else {

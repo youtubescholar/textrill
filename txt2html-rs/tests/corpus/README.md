@@ -4,26 +4,44 @@
 the Perl reference (`HTML::TextToHTML` 3.0) and this Rust port, then compares
 the two outputs byte for byte.
 
+The reference is not in version control. `make ref` builds it from the tracked
+`txt2html-3.0.tar.gz` plus a tracked stub, offline:
+
 ```sh
+make ref                      # extract the reference; run this first
+cd txt2html-rs
 cargo build
 tests/corpus/run.sh          # all cases
 tests/corpus/run.sh sample   # a single case
 ```
 
-Environment overrides:
+Environment overrides. Every one of these defaults to a path derived from the
+script's own location, so a fresh checkout works; none of them is load-bearing:
 
-| variable    | default                                                 |
-|-------------|---------------------------------------------------------|
-| `REFDIR`    | `/home/vicpu/build/ref/txt2html-3.0`                    |
-| `MINE`      | `/home/vicpu/build/txt2html-rs/target/debug/txt2html`   |
-| `RUNDIR`    | `/tmp/opencode/corpus`                                  |
-| `PERL5LIB`  | `/home/vicpu/build/ref/stubs:$REFDIR/lib`                |
+| variable    | default                                                |
+|-------------|--------------------------------------------------------|
+| `REFDIR`    | `<checkout>/ref/txt2html-3.0`                          |
+| `STUBS`     | `<checkout>/ref/stubs`                                 |
+| `MINE`      | `<crate>/target/debug/txt2html`                        |
+| `RUNDIR`    | `${TMPDIR:-/tmp}/txt2html-corpus`                      |
+| `PERL5LIB`  | `$STUBS:$REFDIR/lib`                                   |
+
+`<checkout>` is the directory holding this repository and `ref/`; `<crate>` is
+`txt2html-rs`. These used to be the absolute path of the machine that developed
+the port, which meant a fresh clone had no working gate at all — the defaults
+pointed into a home directory that does not exist elsewhere, and `ref/` is
+gitignored, so there was nothing to point *at*. `run.sh` and `fuzz.py` now
+refuse to start with a clear error if the reference is missing, rather than
+letting both halves of every case fail identically and report a clean pass.
 
 Both halves of the default `PERL5LIB` live under `ref/` in the repo on purpose.
 `ref/stubs/YAML/Syck.pm` is a stub for a module `TextToHTML.pm` `use`s at load
 time but never calls; the real `YAML::Syck` is long superseded and not
-installable on a current perl. Keeping these in `/tmp` was tried and a reboot
-wiped them mid-run — see "Two ways this reports success wrongly" below.
+installable on a current perl. The canonical copy is tracked at
+`tests/refstub/YAML/Syck.pm` and `make ref` copies it into place, so the
+reasoning for the stub is reviewable rather than living on one machine. Keeping
+these in `/tmp` was tried and a reboot wiped them mid-run — see "Two ways this
+reports success wrongly" below.
 
 `cases.sh` holds one recipe per case:
 
@@ -46,15 +64,17 @@ wiped them mid-run — see "Two ways this reports success wrongly" below.
   * `pre2` — the golden file has a trailing newline the reference output does
     not. Upstream's own comparison strips CR and LF before diffing.
 
-Current status: **46/46 cases byte-identical**, and 29 of the 31 upstream
-goldens reproduce byte for byte (the other two are the `NOGOLDEN` cases above).
-`tests/paratest.rs` additionally mirrors `t/10para.t`, `t/25handles.t`,
-`t/30sample.t`, `t/50xsample.t` and `t/70bugs.t` from the reference
-distribution for the string-level API.
+Current status: **48/48 cases byte-identical**, and 33 of the 32 upstream
+goldens reproduce byte for byte across 29 distinct files (the `empty1`–`empty4`
+cases all compare against the one `good_empty.html`, which is why the count of
+checks exceeds the count of files; the other skipped cases are the `NOGOLDEN`
+ones above). `tests/paratest.rs` additionally mirrors `t/10para.t`,
+`t/25handles.t`, `t/30sample.t`, `t/50xsample.t` and `t/70bugs.t` from the
+reference distribution for the string-level API.
 
-## Five ways this reported success wrongly
+## Six ways this reported success wrongly
 
-All five were live bugs in this harness, and all five produce a green run while
+All six were live bugs in this harness, and all six produce a green run while
 comparing nothing, nothing at all, or less than it appears to. They are worth
 stating rather than just fixing, because in every case the *output* was correct
 and only the exit status was wrong — which is exactly why reading the output
@@ -105,6 +125,23 @@ never found them.
    printf "\nCLI[typo]='--xhtml'\n" >> tests/corpus/cases.sh   # must fail
    make corpus | grep ALIGN
    ```
+
+6. **A case key assigned twice** (`P21`, 2026-10-01). `alignment_check` compares
+   key *sets*, so it structurally cannot see a stem that was assigned twice: by
+   the time it runs, bash's associative array has already kept the second
+   assignment and the first is gone. A8 added a new `pre_explicit_blank` case
+   without noticing the stem was taken, and the older case it displaced stopped
+   running. Nothing went red — both variants happen to agree with the reference,
+   so the corpus reported its usual clean pass with one case silently absent from
+   it. That is a case that cannot fail, which is the P2 shape one level down.
+   `duplicate_key_check` now greps the *source text*, where both assignments are
+   still visible, across every array a case is defined in.
+
+   ```sh
+   printf "\nCLI[pre_explicit]='--xhtml'\n" >> tests/corpus/cases.sh  # must fail
+   ```
+
+   The displaced case is restored as `pre_explicit`, named after its input.
 
 > **The rule these five produced: a gate that has never been observed failing is
 > not a gate.** Before trusting any check here, break it on purpose and confirm it
