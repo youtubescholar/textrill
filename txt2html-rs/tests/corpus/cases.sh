@@ -212,3 +212,42 @@ INPUT[huge_paragraph_crlf]="$HERE/inputs/big_para_crlf.txt"
 EXTRA[delim_retry]='table_type=>{ALIGN=>0},preformat_trigger_lines=>2'
 CLI[delim_retry]='--table_type ALIGN=0 --preformat_trigger_lines 2'
 INPUT[delim_retry]="$HERE/inputs/delim_retry.txt"
+
+# --- explicit <pre> spanning a blank line, end marker in its own para ------
+#
+# Found by fuzz.py (seed 90210, case 30).  The end marker here is in a
+# *different* paragraph from the text it closes, because of the blank line, and
+# that is what routes the input through `split_end_explicit_preformat` instead
+# of the per-line `endpreformat`.  In that function the reference's end-marker
+# test at TextToHTML.pm:3868 is `if (${para_ref} =~ ...)` -- a symbolic
+# reference, missing its `$`, to a global nothing ever assigns -- so the test
+# never matches and the whole paragraph is emitted as preformatted text with the
+# marker escaped into it.  PRE_EXPLICIT is not cleared either, so the trailing
+# text stays inside the block.  The port now reproduces that; before the fix it
+# dropped the escaped `&lt;/pre&gt;` line and moved `after the block` out of the
+# block.  See the comment on `Converter::split_end_explicit_preformat`.
+#
+# No golden: upstream ships no `good_pre_explicit_blank.html`, so the
+# differential comparison is the only oracle, and it is a strong one -- the
+# point of the case is a byte difference the port used to get wrong.
+EXTRA[pre_explicit_blank]='use_preformat_marker=>1'
+CLI[pre_explicit_blank]='--use_preformat_marker'
+INPUT[pre_explicit_blank]="$HERE/inputs/pre_explicit_blank.txt"
+
+# --- A8: option values interpolated into the document are escaped ----------
+#
+# Two separate injections.  `--title` closes its own element and then opens a
+# script element, because the value reached `<title>` unescaped; `--style_url`
+# closes the href attribute the same way.  Neither is reachable from document
+# text, so the fuzz corpus cannot produce them and they needed their own case.
+#
+# The port now escapes both (chars::escape_attr) and this is a Tier 2 divergence:
+# the reference emits these bytes verbatim, so the differential comparison is
+# expected to FAIL and is therefore not the oracle here.  The oracle is the
+# second check below, which asks whether the output parses as XML -- before the
+# fix it did not, and that is what the proptest suite had 30 known-open checks
+# for.  See the A8 comment in fuzz.py's OPTION_DIVERGENT.
+EXTRA[opt_injection]='title=>"</title><script>alert(3)</script>",style_url=>"x.css\" onload=\"alert(4)"'
+CLI[opt_injection]='--title "plain" --style_url "plain.css"'
+INPUT[opt_injection]="$HERE/inputs/pre_explicit_blank.txt"
+NOGOLDEN[opt_injection]='differential must fail: deliberate Tier 2 divergence: the reference interpolates --title and --style_url into the document unescaped, which is a live XSS. The port escapes them, so a byte comparison against the reference must fail and cannot be the oracle; the oracle is the XML well-formedness check in proptest.py'

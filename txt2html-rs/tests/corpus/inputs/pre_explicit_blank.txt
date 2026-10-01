@@ -1,0 +1,7 @@
+<pre>
+line one
+
+line two
+</pre>
+
+after the block

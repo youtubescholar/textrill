@@ -128,8 +128,6 @@ BOOL_OPTS = [
 # (cli_flag_name, perl_key, [values]).  The flag is always passed as two argv
 # entries, matching the port's `<flag> <value>` form.
 VALUE_OPTS = [
-    ("--style_url", "style_url", ["ascii.css", "s.css"]),
-    ("--title", "title", ["Fuzz", "A & B", "1. Intro"]),
     ("--body_deco", "body_deco", ["<!-- hi -->", "<hr/>"]),
     ("--tab_width", "tab_width", ["2", "4", "8"]),
     ("--indent_width", "indent_width", ["2", "3", "4"]),
@@ -150,6 +148,38 @@ VALUE_OPTS = [
     ("--endpreformat_trigger_lines", "endpreformat_trigger_lines", ["1", "2"]),
     ("--table_type", "table_type", ["ALIGN=0", "PGSQL=0", "DELIM=0", "BORDER=0"]),
 ]
+
+# Options the fuzzer must NOT generate, because the port deliberately emits
+# different bytes from the reference for them and byte-comparing is therefore
+# the wrong oracle.  A9/A8 in the remediation plan: `--title` and `--style_url`
+# are interpolated into the document escaped (`chars::escape_attr`), because
+# unescaped they are a live XSS -- `--title '</title><script>alert(3)</script>'`
+# emitted exactly that.  Perl emits them raw, so any value containing `& < > "`
+# differs by construction.
+#
+# Both used to be in VALUE_OPTS, and the `&` in `--title "A & B"` is why.  This
+# is a list of *options*, not of known-bad values, and the distinction is the
+# whole point: these are not "divergences we have not fixed yet", they are inputs
+# where the reference is the defect and the plan's tier table says Tier 2 items
+# may not be verified by byte-comparing against the reference.  A list of
+# *unfixed* divergences is the thing this project deliberately removed from this
+# file, so it is not being reintroduced under another name -- there is no
+# mechanism here that can suppress a mismatch, and no entry can be added to
+# silence one.
+#
+# The cost is real and is worth stating: dropping these two means the fuzzer no
+# longer exercises title or stylesheet-URL handling at all, across all 16 000
+# cases.  That is why `OPTION_DIVERGENT` below is a hard error if anything else
+# ever needs excluding -- the next person has to come here and write down why,
+# rather than it being a value quietly removed from a list.
+#
+# Their *content* is still covered, by a different oracle: `proptest.py` checks
+# that `--xhtml` output parses as XML, which is what the escaping is for and what
+# the raw bytes failed.
+OPTION_DIVERGENT = {
+    "--title": "A8: emitted escaped by the port, raw by the reference (XSS)",
+    "--style_url": "A8: emitted escaped by the port, raw by the reference (XSS)",
+}
 
 # Values that must reach the reference as a hashref rather than a string.
 PERL_HASH_OPTS = {"table_type"}
@@ -474,6 +504,22 @@ def main():
         sys.exit(f"fuzz: MINE {MINE} is not executable (run 'cargo build')")
 
     smoke_check()
+
+    # Checked once here rather than inside the generator's loop, because the loop
+    # only reaches an option that happens to be sampled -- with `--cases 2` and
+    # `--title` in a list of nineteen, the contradiction is silent. An option
+    # cannot be both byte-compared and declared byte-divergent, and which of the
+    # two someone believes decides whether a real mismatch is reported or
+    # suppressed.
+    generated = {flag for flag, _k, _v in VALUE_OPTS}
+    both = sorted(generated & set(OPTION_DIVERGENT))
+    if both:
+        for flag in both:
+            sys.exit(
+                f"fuzz: {flag} is in both VALUE_OPTS and OPTION_DIVERGENT "
+                f"({OPTION_DIVERGENT[flag]}). It cannot be compared and skipped "
+                f"at once; remove it from one of the two."
+            )
 
     seeds = read_seed_texts()
 

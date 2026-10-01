@@ -14,9 +14,18 @@
 //! newline, `"0"` being false, one-byte placeholders in the table space maps, and
 //! option tables that keep their state between calls.
 //!
-//! Three deliberate deviations, none of which the upstream test suite
+//! Four deliberate deviations, none of which the upstream test suite
 //! exercises:
 //!
+//! * An explicit `--title` and `--style_url` are escaped on their way into the
+//!   document — `<`, `>`, `&` and `"` — because they are option values
+//!   interpolated into a tag, where nothing stops them from closing it. Perl
+//!   emits both verbatim: `--title '</title><script>alert(3)</script>'` came out
+//!   of the reference as that literal script element, and `--style_url 'x.css"
+//!   onload="alert(4)'` closed the `href` attribute the same way. A title derived
+//!   with `--titlefirst` is *not* covered by this: it comes from the document's
+//!   own first line, so it is document text and `escape_html_chars` governs it
+//!   exactly as the reference does.
 //! * `Options::instring` holds literal input strings, as documented. The Perl
 //!   module reads `$_` instead of the current source in its string branch, so
 //!   `instring` there always converts an empty paragraph.

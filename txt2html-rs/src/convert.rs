@@ -1272,29 +1272,58 @@ impl Converter {
     fn split_end_explicit_preformat(&mut self, para: &mut String) -> String {
         let mut pre_str = String::new();
         if self.mode & PRE_EXPLICIT != 0 {
-            let pe_mark = self.opts.preformat_end_marker.clone();
-            let re = self.re_i(&pe_mark);
-            if re.is_match(para).unwrap_or(false) {
-                // split on first match
-                let m = re.find(para).ok().flatten().unwrap();
-                let pre = para[..m.start()].to_string();
-                *para = para[m.end()..].to_string();
-                pre_str = if self.opts.escape_html_chars {
-                    chars::escape(&pre)
-                } else {
-                    pre
-                };
-                let tag = self.close_tag("pre");
-                pre_str.push_str(&format!("{tag}\n"));
-                self.mode ^= (PRE | PRE_EXPLICIT) & self.mode;
+            // The reference's test here is *always false*, and that is load
+            // bearing. TextToHTML.pm:3868 reads
+            //
+            //     if (${para_ref} =~ /$pe_mark/io)
+            //
+            // -- note there is no `$` before `para_ref`. In Perl that is a
+            // symbolic reference: the string "para_ref" is treated as the *name*
+            // of a variable, so the regex is matched against `$main::para_ref`,
+            // a global that nothing in the module ever assigns (it is not
+            // `our`-declared either, and the module does not `use strict refs`,
+            // so it is simply undef). Undef never matches, so the `if` body is
+            // dead code and every call falls through to the comment Perl labels
+            // "no end -- the whole thing is preformatted".
+            //
+            // Adding the missing deref changes the output, which is how this was
+            // confirmed rather than assumed. With `${$para_ref}` in place of
+            // `${para_ref}`:
+            //
+            //   printf '<pre>\na\n\n</pre>\n' | txt2html --use_preformat_marker
+            //   reference      <pre class='quote_explicit'>\na\n&lt;/pre&gt;\n</pre>
+            //   with deref     ...&lt;/pre&gt;</pre>\n<p>&lt;/pre&gt;</p>
+            //
+            // Three consequences, all of which the port has to reproduce:
+            //
+            // 1. The whole paragraph is emitted as preformatted text, escaped
+            //    like ordinary text. So a literal `</pre>` reaches the output as
+            //    `&lt;/pre&gt;` -- visible to the reader, and the reason this
+            //    diverged.
+            // 2. PRE_EXPLICIT is *not* cleared. The block therefore does not end
+            //    at the marker: everything after it in the chunk stays inside
+            //    the preformatted block, and the `</pre>` that eventually closes
+            //    it comes from the document's own tag cleanup at the end.
+            // 3. `para` is emptied, so the marker is not reprocessed as a fresh
+            //    paragraph.
+            //
+            // Concretely, for input `<pre>\na\n\n</pre>\nb\n` the reference
+            // emits `b` *inside* the pre block:
+            //
+            //   <pre class='quote_explicit'>\na\n&lt;/pre&gt;\nb\n</pre>
+            //
+            // The end marker only has any effect at all when the block and its
+            // marker are in the *same* paragraph, because then `endpreformat`
+            // (a different function, correctly dereferenced) is what ends it.
+            // That is why a blank line before the marker is all it takes to
+            // reach this path, and why the same document with the blank line
+            // removed behaves correctly.
+            pre_str = if self.opts.escape_html_chars {
+                chars::escape(para)
             } else {
-                pre_str = if self.opts.escape_html_chars {
-                    chars::escape(para)
-                } else {
-                    para.clone()
-                };
-                *para = String::new();
-            }
+                para.clone()
+            };
+            *para = String::new();
         }
         pre_str
     }
@@ -2214,7 +2243,24 @@ impl Converter {
             out.push_str(&self.get_tag("head", TAG_START, ""));
             out.push('\n');
 
-            if self.opts.titlefirst && self.opts.title.is_empty() {
+            // A title reaches the document by two routes, and they need
+            // different treatment. An explicit `--title` is an option value
+            // interpolated into element text with nothing stopping it from
+            // closing the tag (A8) -- `--title '</title><script>alert(3)</script>'`
+            // was emitted verbatim -- so it is always escaped, and `"` too
+            // because an option value can reach an attribute. A `--titlefirst`
+            // title is instead lifted out of the document's own first line, so
+            // it is already document text, and the reference's rule for document
+            // text (`escape_html_chars`) is both correct and sufficient: `<`, `>`
+            // and `&` are all that can break out of element text.
+            //
+            // Escaping both with `escape_attr` would be wrong in a way the fuzzer
+            // caught: it ignores `escape_html_chars`, so
+            // `--titlefirst --no-escape_HTML_chars` on `a & b` emitted
+            // `<title>a &amp; b</title>` where the reference emits
+            // `<title>a & b</title>`. That is a Tier 1 divergence introduced by
+            // an over-broad fix, so the derived route keeps the flag.
+            let title_escaped = if self.opts.titlefirst && self.opts.title.is_empty() {
                 // ($tit) = $first_line =~ /^ *(.*)/
                 let tit = first_line.trim_start_matches(' ').to_string();
                 let tit = tit.trim_end_matches(' ').to_string();
@@ -2223,12 +2269,17 @@ impl Converter {
                 } else {
                     self.opts.title = tit;
                 }
-            }
-            if self.opts.title.is_empty() {
-                self.opts.title = String::new();
-            }
+                // Already escaped above; emitting it again would double escape.
+                true
+            } else {
+                false
+            };
             out.push_str(&self.get_tag("title", TAG_START, ""));
-            out.push_str(&self.opts.title);
+            if title_escaped {
+                out.push_str(&self.opts.title);
+            } else {
+                out.push_str(&chars::escape_attr(&self.opts.title));
+            }
             out.push_str(&self.close_tag("title"));
             out.push('\n');
 
@@ -2253,7 +2304,7 @@ impl Converter {
             }
             out.push('\n');
             if !self.opts.style_url.is_empty() {
-                let style_url = self.opts.style_url.clone();
+                let style_url = chars::escape_attr(&self.opts.style_url);
                 if self.opts.lower_case_tags {
                     out.push_str(&self.get_tag(
                         "link",

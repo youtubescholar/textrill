@@ -4,7 +4,7 @@ Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
 **Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P19, P21, P22, E1–E3, A1,
-A1b, A2–A7. Open: A8, A9, A10, P5–P11, P13.** Every High and Medium item
+A1b, A2–A8. Open: A9, A10, P5–P11, P13.** Every High and Medium item
 from the attack pass is closed. The Phase 0b gate audit is finished:
 all four defects it found are fixed, the panic divergence it surfaced (P22) is
 closed, and P20's alignment guard is in. What remains is the ordinary backlog.
@@ -92,8 +92,8 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 |---|---|
 | `cargo test --release` ✓ | **52/52** pass (14 lib, 4 optionstest, 13 cliexit, 5 linktest, 9 paratest, 4 alloctest, 3 doc) — was 33/33 |
 | GUI `unittest` (offscreen) ✓ | **46/46** pass, 1 skipped — was 30/30 |
-| corpus, clean `RUNDIR` ✓ | **46/46** byte-identical, 29/29 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15 |
-| `proptest.py` ✓ | OK — 30 known-open checks, all owned by A8 and printed, not silenced. Verified to return 1 on failure |
+| corpus, clean `RUNDIR` ✓ | **47/47**, 29/29 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15. The 47th is `pre_explicit_blank`, plus `opt_injection`, which is a declared Tier 2 divergence scored the other way round |
+| `proptest.py` ✓ | OK — **0 known-open checks**. It used to report 30, all owned by A8, printed rather than silenced; A8 is fixed and the list is empty. Verified to return 1 on failure |
 | `alloctest` ✓ | 4/4, at any `--test-threads` (see P12) |
 | `cargo fmt --check` ✓ | clean |
 | `cargo clippy --release --all-targets` ✓ | 0 errors, 51 lib warnings — deliberately warn-only, see §0.1 |
@@ -121,9 +121,11 @@ first four runs, one of them silent content loss.
 
 ## 0.1 Progress, 2026-09-30, reconciled 2026-10-01
 
-Phase 0 is complete, and the corpus is at **46/46** with **29/29** goldens
+Phase 0 is complete, and the corpus is at **47/47** with **29/29** goldens
 byte-identical and the GUI at **46/46**. Fuzzing is 2 000 cases across eight
-seeds (16 000 cases), against 700 cases before.
+seeds (16 000 cases), against 700 cases before. The corpus grew from 46 to 47
+with A8, which added two cases and made one of them (`opt_injection`) a declared
+Tier 2 divergence — see the A8 section for why its verdict is inverted.
 
 E3 landed on 2026-10-01, which was the last item on the agreed sequence below
 apart from P13.
@@ -208,8 +210,8 @@ Recommended order from here:
 2. **P20** — the `CLI[]`/`EXTRA[]` guard. Three lines, and it closes the last
    known way to add a corpus case that silently never runs.
 3. **P13** — the packaging decision. Blocks Tier 3 scoping only.
-4. **A8** — escape `--title` / `--style_url`. Sole owner of the 30 known-open
-   `proptest` checks.
+4. ~~**A8** — escape `--title` / `--style_url`.~~ **Done.** It was the sole
+   owner of the 30 known-open `proptest` checks; there are none left.
 5. **A9, A10**, then the Phase 2–4 items **P5–P11** in the order §0.1 gives them.
    Note that P4/P22 was what kept the GUI's panic handler honest, and it is the same
    panic seen from the CLI, where nothing catches it.
@@ -521,7 +523,7 @@ validated until this is fixed.
 
 _Landed 2026-09-30. See §0.1. The `38/40` in §0 is the number this item
 produced, kept as the record of the defect; the corpus was `43/43` when this
-landed and is `46/46` now._
+landed and is `47/47` now._
 
 `tests/corpus/run.sh:7` does `mkdir -p` but never clears `$RUNDIR`, and
 `run_case` ignores the Rust binary's exit status (`run.sh:85`). A Rust-side
@@ -652,7 +654,7 @@ $ echo $?          ->  0
 
 **Every case failed and `make corpus` reported success.**
 
-This is the Tier 1 invariant — "46/46 and 29/29", restated in this plan after
+This is the Tier 1 invariant — "47/47 and 29/29", restated in this plan after
 almost every item since Phase 0 — and it was not being enforced by anything. It
 was being *reported*. Those are different things, and the difference is the whole
 of P15.
@@ -663,7 +665,7 @@ single-stem entry point (`run.sh <stem>`) had the same defect and is fixed the
 same way.
 
 Fix: compute a status and `exit` with it, on both paths. Verified in both
-directions — real corpus exits 0 at 46/46 with 29/29 goldens; the stub exits
+directions — real corpus exits 0 at 47/47 with 29/29 goldens; the stub exits
 non-zero at `FAIL=46`; `run.sh list` alone exits 0 on the real port and non-zero
 on the stub.
 
@@ -1286,9 +1288,11 @@ stylesheet that is not opt-in, and the htmltoc-style post-processing TOC.
 - Phase 5 items 3 and 4 (TOC, heading numbering) should be implemented together
   or not at all — a numbered TOC is the only reason to have heading numbering,
   and both depend on the same heading pass.
-- Every phase must keep the corpus at **46/46** and the goldens at **29/29**
+- Every phase must keep the corpus at **47/47** and the goldens at **29/29**
   byte-identical, except where a change is explicitly declared a deviation.
-  (46 as of 2026-09-30; it was 40 when this was written.)
+  (47 as of 2026-10-01, after A8; 46 as of 2026-09-30; 40 when this was
+  written.) One of the 47 is a declared divergence, so 46 of them are
+  byte-identical to the reference and one must not be.
 - That invariant is the **Tier 1** rule and it holds for every item below, all of
   which are Tier 1 or have no non-ASCII surface. A Tier 2 item — anything that
   changes behaviour for non-ASCII input, resource limits, or error handling — is
@@ -1914,6 +1918,37 @@ plausible injection vector in a dotfile-managed or shared environment.
 Escape `<`, `>`, `&`, `"` in both. Declare it as a deviation and record it in
 the deviation list at `lib.rs:16-31`.
 
+**Done.** `chars::escape_attr` escapes all four; `convert.rs` applies it at the
+two points the values are interpolated. Two consequences that were not obvious
+before implementing it:
+
+* **The title has two routes and they need different treatment.** An explicit
+  `--title` is an option value, so it is always escaped. A `--titlefirst` title
+  is lifted out of the document's own first line, so it is document text
+  already, and the reference's rule for document text — `escape_html_chars` —
+  is both correct and sufficient there, since `<`, `>` and `&` are all that can
+  break out of element text. Escaping both routes with `escape_attr` was the
+  first attempt and it introduced a *Tier 1* divergence:
+  `--titlefirst --no-escape_HTML_chars` on `a & b` emitted
+  `<title>a &amp; b</title>` where the reference emits `<title>a & b</title>`,
+  which `fuzz.py` caught at seed 20260929 case 600. The derived route now keeps
+  the flag.
+* **Escaping twice is worse than escaping once.** The pre-existing
+  `titlefirst` path already escaped when `escape_html_chars` was on, so adding an
+  escape at the emission point double escaped: `&lt;` became `&amp;lt;`, which
+  renders as the literal text "&lt;" instead of "<". There is now exactly one
+  escape per route.
+
+Oracles. The differential comparison *cannot* be the oracle for this, because
+the reference is the defect and the bytes must differ — so `opt_injection` in
+`cases.sh` is declared `differential must fail:` and `run.sh` inverted its
+verdict for such cases (a match is then the failure, since it would mean the
+escaping had stopped). The real oracle is XML well-formedness in `proptest.py`,
+which is what the 30 known-open checks measured; all 30 now pass and
+`KNOWN_OPEN_XML_ARGS` is empty. `fuzz.py` no longer generates `--title` or
+`--style_url` at all, via `OPTION_DIVERGENT`, a list of *options* that cannot
+silence a mismatch — there is no mechanism in it for that.
+
 ### A9. Exit non-zero when the input cannot be read
 
 `--infile /nonexistent` prints `Could not open …` to stderr, writes a 0-byte
@@ -1926,6 +1961,9 @@ Fix: return an error from the read path and exit non-zero. This is a deviation
 from Perl's exit code but not from its output, so it should not disturb any
 goldens. A9 is the one item here that makes the tool *safer* in automation
 without changing a single byte of what it produces.
+
+**Not started.** Confirmed still open: `--infile /nonexistent` writes a 0-byte
+output file and exits 0, on both sides.
 
 ### A10. Bound `re_cache`
 

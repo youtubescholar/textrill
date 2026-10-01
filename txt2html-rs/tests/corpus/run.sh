@@ -201,15 +201,49 @@ alignment_check() {
   # A NOGOLDEN entry is a suppression, and a suppression that suppresses nothing
   # is a lie in a file whose whole job is being believed. Each one has to name a
   # case that exists and that actually has a golden to skip.
+  # A NOGOLDEN entry is a suppression, and a suppression that suppresses nothing
+  # is a lie in a file whose whole job is being believed. Each one has to name a
+  # case that exists, and it has to be honest about *which* oracle it is
+  # standing in for.
+  #
+  # Two kinds, distinguished by NOGOLDEN_REASON[], which the entry must use:
+  #
+  #   * "golden differs for a stated reason" -- the case HAS a golden, the
+  #     reference does not match it, and the reason says why. The differential
+  #     comparison against the reference is still the oracle and still runs.
+  #   * "differential must fail: <reason>" -- the case has NO golden, because
+  #     upstream ships none, and the port deliberately diverges from the
+  #     reference, so a byte comparison cannot be the oracle at all. The entry
+  #     has to say so explicitly, and the differential comparison for that case
+  #     is then expected to fail rather than being silently tolerated.
+  #
+  # Without the second kind, "opt_injection" would have had to be written as a
+  # golden-shaped NOGOLDEN entry to get past the check below, which is exactly
+  # the lie this guard exists to prevent: a case whose divergence is deliberate
+  # and total has no golden to skip, and saying it does would be untrue.
   local bogus=0 stem
   for stem in "${!NOGOLDEN[@]}"; do
     if [ -z "${EXTRA[$stem]+x}" ]; then
       echo "ALIGN: NOGOLDEN['$stem'] names a case that does not exist"
       bogus=1
-    elif [ ! -f "$REFDIR/tfiles/good_$stem.html" ]; then
-      echo "ALIGN: NOGOLDEN['$stem'] skips a case that has no golden"
-      bogus=1
+      continue
     fi
+    case "${NOGOLDEN[$stem]}" in
+      "differential must fail:"*)
+        if [ -f "$REFDIR/tfiles/good_$stem.html" ]; then
+          echo "ALIGN: NOGOLDEN['$stem'] claims no golden exists but one does"
+          bogus=1
+        fi
+        ;;
+      *)
+        if [ ! -f "$REFDIR/tfiles/good_$stem.html" ]; then
+          echo "ALIGN: NOGOLDEN['$stem'] skips a case that has no golden"
+          echo "      (if the port deliberately diverges from the reference for"
+          echo "       this case, start the reason with 'differential must fail:')"
+          bogus=1
+        fi
+        ;;
+    esac
   done
   [ "$bogus" -eq 0 ] || return 1
   return 0
@@ -268,6 +302,26 @@ else
     [ -n "$CASE_ERR" ] && echo "  ERROR: $CASE_ERR"
     echo "$res"
     golden_check "$stem"
+    # A case declared `differential must fail:` has no golden and diverges from
+    # the reference *on purpose* -- the reference is the defect, which is the
+    # whole of Tier 2. So a mismatch is the required outcome, not a failure, and
+    # counting it as one would make the fix impossible to land. What is still
+    # checked, and what would be a real failure, is the two things that can go
+    # wrong in the other direction: the port not running at all, and the port
+    # matching the reference (which would mean the deliberate escaping had
+    # quietly stopped happening).
+    case "${NOGOLDEN[$stem]-}" in
+      "differential must fail:"*)
+        if [ -n "$CASE_ERR" ]; then
+          fail=$((fail+1)); failnames+=("$stem (converter error)")
+        elif echo "$res" | grep -q PASS; then
+          fail=$((fail+1)); failnames+=("$stem (matches the reference; the declared divergence is gone)")
+        else
+          pass=$((pass+1))
+        fi
+        continue
+        ;;
+    esac
     if [ -z "$CASE_ERR" ] && echo "$res" | grep -q PASS; then
       pass=$((pass+1))
     else

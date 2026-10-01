@@ -179,8 +179,12 @@ XML_ARGS = [
 # an `&` in a stylesheet URL produces XML no parser will accept. Recorded in
 # REMEDIATION-PLAN.md as A8; delete these two lines when it is fixed.
 KNOWN_OPEN_XML_ARGS = {
-    ("--xhtml", "--title", "t&<>\"'"): "A8",
-    ("--xhtml", "--style_url", "s.xsl?a=1&b=2"): "A8",
+    # A8 is fixed: --title and --style_url are escaped on the way into the
+    # document (`chars::escape_attr`), so `& < > "` cannot produce a document
+    # no parser will accept, and the XSS cases in the corpus no longer parse as
+    # markup. `escape_html_chars` still governs a *derived* `--titlefirst`
+    # title, which is document text rather than an option value; those cases
+    # pass too, so nothing is left to exempt.
 }
 
 

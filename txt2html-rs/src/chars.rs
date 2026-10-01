@@ -14,6 +14,38 @@ pub fn escape(text: &str) -> String {
     out
 }
 
+/// Escape a value that will be interpolated into a double-quoted attribute or
+/// into element text, for option values the caller supplies rather than document
+/// content.
+///
+/// [`escape`] covers `&`, `<` and `>`, which is what a *document* needs: the
+/// reference's own `escape()` is the model, and a paragraph's text has no
+/// attribute delimiters in it. An option value has a second problem — it can
+/// contain the `"` that closes the attribute it is being placed in. `--title
+/// '</title><script>alert(3)</script>'` and `--style_url 'x.css" onload="alert(4)'`
+/// both produced live XSS before this existed, escaping `& < >` but not `"`.
+///
+/// Perl emits the same unescaped bytes. This is Tier 2 by the plan's own tier
+/// table — error handling may differ, provided the port is the better one — and
+/// it is not verified against the reference, because the reference is the defect.
+/// It is a deviation from Perl's output for *every* title and stylesheet URL
+/// containing any of these four characters, and that includes the fuzzer's own
+/// `--title "A & B"`, so `fuzz.py` must not compare those two options (see
+/// `OPTION_DIVERGENT` there).
+pub fn escape_attr(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '>' => out.push_str("&gt;"),
+            '<' => out.push_str("&lt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// Microsoft "smart character" bytes -> plain characters.
 /// Operates on the common Unicode code points produced when such files are
 /// read as UTF-8 (these are the UTF-8 encodings of CP1252 code points),
