@@ -52,12 +52,13 @@ goldens reproduce byte for byte (the other two are the `NOGOLDEN` cases above).
 `t/30sample.t`, `t/50xsample.t` and `t/70bugs.t` from the reference
 distribution for the string-level API.
 
-## Four ways this reported success wrongly
+## Five ways this reported success wrongly
 
-All four were live bugs in this harness, and all four produce a green run while
-comparing nothing or nothing at all. They are worth stating rather than just
-fixing, because in every case the *output* was correct and only the exit status
-was wrong — which is exactly why reading the output never found them.
+All five were live bugs in this harness, and all five produce a green run while
+comparing nothing, nothing at all, or less than it appears to. They are worth
+stating rather than just fixing, because in every case the *output* was correct
+and only the exit status was wrong — which is exactly why reading the output
+never found them.
 
 1. **Both sides fail identically.** If `PERL5LIB` is wrong, every perl
    invocation exits non-zero and writes nothing, so comparing two absent files
@@ -88,7 +89,24 @@ was wrong — which is exactly why reading the output never found them.
    `GOLDEN_N: unbound variable` — after printing `PASS` and `GOLDEN pass`. That
    is the P2 shape: a correct-looking path that no gate ever executes.
 
-> **The rule these four produced: a gate that has never been observed failing is
+5. **A case declared on one side of the tables only** (`P20`, same date).
+   The full run iterates `"${!EXTRA[@]}"` and reads `CLI[$stem]`, so a case
+   written into `CLI[]` but not `EXTRA[]` never runs — and a case that does not
+   run cannot fail, which is the P2 shape again. Nothing checked the two arrays
+   agreed. `alignment_check` now compares the key sets and names any asymmetry,
+   and it runs *before* the loop: an early version appended `ALIGN:` lines to the
+   report and carried on, which printed `PASS=46 FAIL=0` on a deliberately
+   broken table. Since `PASS` counts the cases that ran, no count means anything
+   once the tables disagree, so the run aborts instead. It also checks
+   `NOGOLDEN[]`, because an entry suppressing a case that has no golden is a
+   lie in a file whose job is being believed.
+
+   ```sh
+   printf "\nCLI[typo]='--xhtml'\n" >> tests/corpus/cases.sh   # must fail
+   make corpus | grep ALIGN
+   ```
+
+> **The rule these five produced: a gate that has never been observed failing is
 > not a gate.** Before trusting any check here, break it on purpose and confirm it
 > exits non-zero. `MINE=/path/to/stub-that-writes-garbage tests/corpus/run.sh`
 > is the test, and it should print `PASS=0 FAIL=46` *and* exit non-zero. The
@@ -116,9 +134,19 @@ Exit status and hangs, both found 2026-10-01 (`P14`, `P16`):
 
 - `fuzz.py` returns non-zero if any case mismatches **or any case times out on
   the port**. A port timeout is a defect in the port. A *reference* timeout is
-  not, so it is skipped like any other reference refusal — but it is counted,
-  printed, and included in the exit status, never folded into a clean-looking
-  `0 mismatches`.
+  not the port's fault, so it is skipped — but it is counted and printed under
+  its own heading, never folded into a clean-looking `0 mismatches`.
+- A **reference exit** (non-zero without a timeout) also fails the run. It used
+  to be counted as "the reference refused this option set" and stepped over,
+  which is the P1 false-green shape in miniature: a broken `PERL5LIB` makes the
+  reference exit non-zero on every case, and a run that skips those cases
+  reports `0 mismatches` having checked nothing. `build_case` only ever draws
+  from hand-checked choice lists, so a refusal is unreachable by construction —
+  it has never fired, across 16 000 cases and eight seeds. An unreachable branch
+  whose only effect would be to reduce the number of things checked is not a
+  safety net. `smoke_check` catches a total failure before the loop and by
+  name; `compared == 0` catches it independently; this catches the partial
+  case, which neither of the others can see.
 - Both converters run under `timeout=120`, and that exception is now caught per
   case. Uncaught, it terminated the whole seed silently after however many cases
   it had reached.
@@ -185,31 +213,25 @@ reference, and the structural fixtures need tabs and CRs.
 
 ### Known divergences
 
-`KNOWN_DIVERGENCES` lists divergences that are understood and not yet fixed.
-An entry pins the *output shape* as well as the required options, so a second
-and different bug landing on the same options is still reported; only an exact
-repeat is stepped over, and repeats are counted and printed. If a sweep starts
-printing "N known", something has regressed or a new bug matches a recorded
-shape.
+There are none, and there is no list. The fuzzer used to carry a
+`KNOWN_DIVERGENCES` table plus ~50 lines that matched a mismatch against recorded
+option sets and output shapes and stepped over anything that matched. It is
+gone, for a reason worth keeping: the table was empty, and stayed empty,
+because every entry was deleted in the same change that fixed the defect it
+described.
 
-| options | reference | port |
-|---|---|---|
-| `--xhtml --make_anchors` | 3 newlines in `<body>` | 5 |
+The one entry it held for any length was the CR path's extra blank lines, and
+it was recorded as a *signature* — "the port's line list is the reference's with
+two blank lines spliced in" — rather than as a defect. A signature outlives its
+fix by construction. Left in place after E3, it would have suppressed the same
+regression the moment it returned, and the fuzzer would have had nothing to say
+about it. Suppressing on a symptom is a machine for hiding a bug that got fixed.
 
-```sh
-printf '\r\n\r\n\n' | txt2html --xhtml --make_anchors \
-  --preserve_indent --no-use_mosaic_header --no-titlefirst
-```
+So the rule matches the corpus's own: a divergence is a failing gate, and it
+becomes a passing gate by being fixed, in the same change. A defect that needs
+tracking goes in `cases.sh`, as a case that currently fails.
 
-CR-only lines leave two stray blank lines in the body. It is very narrow:
-`\r\n`, `\r`, `\n`, `\r\n\r\n`, `\n\n` and `a\r\n\r\n\r` all agree, so
-this is paragraph-boundary accounting in the CR handling rather than a general
-"CRs are mishandled" one. The entry is matched structurally — "the port's line
-list is the reference's with two blank lines spliced in" — because the first
-differing line is reported to depend entirely on what follows the CRs: the same
-defect has shown up as a missing `</body>`, as a missing `<p>-</p>` and as a
-missing `<h1>`. Nothing is ever actually missing, so a structural match cannot
-hide a content-loss bug.
+### Fixed, and pinned
 
 ### Fixed, and pinned
 

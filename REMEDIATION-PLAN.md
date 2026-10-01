@@ -4,11 +4,10 @@ Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
 **Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P19, P21, P22, E1–E3, A1,
-A1b, A2–A7. Open: A8, A9, A10, P5–P11, P13, P20.** Every High and Medium item
+A1b, A2–A7. Open: A8, A9, A10, P5–P11, P13.** Every High and Medium item
 from the attack pass is closed. The Phase 0b gate audit is finished:
-all four defects it found are fixed, and the panic divergence it surfaced (P22) is
-closed too. What remains is P20's three-line alignment guard and the ordinary
-backlog.
+all four defects it found are fixed, the panic divergence it surfaced (P22) is
+closed, and P20's alignment guard is in. What remains is the ordinary backlog.
 
 > **Read Phase 0b before trusting any result in this document.** Checks in
 > `make verify` were found on 2026-10-01 to be structurally incapable of reporting
@@ -100,7 +99,7 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 | `cargo clippy --release --all-targets` ✓ | 0 errors, 51 lib warnings — deliberately warn-only, see §0.1 |
 | upstream Perl `t/*.t` ✓ | **102/102** assertions pass, 7 functional files (5 release-only files skipped) — the canary for P1 |
 | differential fuzz ✓ | **16 000 cases** (8 seeds × 2 000), **16 000 compared**, 0 mismatches, 0 skipped, 0 timeouts — 5m30s wall / 39m18s CPU, concurrent (P19). Replaces the void figure of P18 |
-| `make verify` end-to-end ✓ | **OK, 9m46s** — first complete green in the project, on a harness whose failure modes are demonstrated (P19, P21) |
+| `make verify` end-to-end ✓ | **OK, 8m43s** — first complete green in the project, on a harness whose failure modes are demonstrated (P19, P21) |
 | invalid user regexp ✓ | **clean error, exit 1, no output written** (P22) — was a Rust panic and exit 101. Tier 2 divergence, deliberate |
 | speed, `big_para` 1.1 MB ✓ | Rust **0.37 s** vs Perl **0.18 s** (~2.1x slower) |
 | speed, `big_para_crlf` 0.8 MB ✓ | Rust **0.37 s** vs Perl **0.41 s** — the port is *faster* here |
@@ -151,7 +150,8 @@ apart from P13.
 | P14–P15 | **done** | `make fuzz` and `run.sh` could not report failure at all; `run.sh` printed `FAIL=46` and exited 0. Both now gate |
 | P16–P17 | **done** | an uncaught `TimeoutExpired` killed a fuzz seed silently; `run.sh <stem>` died on an unbound `GOLDEN_N` after printing PASS |
 | P18–P19, P21 | **done** | fuzz figure re-established on the fixed harness (16 000 compared, 0 mismatches); 8 seeds now concurrent, 99 min → 5m30s; and the fuzzer's missing `compared` counter closed, which had let a run that checked nothing exit 0 |
-| P20 | **open** | guard `CLI[]`/`EXTRA[]` alignment |
+| P20 | **done** | a case wired into one table and not the other never ran, silently — the P2 shape. Now checked by name in both directions, and it aborts the run rather than summarising a subset |
+| fuzzer cleanup | **done** | removed `KNOWN_DIVERGENCES` and ~90 lines of matching machinery, plus a dead `PERL_DRIVER`. The "reference refused" skip turned out to be a real false green and is gone |
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
 | P13 | **open** | packaging decision, blocks the scope of Tier 3 |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
@@ -909,16 +909,48 @@ as a compatibility target — see the tier table note at the top of this documen
 > obvious hypothesis was wrong, and the expensive move would be to keep hunting a
 > memory bug that does not exist.
 
-### P20. Guard `CLI[]`/`EXTRA[]` alignment — **open**
+### P20. Guard `CLI[]`/`EXTRA[]` alignment — **done**
 
 `run.sh` iterates `"${!EXTRA[@]}"` and reads `CLI[$stem]`. A stem present in
 `CLI[]` but absent from `EXTRA[]` would therefore never run — which is **P2**, the
-typo that silently disabled coverage, and nothing prevents a recurrence. The two
-arrays are aligned today (46 and 46, verified), but that is a fact about the
-current file, not an invariant the harness checks.
+typo that silently disabled coverage, and nothing prevented a recurrence. The two
+arrays are aligned today (46 and 46), but that was a fact about the file, not an
+invariant the harness checked.
 
-The guard is three lines and should fail loudly on any asymmetry, the way P1's
-`RUNDIR` clearing and the reference smoke gate already do.
+The guard is `alignment_check` in `run.sh`, called from both the full run and the
+single-stem path. Three decisions in it, each of which the "three lines" framing
+skipped past:
+
+- **By name, in both directions, not by count.** The two directions are not
+  symmetric. `CLI[]`-only is skipped in silence, because a case that does not run
+  cannot fail. `EXTRA[]`-only trips `set -u` on `"${CLI[$stem]}"` — loud, but only
+  by accident, and the message names a shell variable rather than a case. A
+  `comm` diff of the two key sets reports each asymmetry by name, and the count
+  comparison the obvious version would use cannot tell those two apart.
+- **It aborts the run rather than appending to its output.** The first version
+  printed `ALIGN:` lines and then carried on, which produced `PASS=46 FAIL=0` on
+  an intentionally broken table — a report that reads as a pass. Since `PASS` is
+  the number of cases that *ran*, no count means anything once the tables
+  disagree, so the run stops and says so. Continuing also turned one fault into
+  two errors, the `set -u` death arriving a few lines below the diagnosis.
+- **It also checks `NOGOLDEN[]`.** A `NOGOLDEN` entry is a suppression, and one
+  that suppresses nothing is a lie in the file whose entire job is being believed
+  — the same failure mode as the fuzzer's `KNOWN_DIVERGENCES`, which this project
+  has now removed for exactly that reason. Each entry must name a case that
+  exists *and* that has a golden to skip.
+
+Demonstrated, by injecting each fault into `cases.sh`: a `CLI[]`-only case, an
+`EXTRA[]`-only case, a `NOGOLDEN` entry naming a nonexistent case, and a
+`NOGOLDEN` entry on `ci_dict`, which has no golden. All four fail the gate, the
+first two naming the case.
+
+**One finding from writing the guard, not fixed here.** The reference tree has 32
+goldens and the corpus covers 31 of them: `good_empty.html` has no case, though
+`t/20tfiles.t:546` tests it. The port already agrees with the reference on an
+empty file (both emit 0 bytes), so an `empty` case would pass today. It is left
+alone deliberately — adding a case changes the Tier 1 invariant from 46/46 and
+29/29 everywhere it is quoted, which is its own kind of churn, and it belongs
+with whoever next revisits the corpus rather than inside a harness guard.
 
 ### What this section does not claim
 

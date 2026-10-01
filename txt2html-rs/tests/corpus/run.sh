@@ -165,6 +165,56 @@ golden_check() {
 # shellcheck disable=SC1091
 . "$(dirname "$0")/cases.sh"
 
+# P20. The full run iterates "${!EXTRA[@]}" and reads CLI[$stem] for each, so
+# the two arrays have to name the same cases. They do today -- 46 and 46 -- but
+# that was a fact about the file, not something the harness checked, and the way
+# it breaks is the P2 shape exactly: a case is written, wired up on one side, and
+# never runs. It fails silently in the direction that matters, because a case
+# that does not run cannot fail.
+#
+# The two directions are not symmetric, which is why this cannot be a count
+# comparison. A stem in CLI[] but not EXTRA[] is skipped without a word.
+# A stem in EXTRA[] but not CLI[] trips `set -u` on "${CLI[$stem]}" and kills
+# the script mid-run -- loud, but only because of an unrelated line of shell,
+# and the message names a variable rather than a case. So both directions are
+# checked by name.
+alignment_check() {
+  local only_cli only_extra n=0
+  mapfile -t only_cli < <(
+    comm -23 <(printf '%s\n' "${!CLI[@]}"   | sort) <(printf '%s\n' "${!EXTRA[@]}" | sort)
+  )
+  mapfile -t only_extra < <(
+    comm -13 <(printf '%s\n' "${!CLI[@]}"   | sort) <(printf '%s\n' "${!EXTRA[@]}" | sort)
+  )
+  for stem in "${only_cli[@]}"; do
+    echo "ALIGN: '$stem' is in CLI[] but not EXTRA[] -- it would never run"
+    n=$((n+1))
+  done
+  for stem in "${only_extra[@]}"; do
+    echo "ALIGN: '$stem' is in EXTRA[] but not CLI[] -- it would die on set -u"
+    n=$((n+1))
+  done
+  if [ "$n" -gt 0 ]; then
+    echo "ALIGN: $n case(s) declared on one side only"
+    return 1
+  fi
+  # A NOGOLDEN entry is a suppression, and a suppression that suppresses nothing
+  # is a lie in a file whose whole job is being believed. Each one has to name a
+  # case that exists and that actually has a golden to skip.
+  local bogus=0 stem
+  for stem in "${!NOGOLDEN[@]}"; do
+    if [ -z "${EXTRA[$stem]+x}" ]; then
+      echo "ALIGN: NOGOLDEN['$stem'] names a case that does not exist"
+      bogus=1
+    elif [ ! -f "$REFDIR/tfiles/good_$stem.html" ]; then
+      echo "ALIGN: NOGOLDEN['$stem'] skips a case that has no golden"
+      bogus=1
+    fi
+  done
+  [ "$bogus" -eq 0 ] || return 1
+  return 0
+}
+
 if [ "$#" -gt 0 ]; then
   stem="$1"
   extra="${EXTRA[$stem]-}"; cli="${CLI[$stem]-}"
@@ -187,10 +237,29 @@ if [ "$#" -gt 0 ]; then
   [ -n "$CASE_ERR" ] && rc=1
   echo "$res" | grep -q PASS || rc=1
   [ "${#GOLDEN_FAILS[@]}" -gt 0 ] && rc=1
+  # Checked here too, because the single-stem path is how a case is developed
+  # and the misalignment is exactly the kind of thing that happens while writing
+  # one. Cheap, and it names the case rather than dying on a variable.
+  alignment_check || rc=1
   exit "$rc"
 else
   pass=0; fail=0; failnames=()
   GOLDEN_FAILS=(); GOLDEN_N=0
+  # Before the loop, not after: a case that never runs is a case that cannot
+  # fail, so an alignment problem has to be reported before the run is summarised
+  # as PASS=46/46, not appended to a report that already looks like a pass.
+  #
+  # And on failure the loop is not run. A misaligned table cannot produce a
+  # meaningful PASS count -- the count is the number of cases that ran, so
+  # reporting one here is reporting on a subset while implying it is the whole.
+  # Continuing would also turn one fault into two errors, since the EXTRA-only
+  # case then trips `set -u` on "${CLI[$stem]}" a few lines below.
+  if ! alignment_check; then
+    echo
+    echo "PASS=0 FAIL=0"
+    echo "  run aborted: the case tables disagree, so no count would mean anything"
+    exit 1
+  fi
   for stem in "${!EXTRA[@]}"; do
     extra="${EXTRA[$stem]}"; cli="${CLI[$stem]}"
     run_case "$stem" "$extra" "$cli"

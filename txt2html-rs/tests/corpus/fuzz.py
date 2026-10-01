@@ -318,75 +318,31 @@ def sanitise(text):
     return "\n".join(out)
 
 
-# Divergences that are known, understood and not yet fixed.  Each entry must
-# pin the *output shape* as well as the options, so a second and different bug
-# landing on the same options still gets reported; only an exact repeat of a
-# known divergence is stepped over, and it is counted and printed.
+# There is deliberately no list of known-and-unfixed divergences here, and no
+# machinery to consult one.  An earlier version had `KNOWN_DIVERGENCES` plus ~50
+# lines matching a reported mismatch against recorded option sets and output
+# shapes, stepping over anything that matched.  It was removed because it was
+# machinery with no user:
 #
-# Every entry needs a minimal reproduction here so that whoever picks it up does
-# not have to re-derive it.
+#   - The list was empty, and stayed empty, because every entry was deleted in
+#     the same change that fixed the defect it described.  The three that came
+#     before that -- a table_type that merged into the defaults instead of
+#     replacing them, a named table_type, and a PRE block that dropped
+#     everything after its first blank line -- are pinned as fixed cases in
+#     cases.sh, where a regression is a *failing test* rather than a quiet pass.
 #
-# Currently empty, which is the state to keep it in.  The three that used to
-# live here were all fixed and are now pinned as fixed cases in cases.sh
-# (table_type_replace, table_type_named, pre_explicit_blank): a
-# table_type set that merged into the defaults instead of replacing them, and
-# an explicit-quote PRE block that dropped everything after its first blank
-# line.  If a sweep starts printing "N known", something listed here has
-# regressed or a new bug matches a recorded shape exactly.
-# Divergences that are known, understood, and still unfixed.  Each entry keeps
-# the fuzzer quiet about one defect so that it can find the next one; removing an
-# entry is part of fixing the defect it describes.
+#   - Its history was bad for a suppression list.  The CR path's phantom
+#     trailing paragraph (E3) was recorded as a *signature* -- "the port's line
+#     list is the reference's with two blank lines spliced in" -- not as a
+#     defect.  A signature outlives its fix by construction: left in place, it
+#     suppressed the very regression that came back, and the fuzzer had nothing
+#     to say about it.  A suppression entry keyed on a symptom is a machine for
+#     hiding a bug that got fixed.
 #
-# This list is empty because its only occupant, the CR path's phantom trailing
-# paragraph, is fixed (E3).  The entry described a signature -- "the port's line
-# list is the reference's with two blank lines spliced in" -- rather than the
-# defect, so leaving it in place after the fix would have suppressed the same
-# regression the moment it came back, and the fuzzer would have had nothing to
-# say about it.  A recurrence should be reported, not suppressed: add an entry
-# when a divergence is diagnosed but not yet fixed, and delete it in the same
-# change that fixes it.
-KNOWN_DIVERGENCES: list[dict] = []
-
-
-
-def first_difference(a, b):
-    """Return (ref_line, mine_line) at the first differing line, else None."""
-    la, lb = a.split(b"\n"), b.split(b"\n")
-    for x, y in zip(la, lb):
-        if x != y:
-            return x, y
-    if len(la) != len(lb):
-        return la[min(len(la), len(lb)) :][0:1] or b"", lb[min(len(la), len(lb)) :][0:1] or b""
-    return None
-
-
-def _contains(haystack, needle):
-    n = len(needle)
-    return any(tuple(haystack[i : i + n]) == needle for i in range(len(haystack) - n + 1))
-
-
-def _is_extra_blank_lines(a, b, n):
-    """True when the port's lines are the reference's with n blanks spliced in."""
-    la, lb = a.split(b"\n"), b.split(b"\n")
-    if len(lb) != len(la) + n:
-        return False
-    return any(la[:i] + [b""] * n + la[i:] == lb for i in range(len(la) + 1))
-
-
-def known_divergence(flags, a, b):
-    for k in KNOWN_DIVERGENCES:
-        # Each entry in "requires" is a contiguous run of argv that has to be
-        # present somewhere, in any order and with any other options around it.
-        if not all(_contains(flags, r) for r in k["requires"]):
-            continue
-        if "extra_blank_lines" in k:
-            if _is_extra_blank_lines(a, b, k["extra_blank_lines"]):
-                return True
-        elif first_difference(a, b) == (k["ref"], k["mine"]):
-            # The exact first differing line is the discriminator, so a
-            # different bug landing on the same options is still reported.
-            return True
-    return False
+# So the rule is the one the corpus already follows: a divergence is a failing
+# gate, and it is made a *passing* gate by fixing it, in the same change.  When
+# a real defect needs tracking, cases.sh is where it goes, and it goes there as
+# a case that currently fails.
 
 
 def build_case(rng, seeds):
@@ -423,39 +379,6 @@ def build_case(rng, seeds):
 
 # --- the two converters ----------------------------------------------------
 
-PERL_DRIVER = r"""
-use HTML::TextToHTML;
-my ($in, $out, @pairs) = @ARGV;
-my %o = (infile => [$in], outfile => $out, default_link_dict => "");
-for my $kv (@pairs) {
-    my ($k, $v) = split(/=>/, $kv, 2);
-    # A leading % marks a value that has to be built into a hashref; this is
-    # how the reference stores table_type (init_our_data sets it to a hashref,
-    # and scripts/txt2html gets one from Getopt::Long's n% spec).
-    if ($v =~ /^%(.*)$/s) {
-        my %h;
-        for my $pair (split(/,/, $1)) {
-            my ($kk, $vv) = split(/=/, $pair, 2);
-            $h{$kk} = $vv;
-        }
-        $o{$k} = \%h;
-    }
-    else {
-        $o{$k} = $v;
-    }
-}
-# Options go to the constructor and txt2html() is called with no arguments,
-# exactly as scripts/txt2html does (new(%{$args_ref}) then txt2html()).  This is
-# not cosmetic: the reference derives lower_case_tags from xhtml and loads the
-# link dictionary during construction, so passing options to txt2html() instead
-# produces a different document for the same option values.  run.sh's Perl
-# driver passes them to txt2html() and compensates with CTOR[]; here there is
-# no such table, so the CLI's own shape is the one to mirror.
-my $c = HTML::TextToHTML->new(%o);
-$c->txt2html();
-"""
-
-
 def run_perl(inpath, outpath, flags):
     # The oracle is scripts/txt2html -- the reference's own command line tool --
     # driven with the very same argv the port is given, so the comparison is
@@ -490,12 +413,13 @@ def run_rust(inpath, outpath, flags):
 def smoke_check():
     """Refuse to report a result unless both converters actually work.
 
-    A case where the reference exits non-zero is counted as "the reference
-    refused this option set" and skipped.  That is right for a genuinely
-    invalid option set and catastrophic for a broken PERL5LIB: every case gets
-    skipped and the run prints "0 mismatches" having compared nothing at all --
-    the same false-green shape as the P1 harness bug.  So prove both sides
-    convert a known input before the loop starts.
+    A broken PERL5LIB or a half-deleted reference tree makes the reference exit
+    non-zero on every case.  A run that simply stepped over those cases printed
+    "0 mismatches" having compared nothing at all -- the same false-green shape
+    as the P1 harness bug.  The per-case skip that allowed it has been removed,
+    so a total failure now fails the run; what is left to this check is the
+    diagnosis, which is worth having early and by name: "the reference exited 1
+    and here is its stderr" is a different morning from "0 cases compared".
     """
     d = tempfile.mkdtemp(prefix="t2hsmoke-", dir="/tmp")
     i, r, m = (os.path.join(d, n) for n in ("in.txt", "ref.html", "mine.html"))
@@ -572,8 +496,6 @@ def main():
 
     rng = random.Random(args.seed)
     mismatches = 0
-    skipped = 0
-    known = 0
     port_timeouts = 0
     ref_timeouts = 0
     compared = 0
@@ -618,7 +540,6 @@ def main():
             # every case is an environment failure, and `compared == 0` below
             # is what catches that.
             ref_timeouts += 1
-            skipped += 1
             print(
                 f"case {n} (seed {args.seed}, from {name}): "
                 "reference timed out, skipped"
@@ -636,8 +557,34 @@ def main():
                 _save(faildir, args.seed, inpath, refout, myout, name, n)
             continue
         if r.returncode != 0:
-            # The reference refusing an option set is not a port defect.
-            skipped += 1
+            # The reference refusing an option set is not a port defect, so it
+            # used to be counted as "skipped" and stepped over.  That is the
+            # P1 false-green shape in miniature, and it is gone.
+            #
+            # `build_case` draws every value from the hand-checked choice lists
+            # above -- `VALUE_OPTS` names only options that exist in *both*
+            # implementations, with values each side accepts -- so a refusal is
+            # unreachable by construction.  It has never once fired: 16 000 cases
+            # across eight seeds, zero skips.  A branch that cannot be taken,
+            # whose only effect if it were taken would be to reduce the number of
+            # things checked, is not a safety net; it is a way for the sweep to
+            # quietly shrink.  So it is now reported and fails the run, which is
+            # what a real environment failure needs anyway: a wiped /tmp used to
+            # make the reference exit non-zero on *every* case, and the symptom
+            # the team saw was a green build.
+            #
+            # `compared == 0` further down still catches the total-failure case
+            # on its own, and `smoke_check` catches it before the loop starts.
+            # Neither can see a *partial* refusal, which is why this one matters.
+            mismatches += 1
+            print(
+                f"case {n} (seed {args.seed}, from {name}): "
+                f"reference exited {r.returncode}"
+            )
+            print("  flags:", " ".join(flags))
+            print("  stderr:", r.stderr.decode("utf-8", "replace")[:400].strip())
+            if args.keep:
+                _save(faildir, args.seed, inpath, refout, myout, name, n)
             continue
         if not os.path.exists(refout) or not os.path.exists(myout):
             mismatches += 1
@@ -656,11 +603,6 @@ def main():
             a = fh.read()
         with open(myout, "rb") as fh:
             b = fh.read()
-        if a != b and known_divergence(flags, a, b):
-            known += 1
-            if args.keep:
-                _save(faildir, args.seed, inpath, refout, myout, name, n)
-            continue
         if a != b:
             mismatches += 1
             print(f"case {n} (seed {args.seed}, from {name}): MISMATCH")
@@ -677,13 +619,11 @@ def main():
             if args.keep:
                 _save(faildir, args.seed, inpath, refout, myout, name, n)
 
-    timeouts = port_timeouts + ref_timeouts
     print(
         f"fuzz: {args.cases} cases, seed {args.seed}, "
         f"{compared} compared, "
-        f"{mismatches} mismatches, {known} known, "
-        f"{skipped} skipped (reference refused), "
-        f"{timeouts} timed out (port {port_timeouts}, reference {ref_timeouts})"
+        f"{mismatches} mismatches, "
+        f"{port_timeouts} port timeouts, {ref_timeouts} reference timeouts"
     )
     # A port timeout is a defect, so it fails the run on its own. A reference
     # timeout is not the port's fault and does not, but a run that compared
@@ -692,8 +632,8 @@ def main():
     # caused. Zero comparisons is a broken environment, never a pass.
     if compared == 0:
         print(
-            "fuzz: FAIL -- 0 cases compared. The reference refused or hung on "
-            "every case, so this run checked nothing."
+            "fuzz: FAIL -- 0 cases compared. The reference hung or produced no "
+            "output on every case, so this run checked nothing."
         )
         return 1
     return 1 if (mismatches or port_timeouts) else 0
