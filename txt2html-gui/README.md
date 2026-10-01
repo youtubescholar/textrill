@@ -3,6 +3,22 @@
 A small Qt front end for [txt2html](../txt2html-rs), the Rust port of the Perl
 module `HTML::TextToHTML` 3.0.
 
+> **This front end is scheduled to be rewritten, 2026-10-01.** The project
+> settled that the deliverable is a *single self-contained artifact*, and this
+> package needs a Python runtime plus PySide6 at run time, so it does not meet
+> that. The rewrite moves the shell to Rust + Qt. The converter in
+> `../txt2html-rs` is **not** being rewritten — it is the part that is finished
+> and byte-verified against Perl, and a Rust GUI calls into it directly instead
+> of across the pyo3 boundary this package uses.
+>
+> The plan is **Phase 6** in [`../REMEDIATION-PLAN.md`](../REMEDIATION-PLAN.md),
+> and `tests/test_gui.py` is treated as its acceptance criteria rather than as
+> code to translate. The 30 shell tests in it are the specification of what the
+> Rust GUI has to do. Nothing here is a dead end: the tests, the encoding rules
+> and the concurrency contract all carry over. Open questions before the port
+> starts are Qt6 vs GTK4, whether the CLI stays as a second binary, and whether
+> this package is replaced outright or kept runnable alongside during the port.
+
 Type or open text on the left, watch the HTML appear on the right, and adjust
 the conversion options in the panel on the far right.  Every option, its
 default, its help text and its aliases come from the converter itself, so the

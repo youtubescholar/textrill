@@ -3,11 +3,14 @@
 Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
-**Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P19, P21, P22, E1–E3, A1,
-A1b, A2–A10. Open: P5–P11, P13.** Every High and Medium item
-from the attack pass is closed. The Phase 0b gate audit is finished:
-all four defects it found are fixed, the panic divergence it surfaced (P22) is
-closed, and P20's alignment guard is in. What remains is the ordinary backlog.
+**Progress is recorded in §0.1 below. Done: P1–P3, P8–P10, P12, P14–P19, P21–P23,
+E1–E3, A1, A1b, A2–A10. Open: P5–P7, P11, and Phase 6 (the GUI rewrite).**
+P13 is answered: the deliverable is a single self-contained artifact, so the GUI
+is rewritten in Rust + Qt and **the engine is kept** — see P13 and Phase 6. Every
+High and Medium item from the attack pass is closed. The Phase 0b gate audit is
+finished: all four defects it found are fixed, the panic divergence it surfaced
+(P22) is closed, and P20's alignment guard is in. What remains is the ordinary
+backlog, plus one planned rewrite.
 
 > **Read Phase 0b before trusting any result in this document.** Checks in
 > `make verify` were found on 2026-10-01 to be structurally incapable of reporting
@@ -128,8 +131,11 @@ seeds (16 000 cases), against 700 cases before. The corpus grew from 46 to 47
 with A8, which added two cases and made one of them (`opt_injection`) a declared
 Tier 2 divergence — see the A8 section for why its verdict is inverted.
 
-E3 landed on 2026-10-01, which was the last item on the agreed sequence below
-apart from P13.
+E3 landed on 2026-10-01. P13, the last item on the agreed sequence, was answered
+the same day: one self-contained artifact, so the GUI is rewritten in Rust + Qt
+and the engine is kept. The rewrite itself is **Phase 6**, and P5–P7 and P11 are
+sequenced ahead of it — P7 first of all, because the encoding rule is currently
+implemented in both Rust and Python and the two copies disagree.
 
 | Item | State | Note |
 |---|---|---|
@@ -156,7 +162,8 @@ apart from P13.
 | P20 | **done** | a case wired into one table and not the other never ran, silently — the P2 shape. Now checked by name in both directions, and it aborts the run rather than summarising a subset |
 | fuzzer cleanup | **done** | removed `KNOWN_DIVERGENCES` and ~90 lines of matching machinery, plus a dead `PERL_DRIVER`. The "reference refused" skip turned out to be a real false green and is gone |
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
-| P13 | **open** | packaging decision, blocks the scope of Tier 3 |
+| P13 | **decided** | single self-contained artifact. The GUI is rewritten in Rust + Qt; **the 5,644-line engine is kept**. P5–P7 and P11 are sequenced *ahead* of it — P7 especially, because the encoding rule is currently implemented twice and the copies disagree. Plan in **Phase 6** |
+| Phase 6 | **planned** | the GUI rewrite: 1,365 lines of Python shell out, ~30 tests ported as acceptance criteria, pyo3 layer and venv deleted from the dependency graph. Open: Qt6 vs GTK4, CLI fate, replace-vs-coexist |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
 ### Agreed sequence, 2026-09-30
@@ -190,11 +197,14 @@ the next person does not have to re-derive the ordering:
 8. ~~**E3.**~~ **Done**, 2026-10-01, commit `ce8f949`. It was a one-character-class
    accounting bug in the paragraph slurper, and it is the reason `KNOWN_DIVERGENCES`
    is now empty rather than merely accurate.
-9. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
-   above, but answer it before starting any Tier 3 work.
+9. ~~**P13 — the packaging decision.**~~ **Decided 2026-10-01:** one
+   self-contained artifact, so the GUI moves to Rust + Qt and the engine is
+   kept. Plan in **Phase 6**; P5–P7 and P11 are sequenced ahead of it, because
+   the encoding rule is currently implemented in two languages and the copies
+   disagree (P7).
 
-That was the agreed sequence, and items 1–8 are all closed. **P13 is the only item
-left from it.** But see below: before any further feature work, **P19 then P18**,
+That was the agreed sequence, and items 1–8 are all closed. **P13 is the last of
+them.** But see below: before any further feature work, **P19 then P18**,
 because the fuzz number this project reports is currently void (P18) and the run
 that would establish it takes 99 minutes (P19).
 
@@ -210,7 +220,9 @@ Recommended order from here:
    only *newly found* correctness divergence, and it is user-reachable today.
 2. **P20** — the `CLI[]`/`EXTRA[]` guard. Three lines, and it closes the last
    known way to add a corpus case that silently never runs.
-3. **P13** — the packaging decision. Blocks Tier 3 scoping only.
+3. ~~**P13** — the packaging decision.~~ **Decided:** single artifact, GUI to
+   Rust + Qt, engine kept. See Phase 6. P5–P7 and P11 now go **before** the
+   rewrite rather than after.
 4. ~~**A8** — escape `--title` / `--style_url`.~~ **Done.** It was the sole
    owner of the 30 known-open `proptest` checks; there are none left.
 5. **The Phase 2–4 items P5–P11**, in the order §0.1 gives them. A10 is done:
@@ -218,6 +230,14 @@ Recommended order from here:
    set. Nothing in Phases A or B is open now.
    Note that P4/P22 was what kept the GUI's panic handler honest, and it is the same
    panic seen from the CLI, where nothing catches it.
+6. **Phase 6, the GUI rewrite** — and only after the above. P13 answered the
+   packaging question; Phase 6 is the work that follows from the answer, and its
+   prerequisite is **P7**, because the encoding rule is currently written twice
+   in two languages and the two copies do not agree. Do not start the shell
+   before that lands, or the port inherits the disagreement. Phase 5 (opt-in
+   features) is deferred past Phase 6 — it is engine-side and unaffected, but
+   every new option currently has to be added to two front ends, and after the
+   rewrite there is only one.
 
 Two lessons worth carrying to the next item, because both cost time here: a
 micro-benchmark of a helper API is not evidence about the tool's exposure to
@@ -487,13 +507,78 @@ the same style as `proptest.py`'s A8 handling, and `KNOWN_OPEN` in the test is
 the audit list. A *new* exceeded budget has no such record and fails the run. A
 gate that is permanently red gets ignored, which is not a gate.
 
-### P13. Decide what "stands on its own" means for packaging
+### P13. Decide what "stands on its own" means for packaging — **decided**
 
-Undecided, and it should be settled before more engine work rather than after.
-The CLI is a self-contained Rust binary. The GUI is not: `txt2html-gui` needs a
-Python runtime plus PySide6 at run time, and is built as a wheel. If the
-deliverable is a single artifact, Rust + Qt (C++) is a different architecture, not
-a refactor. Tier 3 of the policy above is scoped by this answer.
+_Answered 2026-10-01. The single self-contained artifact wins: the deliverable is
+one binary, so the GUI moves off Python + PySide6 onto Rust + Qt. Phase 5 below
+is the plan; P5–P11 are sequenced ahead of it._
+
+The question was whether "stands on its own" means one artifact or two. The CLI
+is a self-contained Rust binary; the GUI was not — `txt2html-gui` needs a Python
+runtime plus PySide6 at run time, and ships as a wheel. Meeting a
+single-artifact requirement with the Python wheel means the requirement is not
+met, so the shell is rewritten. **The engine is not rewritten.** That distinction
+is the whole shape of this item and is recorded here because the plan's original
+framing — "Rust + Qt is a different architecture, not a refactor" — invites
+reading the entire project as up for replacement. It is not.
+
+| component | lines | fate |
+|---|---|---|
+| **engine** (`convert.rs`, `links.rs`, `options.rs`, `chars.rs`, `cli.rs`) | **5,644** | **kept** — this is the hard part, and it is already byte-verified against Perl |
+| `python.rs` (pyo3 bindings) | 212 | **deleted** — exists only to cross a language boundary |
+| `main.rs` (CLI entry point) | 111 | **kept** — the CLI is a second binary on the same crate |
+| `lib.rs` (crate root) | 65 | kept, minus the pyo3 module declaration |
+| `txt2html-gui` shell (`mainwindow.py`, `optionspanel.py`, `worker.py`, `app.py`, `files.py`) | 1,365 | **rewritten** in Rust + Qt |
+| `txt2html-gui/tests/test_gui.py` | 887 | **the spec**, not the code — roughly half survives as Rust tests |
+
+So the rewrite is 1,365 lines out against 5,644 kept, and the 212-line binding
+layer goes with it. The crate is 6,032 lines in total.
+
+**Why the rewrite is cheap, and it is not the reason people expect.** The engine
+is where the difficulty was, and it is already paid for. What the rewrite removes
+is *duplication that only exists because two languages are involved*:
+
+1. **The encoding rule is currently implemented twice, in two languages.**
+   `convert.rs:30` (`read_any_file`) decodes UTF-8 when the bytes are valid UTF-8
+   and falls back to Latin-1 otherwise. `files.py:46` (`decode_bytes`) implements
+   the same rule in Python, with a docstring that says so outright. A Rust GUI
+   calls `read_any_file` and the second implementation is deleted. This is why
+   **P7 must land before the rewrite, not after** — see Phase 5.
+2. **The pyo3 layer disappears.** Five `#[pyfunction]`s (`convert`,
+   `convert_file`, `process_chunk`, `option_specs`, `version`) exist to cross
+   into Python. In Rust these are direct calls, and the ~212-line binding file
+   goes with them.
+3. **`option_specs` becomes a direct read of `cli::SPECS`.** It already reports
+   the engine's own `NUMERIC_RANGES`, so a front end cannot offer a value the
+   engine will reject. A Qt options panel built from that table is *more*
+   correct than the Python one, which reconstructs it across a boundary.
+
+Two consequences worth stating plainly, because both cut against the decision and
+both are accepted deliberately:
+
+- **P7 gets fixed by construction rather than patched.** The CP1252 defect — 0x80-0x9F
+  bytes becoming C1 control characters in the output — is currently a policy
+  split across two languages that *disagree*. Merging them into one removes a
+  whole class of bug rather than fixing an instance of it.
+- **The GUI's 887-line test suite is the expensive part, and it is being
+  rewritten, not inherited.** It is also the most valuable document in the GUI,
+  because it is the only place the shell's behaviour is written down. Treat it as
+  the port's acceptance criteria (§5.3) rather than as code to translate.
+
+**Still open, and needed before Phase 5 starts** — the decision above settles
+the *architecture*, not the toolkit:
+
+1. **Qt6 or GTK4.** The plan below assumes Qt6 Widgets, because it is the
+   closest match to PySide6 semantics and therefore minimises behavioural drift
+   across the GUI suite. If GTK4 is preferred, the port's widget mapping changes
+   but nothing in the engine work does.
+2. **Does the CLI stay?** Assumed yes, as a second binary linking the same
+   crate. It is nearly free once the engine is a library.
+3. **Replace `txt2html-gui`, or sit beside it during the port?** Replacing is
+   cleaner; beside it allows behavioural diffing. The plan assumes replace-at-
+   the-end, with the Python GUI kept runnable until the Rust one passes the
+   ported suite.
+
 
 ### Corrections to the items above
 
@@ -1308,7 +1393,7 @@ what CI does.
   Perl's `$key =~ s|/|\\/|g` (`TextToHTML.pm:4777`). Behaviourally harmless:
   verified identical output for `|a/b/c|`, because an unescaped `/` is already
   literal in a Rust regex. Either add the line or fix the comment.
-- ~~`cargo clippy` reports 42 warnings in the lib~~ — **done (P23)**. 74
+- ~~`cargo clippy` reports 42 warnings in the lib~~ — **done (P23)**. 69
   warnings total across all targets, now 0, and the gate fails on a new one.
   Four are reviewed `#[allow]`s with the reason recorded next to them.
 - ~~`cargo fmt --check` is not clean — the hand-aligned comment table at
@@ -1388,6 +1473,137 @@ Explicitly rejected by the survey, so they are not reconsidered later: multi-tar
 output (a different product), syntax highlighting inside `<pre>`, a built-in
 stylesheet that is not opt-in, and the htmltoc-style post-processing TOC.
 
+## Phase 6 — The GUI rewrite (P13)
+
+Added 2026-10-01, after P13 was answered: the deliverable is a single
+self-contained artifact, so `txt2html-gui` is rewritten from Python + PySide6
+onto Rust + Qt. **The engine is kept.** It is 5,644 lines, already byte-verified
+against Perl by a differential corpus, and is the expensive part of this project
+— which is already paid for. What is rewritten is a 1,365-line shell, and the
+212-line pyo3 layer is deleted outright.
+
+This is Phase 6 and not Phase 5 because Phase 5 is opt-in *feature* work that
+touches the engine, and doing it before the rewrite means doing it against a
+shell that is about to be deleted. Nothing in Phase 5 is lost by waiting; §6.5
+says where it goes.
+
+### 6.1 The sequence, and why P5–P11 come first
+
+**Do P5–P11 before starting the rewrite. All of it assists, and one item is
+close to a prerequisite.**
+
+The reason is that the rewrite *deletes* the Python GUI, and the Python GUI
+currently holds a second copy of an engine rule. `files.py:46` re-implements
+`convert.rs:30`'s encoding rule in Python — UTF-8 if valid, else Latin-1
+byte-as-codepoint — and the two implementations do not fully agree. Landing P7
+first means the Rust GUI inherits one correct policy instead of porting a
+disagreement forward. Doing P7 after the rewrite means finding the same defect a
+second time, in a language where nothing points at the other copy.
+
+| item | assists the rewrite? | why |
+|---|---|---|
+| **P7** (encoding) | **prerequisite** | the split encoding policy is the defect. Fix it in the engine first and the rewrite inherits one implementation. P7.2's `meta_charset` and the GUI write-back path are the same rule that `files.py` duplicates |
+| **P6** (2× slower) | strongly | links are 60% of runtime and 3.3× slower than Perl. In a GUI this is latency on every keystroke, not a batch number. Fix once, both artifacts benefit |
+| **P5** (inherited hang) | strongly | a hang is the worst failure mode for a GUI. The guard becomes a dialog in Rust/Qt; the error already exists if built now |
+| **P10, P11** | neutral-to-positive | engine-side, unrelated to the shell. Would otherwise surface as unexplained behaviour in the new GUI |
+| **Phase 5** (features) | **defer** | touches the engine, so it is independent of the rewrite — but see §6.5 |
+
+None of P5–P11 is GUI-coupled. All of it is engine or reference-comparison work,
+so none of it is wasted on a rewrite, and all of it is cheaper to land while the
+tree has one front end instead of two.
+
+### 6.2 What the rewrite deletes, and why that is the win
+
+Three things exist only because two languages are in the path:
+
+1. **A duplicated encoding rule.** `convert.rs:30` and `files.py:46`. One
+   implementation after the rewrite; `files.py`'s 75 lines go away.
+2. **The entire pyo3 binding layer.** Five `#[pyfunction]`s exist to marshal
+   across a boundary. In Rust they are direct calls, and `python.rs` (212 lines)
+   is deleted. `maturin`, the venv, and `pip install PySide6` leave the
+   dependency graph with it — which is what "stands on its own" was asking about.
+3. **The options-panel reconstruction.** `optionspanel.py` (491 lines) rebuilds
+   widgets from `option_specs()` output that crossed a boundary as a Python list
+   of tuples. A Rust GUI reads `cli::SPECS` and `options::NUMERIC_RANGES`
+   directly, so a widget cannot offer a value the engine rejects — a guarantee
+   the Python version has to be trusted to preserve.
+
+### 6.3 Order of work
+
+1. **Freeze the surface as a written spec, not as maintained code.** The five
+   `pyfunction`s plus `option_specs`' six fields (name, aliases, kind, default,
+   numeric range, help) are exactly what a Qt options panel needs. Write the
+   table down. Do not keep the pyo3 layer in sync during the port — it will be
+   deleted, so maintaining it is work with no consumer.
+2. **Port the tests before the GUI.** `test_gui.py` (887 lines) is the spec, and
+   the split matters:
+   - `ConverterTests` (6) — pure engine, already covered by cargo tests.
+     **Redundant; delete.**
+   - `FileTests` (10) — engine rules currently expressed in Python.
+     **Move to the engine's Rust tests**, where the rule lives. These are the
+     tests that should have been Rust all along.
+   - `BacklogTests` (3) and `GuiTests` (27) — 30 of the 46, and **the port's
+     acceptance criteria.** Debounce, generation-counter cancellation,
+     dirty-tracking, drag-and-drop, settings persistence, save semantics.
+3. **Port the shell**, in dependency order: `worker.py`'s concurrency contract →
+   `optionspanel.py` from `cli::SPECS` → `mainwindow.py` → `app.py`.
+4. **Keep the A6 concurrency contract verbatim in intent.** `worker.py:75` solved
+   a real problem: a keystroke burst queues faster than the pool drains, so a
+   backlog is also a memory backlog. Generation-counter plus queue-drop is the
+   design. Do not rediscover it — a 300 ms debounce alone does not bound memory
+   if the queue drains slower than the user types.
+5. **Run both GUIs side by side until the ported suite passes.** Then delete the
+   Python one. Keeping it runnable is what makes the suite comparison meaningful
+   rather than a rewrite-from-memory.
+
+### 6.4 Verification
+
+The existing gate mostly survives, because the engine is untouched:
+`make fmt-check`, `make clippy` (`-D warnings`), `cargo test`, `make corpus`
+(48/48, 33/33 goldens), `make fuzz`, and upstream's `t/*.t` as a canary all
+apply unchanged. The GUI suite is the part that is rewritten.
+
+The corpus is the reason this rewrite is verifiable at all: a Rust GUI
+conversion can be compared byte-for-byte against Perl through the same harness
+the engine already uses. A GUI rewrite with no byte-level oracle would be
+guesswork; this one is not.
+
+`.github/workflows/ci.yml`'s `gui` job needs replacing: no venv, no maturin, no
+`PySide6`, no `T2H_TFILES` indirection — the Rust GUI links the engine directly,
+so the reference-golden test becomes an ordinary cargo test. The `T2H_TFILES`
+mechanism and the whole pyo3 install path are deletable from CI at the same time.
+
+### 6.5 Where Phase 5 goes
+
+Phase 5 (HTML5 mode, TOC, heading numbering, streaming, footnotes) is
+**independent of the rewrite** — it is all engine-side. It should simply not be
+started until the rewrite is done, for one reason: each new engine option has to
+be added to `cli::SPECS`, and while the Python GUI exists that means updating two
+front ends. After the rewrite there is one, and the options panel picks it up for
+free.
+
+Two Phase 5 items have a real interaction with Phase 6 and should be sequenced
+deliberately:
+
+- **Explicit encoding parameter** is P7.3, and P7 is the rewrite's
+  prerequisite. Do it there, not here.
+- **Streaming mode** changes `process_chunk`'s role, and the GUI's
+  `process_chunk` call is how the live preview works. Do not change that
+  signature until the rewrite is done, or the port inherits a moving target.
+
+### 6.6 Open before Phase 6 starts
+
+The architecture is decided; the toolkit is not. Three questions remain, and none
+of them blocks P5–P11:
+
+1. **Qt6 or GTK4.** The plan above assumes **Qt6 Widgets**, being the closest
+   match to PySide6 semantics and so the minimum behavioural drift across the
+   30 GUI tests. GTK4 changes the widget mapping and nothing else.
+2. **Does the CLI stay?** Assumed yes, as a second binary linking the same crate.
+   Nearly free once the engine is a library.
+3. **Replace or coexist during the port?** Assumed coexist until the ported
+   suite passes, then replace. Coexisting is what makes §6.3 step 5 possible.
+
 ## Sequencing notes
 
 - P1 and P2 gate everything. Nothing else can be trusted until they land.
@@ -1417,8 +1633,13 @@ stylesheet that is not opt-in, and the htmltoc-style post-processing TOC.
 - **P12 before A2.** A2 has no test that can see it: the output is correct while
   the process leaks, so a byte-comparison passes. P12's counting allocator is that
   test, and A2's published RSS figures are unverified until it exists.
-- **P13 is a decision, not work.** It changes what Tier 3 means, so answer it
-  before starting anything in it, but it does not block Tier 1 or Tier 2.
+- **P13 is a decision, not work.** Answered 2026-10-01 — one self-contained
+  artifact. It changed what Tier 3 means and blocked neither Tier 1 nor Tier 2,
+  which is why it could be left open that long. The work it implies is
+  **Phase 6**, and its prerequisite is P7: the rewrite deletes `files.py`, which
+  is a second implementation of an engine rule, and P7 is the fix to that rule.
+  Fixing the rule before deleting the copy is cheaper than discovering the
+  disagreement again in Rust.
 
 ---
 
