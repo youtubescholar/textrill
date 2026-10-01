@@ -17,6 +17,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use txt2html::convert::Converter;
 use txt2html::links;
@@ -77,7 +78,41 @@ fn known_open(item: &str, what: String) {
     eprintln!("  KNOWN-OPEN [{item}]: {what}");
 }
 
+/// Serialises the tests in this file.
+///
+/// The two counters above are process-global, and every budget here is a
+/// statement about a *net* change across a window. That is only meaningful if
+/// nothing else is allocating while the window is open, and `cargo test` runs
+/// test functions in parallel threads by default. Without this, a sibling test
+/// converting a 1 MB paragraph inside another test's window moves its counter by
+/// tens of megabytes -- which is how `the_instrument_works` came to fail
+/// intermittently, reporting a 100 KB residual on a measurement whose true
+/// residual is zero.
+///
+/// The lock is taken for the whole test body, deliberately **not** inside
+/// `measure`. Tests also allocate outside their measured closures -- building the
+/// 1 MB fixtures, `delim_document`, `printable_delimiters`, and the harness's own
+/// bookkeeping -- and a lock scoped to `measure` would leave exactly those
+/// allocations able to land in a neighbour's window, which is the same bug in a
+/// narrower window.
+///
+/// This makes the budgets mean the same thing at any `--test-threads`, so
+/// `cargo test` and `cargo test --test-threads=1` agree and the Makefile no
+/// longer has to remember a flag for one of them to be trustworthy.
+static MEASURE_LOCK: Mutex<()> = Mutex::new(());
+
+/// Take `MEASURE_LOCK` for the lifetime of the returned guard. Poisoning is
+/// ignored on purpose: a budget that trips is a real result and must not cascade
+/// into every later test reporting a spurious allocator failure.
+fn exclusive() -> MutexGuard<'static, ()> {
+    MEASURE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Bytes allocated inside `f`, and the net change in live bytes across it.
+///
+/// Callers must already hold `MEASURE_LOCK`; see [`exclusive`]. The spawned
+/// measurement threads deliberately do *not* take it themselves -- their parent
+/// test holds it on their behalf, and taking it twice would deadlock.
 fn measure<F: FnOnce()>(f: F) -> (usize, isize) {
     let c0 = CUMULATIVE.load(Ordering::Relaxed);
     let l0 = LIVE.load(Ordering::Relaxed);
@@ -140,6 +175,7 @@ fn printable_delimiters() -> Vec<char> {
 /// sites, which is a larger change than the defect warrants.
 #[test]
 fn a2_literal_cache_retention_is_bounded() {
+    let _guard = exclusive();
     /// The patterns `do_delim` and the table sniffs actually use. Literals, so
     /// they are what the cache is for.
     const LITERALS: &[&str] = &[
@@ -272,6 +308,7 @@ fn retained_for(n: usize, delims: &[char]) -> (usize, isize) {
 
 #[test]
 fn a2_retained_bytes_do_not_scale_with_delimiter_count() {
+    let _guard = exclusive();
     let delims = printable_delimiters();
     assert!(
         delims.len() >= 24,
@@ -311,6 +348,7 @@ fn a2_retained_bytes_do_not_scale_with_delimiter_count() {
 
 #[test]
 fn a1_long_paragraph_allocation_is_linear() {
+    let _guard = exclusive();
     let mk = |n: usize| {
         let mut t = String::with_capacity(n * 5);
         for i in 0..n {
@@ -362,6 +400,7 @@ fn a1_long_paragraph_allocation_is_linear() {
 
 #[test]
 fn the_instrument_works() {
+    let _guard = exclusive();
     let (allocated, live_delta) = measure(|| {
         let v: Vec<u8> = Vec::with_capacity(1 << 20); // 1 MiB
         std::hint::black_box(&v);
