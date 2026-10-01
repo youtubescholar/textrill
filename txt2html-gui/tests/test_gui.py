@@ -304,7 +304,16 @@ class BacklogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # A QThreadPool needs an application object for cross-thread signals.
-        cls.app, _window, _ = build_application([])
+        #
+        # The window is kept on the class, not bound to a local as it was. A
+        # `_window` local drops the last Python reference the moment setUpClass
+        # returns, and the MainWindow is collected while `cls.app` still lives.
+        # The C++ object then goes with it, and anything Python still holding --
+        # here the converter's QThreadPool, which outlives the class -- reports
+        # "Internal C++ object (QPlainTextEdit) already deleted" at interpreter
+        # shutdown. It did not fail a test, which is exactly why it survived: a
+        # shutdown-ordering defect that only ever printed to stderr.
+        cls.app, cls.window, _ = build_application([])
 
     def _settle(self, conv, ran, timeout=120.0, quiet=0.5):
         """Wait for the pool to go idle, delivering results as the app really does.

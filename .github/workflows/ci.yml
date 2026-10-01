@@ -185,12 +185,14 @@ jobs:
       - name: Reference
         run: make ref
 
-      # One run, and its output is kept. The GUI suite prints a libshiboken
-      # error during shutdown; it does not fail the run, and quietly dropping
-      # that output is the P1 shape again, so the log is kept and the warning
-      # is reported as a known defect rather than left for someone to
-      # rediscover. The defect is BacklogTests dropping its window reference
-      # (see tests/test_gui.py).
+      # One run, and its output is kept. The GUI suite used to print a
+      # libshiboken error during interpreter shutdown -- BacklogTests bound its
+      # window to a local, so the MainWindow was collected while the QApplication
+      # lived on, and the converter's thread pool outlived both. It never failed a
+      # test, which is why it survived: a shutdown-ordering defect that only
+      # printed to stderr. Fixed by keeping the window on the class, so there is
+      # now nothing to tolerate and the log is uploaded on failure rather than
+      # annotated on success.
       - name: GUI suite
         env:
           # No display on a runner; Qt needs to be told rather than left to
@@ -199,20 +201,12 @@ jobs:
           # Pointed at the reference's own tfiles so the golden comparison runs.
           # Verified locally: with this set the reference-golden test executes
           # and passes, without it the test skips itself and the run is still
-          # green. A skip in CI looks exactly like a pass.
+          # green. A skip in CI is indistinguishable from a pass.
           T2H_TFILES: ${{ github.workspace }}/ref/txt2html-3.0/tfiles
-        run: |
-          set -o pipefail
-          make gui 2>&1 | tee "$RUNNER_TEMP/gui.log"
-          if grep -q "already deleted" "$RUNNER_TEMP/gui.log"; then
-            echo "::notice title=Known defect::The libshiboken teardown warning is" \
-              "present. BacklogTests drops its window reference, so the C++" \
-              "object outlives the Python one. Not a failure, and not ignored:" \
-              "it is asserted here so a change in its status is visible."
-          fi
+        run: make gui 2>&1 | tee "$RUNNER_TEMP/gui.log"
 
-      # Upload the log either way. If the GUI job ever goes red, the reason is
-      # in here rather than only in the scrollback of a log line.
+      # The log either way, so a red GUI job says why inside the artifact rather
+      # than only in a scrolled-past log line.
       - name: Keep the GUI log
         if: always()
         uses: actions/upload-artifact@v4
