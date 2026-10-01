@@ -3,11 +3,11 @@
 Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
-**Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P17, E1–E3, A1, A1b,
-A2–A7. Open: A8, A9, A10, P4–P11, P13, P18–P20.** Every High and Medium item from
-the attack pass is closed; what remains is three Low items (A8–A10), the Phase 2–4
-backlog (P4–P11), the P13 packaging decision, and a small Phase 0b group about the
-gate itself.
+**Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P19, P21, E1–E3, A1,
+A1b, A2–A7. Open: A8, A9, A10, P4–P11, P13, P20, P22.** Every High and Medium item
+from the attack pass is closed. The Phase 0b gate audit is finished: all four
+defects it found are fixed, and the two open items it left (P20, P22) are the
+alignment guard and a new panic divergence found while confirming P18.
 
 > **Read Phase 0b before trusting any result in this document.** Checks in
 > `make verify` were found on 2026-10-01 to be structurally incapable of reporting
@@ -58,7 +58,8 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 | `cargo fmt --check` ✓ | clean |
 | `cargo clippy --release --all-targets` ✓ | 0 errors, 51 lib warnings — deliberately warn-only, see §0.1 |
 | upstream Perl `t/*.t` ✓ | **102/102** assertions pass, 7 functional files (5 release-only files skipped) — the canary for P1 |
-| differential fuzz | **VOID — see P18.** The "16 000 cases, 8 seeds, 0 mismatches" figure was measured on a harness that could not report failure. Observed 2026-10-01: 1 200 cases, 8 seeds, 0 mismatches, ~32 MB peak. `make fuzz` is now ~99 min and has not been run to completion |
+| differential fuzz ✓ | **16 000 cases** (8 seeds × 2 000), **16 000 compared**, 0 mismatches, 0 skipped, 0 timeouts — 5m30s wall / 39m18s CPU, concurrent (P19). Replaces the void figure of P18 |
+| `make verify` end-to-end ✓ | **OK, 7m49s** — first complete green in the project, on a harness whose failure modes are demonstrated (P19, P21) |
 | speed, `big_para` 1.1 MB ✓ | Rust **0.37 s** vs Perl **0.18 s** (~2.1x slower) |
 | speed, `big_para_crlf` 0.8 MB ✓ | Rust **0.37 s** vs Perl **0.41 s** — the port is *faster* here |
 
@@ -107,7 +108,9 @@ apart from P13.
 | P12 harness fix | **done** | the allocation budgets raced on a process-global counter, so `cargo test` was intermittently red; serialised, commit `4f48dbd` |
 | P14–P15 | **done** | `make fuzz` and `run.sh` could not report failure at all; `run.sh` printed `FAIL=46` and exited 0. Both now gate |
 | P16–P17 | **done** | an uncaught `TimeoutExpired` killed a fuzz seed silently; `run.sh <stem>` died on an unbound `GOLDEN_N` after printing PASS |
-| P18–P20 | **open** | re-establish the fuzz figure; run the 8 seeds concurrently (99 min → ~13); guard `CLI[]`/`EXTRA[]` alignment |
+| P18–P19, P21 | **done** | fuzz figure re-established on the fixed harness (16 000 compared, 0 mismatches); 8 seeds now concurrent, 99 min → 5m30s; and the fuzzer's missing `compared` counter closed, which had let a run that checked nothing exit 0 |
+| P20 | **open** | guard `CLI[]`/`EXTRA[]` alignment |
+| P22 | **open** | an invalid user regexp panics the CLI (exit 101, no output) where the reference warns and continues — needs a behaviour decision before implementing |
 | P13 | **open** | packaging decision, blocks the scope of Tier 3 |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
@@ -150,17 +153,24 @@ left from it.** But see below: before any further feature work, **P19 then P18**
 because the fuzz number this project reports is currently void (P18) and the run
 that would establish it takes 99 minutes (P19).
 
+**P19 and P18 are now both done**, and between them they changed the shape of the
+backlog: the full fuzz went from 99 minutes to 5m30s, and `make verify` runs
+end to end in under 8. The gate is affordable, so it can be run after every change
+instead of once a month — which is the only reason the rest of this list gets
+shorter rather than longer.
+
 Recommended order from here:
 
-1. **P19** — run the eight fuzz seeds concurrently. ~13 minutes instead of 99, and
-   it is what makes P18 possible at all.
-2. **P18** — re-measure the fuzz figure on the P14-fixed harness and replace the
-   void number in §0 with something earned.
-3. **P20** — the `CLI[]`/`EXTRA[]` guard. Three lines.
-4. **P13** — the packaging decision. Blocks Tier 3 scoping only.
-5. **A8** — escape `--title` / `--style_url`. Sole owner of the 30 known-open
+1. **P22** — decide what an invalid user regexp should do, then fix it. It is the
+   only *newly found* correctness divergence, and it is user-reachable today.
+2. **P20** — the `CLI[]`/`EXTRA[]` guard. Three lines, and it closes the last
+   known way to add a corpus case that silently never runs.
+3. **P13** — the packaging decision. Blocks Tier 3 scoping only.
+4. **A8** — escape `--title` / `--style_url`. Sole owner of the 30 known-open
    `proptest` checks.
-6. **A9, A10**, then the Phase 2–4 items **P4–P11** in the order §0.1 gives them.
+5. **A9, A10**, then the Phase 2–4 items **P4–P11** in the order §0.1 gives them.
+   Note that P4 is what keeps the GUI's panic handler honest, and P22 is the same
+   panic seen from the CLI, where nothing catches it.
 
 Two lessons worth carrying to the next item, because both cost time here: a
 micro-benchmark of a helper API is not evidence about the tool's exposure to
@@ -657,43 +667,126 @@ Single-stem mode was therefore unusable for the 28 of 46 cases that have a golde
 and nothing caught it, because no gate invokes it. This is the P2 shape again — a
 code path that exists, is correct-looking, and is never executed.
 
-### P18. Re-establish the fuzz figure — **open**
+### P18. Re-establish the fuzz figure — **done**
 
-**The plan's "16 000 cases across 8 seeds, 0 mismatches" is void.** It was measured
-on the P14 harness, where an aborted run and a clean run were indistinguishable
-from the exit status. It may have been a clean run; it may have been a seed that
-died on case 300. There is no way to tell from the record.
+**The plan's old "16 000 cases across 8 seeds, 0 mismatches" was void.** It was
+measured on the P14 harness, where an aborted run and a clean run were
+indistinguishable from the exit status. It may have been a clean run; it may have
+been a seed that died on case 300. There was no way to tell from the record.
 
-It has to be re-measured on the fixed target before it is quoted again. Until
-then, the honest figure is the one actually observed: **1 200 cases across all 8
-seeds, 0 mismatches, ~32 MB peak** (2026-10-01), which was itself run before P14
-existed and so does not establish the full 16 000.
+Re-measured on the fixed target, 2026-10-01, immediately after P19:
 
-Do this *after* P19, or the run will take 99 minutes for no reason.
+| | |
+|---|---|
+| seeds × cases | 8 × 2 000 = **16 000** |
+| compared | **16 000** — every case genuinely compared, none skipped |
+| mismatches / known / skipped / timeouts | **0 / 0 / 0 / 0** |
+| wall / CPU | 5m30s / 39m18s |
+| end-to-end `make verify` | **OK**, 7m49s |
 
-### P19. Run the eight fuzz seeds concurrently — **open**
+This is the first figure in the project worth quoting, because the harness's
+failure modes are demonstrated rather than assumed: five separate ways to make it
+report a false green were injected and each one is caught (see P19, P21).
 
-The full fuzz is **~99 minutes and single-threaded on a 20-core machine** (load
-average ~1). Measured: 0.37 s/case, 2 000 cases/seed, 8 seeds. This is the reason
-`make verify` is impractical to run, and it is why P18 has been hard to
-establish — the gate nobody runs gets no audit.
+### P19. Run the eight fuzz seeds concurrently — **done**
 
-Each seed already `mkdtemp`s its own scratch directory and writes no shared state,
-so the seeds are independent and can run concurrently. Expected ~13 minutes, and
-comfortably inside a window on a machine that is not being rebooted underneath it.
+The full fuzz was **~99 minutes and single-threaded on a 20-core machine**. That
+is why `make verify` was impractical to run, and why P18 was hard to establish —
+the gate nobody runs gets no audit. Commit `bd488f7`.
 
-Two things to get right, both of which are new failure modes this introduces:
+**Measured: 5m30s wall, 39m18s CPU, peak overlap 8 of 8.** A 7.1x ratio of CPU to
+wall time is the parallelism being confirmed rather than assumed; the stub trace
+agrees. 8 seeds × 2s: 16.35s at `FUZZ_JOBS=1`, 2.25s at `FUZZ_JOBS=8`.
 
-- **The aggregate exit status must still be reported.** P14 is exactly the mistake
-  this invites; a `wait` that is not checked, or a `| tail` around the parallel
-  launcher, reintroduces the same false green one level up.
-- **`RUNDIR/fuzz-fail` is shared.** `--keep` writes
-  `fuzz-fail/{name}-{case}`, so two seeds failing on the same stem and case index
-  would interleave writes into one file. Either give each seed its own failure
-  directory or make the filename seed-qualified.
+Both hazards this introduced are closed:
 
-Memory is not a constraint: each seed peaks around 32 MB plus one Perl and one
-Rust child, so eight concurrent seeds is on the order of 1 GB against 4.3 GB free.
+- **Aggregate status is still reported, and the obvious way to do it was
+  rejected.** Collecting per-seed status through `wait $pid` means a seed that
+  dies before it can be waited on *vanishes* from the results, and the remaining
+  seven look like a clean sweep. Instead each seed writes a status file, statuses
+  are read back in seed order so the report is stable regardless of completion
+  order, and **a missing status file is a failure**. So is a log with no `fuzz:`
+  summary line — a run that printed nothing has proved nothing.
+- **`RUNDIR/fuzz-fail` can no longer collide.** `--keep` wrote
+  `fuzz-fail/{name}-{case}` with no seed in it, so two seeds reaching the same
+  source at the same case index wrote the same path. Demonstrated: seed 7
+  overwrote seed 99's saved input, leaving 3 files where there should have been 6.
+  Names are now `{name}-{seed}-{case}`, and `make fuzz` additionally gives each
+  seed its own `--fail-dir`.
+
+Verified by breaking it, per the Phase 0b rule. Each of these must fail, and does:
+1 bad seed of 8; 3 bad seeds of 8; exit 0 with no summary line; 1 silent seed of 8;
+a seed that `SIGKILL`s itself. All-clean still passes.
+
+### P21. The fuzzer counted mismatches but never counted comparisons — **done**
+
+Found while testing P19, and it is the P1 bug again — still live in the P14-fixed
+harness. `fuzz.py` counted `mismatches` but had no `compared` counter, so a run in
+which the reference refused or hung on **every** case printed `0 mismatches` and
+returned 0.
+
+Demonstrated against the previous commit: reference refuses all 5 cases, port is
+fine, **return code 0**. A green gate that compared nothing. The module's own
+comment at the top records that a wiped `/tmp` already caused exactly this once,
+and the fix that time was to keep the reference in the repo — which addressed that
+instance, not the shape.
+
+`compared` is now incremented at the point a case is genuinely read and compared,
+a run that compared nothing returns 1 with an explicit message, and the summary
+line discloses the count. This is also what stops "skip the cases the reference
+refuses" from becoming a way to pass: the P1 fix, applied to the fuzzer.
+
+Related, same commit: a **reference** timeout was being counted in the same
+`timeouts` total as a port timeout and failed the run via
+`return 1 if (mismatches or timeouts)`, despite the code comment saying a port
+timeout is the defect. The oracle hanging would have failed the gate and blamed
+the port — and would have wasted a 5-minute sweep doing it. Port and reference
+timeouts are now counted and printed separately, and only a port timeout fails.
+
+### P22. An invalid user regexp panics the port where the reference warns — **open**
+
+Not part of P19; found in the `make verify` output while confirming P18, and
+recorded rather than fixed because the right behaviour is a judgement call.
+
+`convert.rs:209` compiles user-supplied patterns with
+`Regex::new(..).unwrap_or_else(|e| panic!(..))` and there is no `catch_unwind`
+anywhere in the path. A pattern that does not compile therefore aborts the
+process rather than producing a diagnostic:
+
+| | `--custom_heading_regexp 'a('` | exit | output file |
+|---|---|---|---|
+| **port** | `panicked at convert.rs:209: bad regex "a("` | **101** | **not written** |
+| **reference** | `Unmatched ( in regex; marked by <-- HERE in m/a( <-- HERE /` | 0 | written |
+
+So the port is *less* forgiving than the thing it ports: the reference reports
+the bad pattern, carries on, and still writes a document. This is
+user-reachable through `--custom_heading_regexp` / `-H`, `--pre_regex` /
+`--post_regex`, and anything else that reaches `re()`.
+
+It surfaced as a `panicked at src/convert.rs:209` line in the middle of a
+**passing** GUI run, which looked alarming and is not a second defect:
+`test_gui.py` provokes exactly this on purpose, to exercise the GUI's panic
+handler, and asserts that the preview shows "stopped on invalid input" and that
+the window stays usable. That handler is the A4 work and it works — pyo3 surfaces
+the Rust panic as `txt2html.PanicException`, re-exported through `python.rs`
+precisely so a Python caller can catch it.
+
+So the divergence is narrower than it first appears, and the narrowing is the
+point: the panic is *handled* at the Python boundary and *unhandled* at the CLI
+boundary. A GUI user sees an error message. A shell user gets exit 101 and no
+document. An embedder who does not know to catch `PanicException` gets a
+`BaseException`.
+
+The fuzzer cannot find this. It samples option *values* from a generator that
+produces valid ones, so a malformed pattern never comes up — which is a gap in the
+fuzzer's strategy, not a coincidence.
+
+The open question is what the port should do. The reference's behaviour is to
+warn and continue, which is arguably wrong on its own part but is the compatibility
+target; the alternatives are to warn and skip the offending pattern, or to fail
+cleanly with a diagnostic and a non-zero exit. The first matches the reference and
+keeps the Tier 1 corpus byte-identical; the second is better engineering and
+diverges. **Not yet decided — this needs a call before it is implemented.**
 
 > **Note on the 2026-10-01 machine reboot, so nobody re-investigates it.** The
 > host rebooted partway through a `make fuzz` run and the run was abandoned. It

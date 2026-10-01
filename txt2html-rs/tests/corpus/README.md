@@ -126,8 +126,23 @@ Exit status and hangs, both found 2026-10-01 (`P14`, `P16`):
   its *last* command — so `make fuzz` was structurally incapable of failing and
   reported a crashed or mismatching run to `make verify` as a pass. This is why
   the "16 000 cases, 0 mismatches" figure in the remediation plan is marked void.
-- The full 8-seed sweep is ~99 minutes single-threaded. Parallelising it (`P19`)
-  is open work; until then, treat a complete `make fuzz` as expensive and rare.
+- The full 8-seed sweep runs **concurrently** — 5m30s wall for 39m18s of CPU, so
+  it is now short enough to sit in `make verify`. `FUZZ_JOBS` sets the width
+  (default 8) and the run echoes it.
+- Each seed reports through its own status file, read back in seed order so the
+  output is stable however the seeds interleave. A **missing status file is a
+  failure**, as is a log with no `fuzz:` summary line — collecting status via
+  `wait $pid` would let a seed that died simply vanish from the results and leave
+  the other seven looking clean.
+- `fuzz.py` fails the run if it compared **zero** cases. A reference that refuses
+  or hangs on everything used to produce `0 mismatches` and exit 0 — a green gate
+  that checked nothing.
+- The summary line reports `compared` separately from `mismatches`, and splits
+  `timed out (port N, reference M)`. Only a *port* timeout fails the run; the
+  reference hanging is the oracle's problem, not the port's.
+- `--keep` saves to `--fail-dir` (default `RUNDIR/fuzz-fail`), and saved names
+  include the seed. Give each concurrent run its own directory; `make fuzz`
+  already does.
 
 The oracle is `scripts/txt2html`, the reference's own command line tool, driven
 with the *same* argv as the port. An earlier version drove the module through
