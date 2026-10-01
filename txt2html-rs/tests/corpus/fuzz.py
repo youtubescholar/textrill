@@ -26,6 +26,12 @@ Usage:
     tests/corpus/fuzz.py --cases 2000       # local
     tests/corpus/fuzz.py --seed 12345       # reproduce a failure
     tests/corpus/fuzz.py --keep             # save failing inputs under RUNDIR
+    tests/corpus/fuzz.py --fail-dir DIR     # save them under DIR instead
+
+``--fail-dir`` exists for concurrent runs. Saved cases are named
+``<source>-<seed>-<n>`` so two runs cannot overwrite each other's evidence even
+if they share a directory, but a caller running several seeds at once should
+still give each one its own directory. ``make fuzz`` does exactly that.
 
 Environment overrides match ``run.sh``: REFDIR, MINE, RUNDIR, PERL5LIB.
 """
@@ -520,12 +526,23 @@ def main():
     ap.add_argument("--seed", type=int, default=20260929)
     ap.add_argument("--keep", action="store_true", help="save failing inputs")
     ap.add_argument(
+        "--fail-dir",
+        metavar="DIR",
+        help=(
+            "where --keep saves failing inputs "
+            f"(default: {os.path.join(RUNDIR, 'fuzz-fail')}). Give each "
+            "concurrent run its own directory."
+        ),
+    )
+    ap.add_argument(
         "--dump",
         type=int,
         metavar="N",
         help="write case N's input and flags to stdout and exit (debugging)",
     )
     args = ap.parse_args()
+
+    faildir = args.fail_dir or os.path.join(RUNDIR, "fuzz-fail")
 
     if not os.path.isdir(REFDIR):
         sys.exit(f"fuzz: REFDIR {REFDIR} does not exist")
@@ -557,7 +574,9 @@ def main():
     mismatches = 0
     skipped = 0
     known = 0
-    timeouts = 0
+    port_timeouts = 0
+    ref_timeouts = 0
+    compared = 0
 
     for n in range(args.cases):
         name, text, flags = build_case(rng, seeds)
@@ -584,19 +603,25 @@ def main():
         try:
             m = run_rust(inpath, myout, flags)
         except subprocess.TimeoutExpired:
-            timeouts += 1
+            port_timeouts += 1
             print(f"case {n} (seed {args.seed}, from {name}): PORT TIMED OUT")
             print("  flags:", " ".join(flags))
             if args.keep:
-                _save(inpath, refout, myout, name, n)
+                _save(faildir, args.seed, inpath, refout, myout, name, n)
             continue
         try:
             r = run_perl(inpath, refout, flags)
         except subprocess.TimeoutExpired:
-            timeouts += 1
+            # The reference hanging is not a port defect, so it does not fail
+            # the run -- but it is counted and printed separately from a port
+            # hang so the two can never be confused. A reference that hangs on
+            # every case is an environment failure, and `compared == 0` below
+            # is what catches that.
+            ref_timeouts += 1
             skipped += 1
             print(
-                f"case {n} (seed {args.seed}, from {name}): reference timed out, skipped"
+                f"case {n} (seed {args.seed}, from {name}): "
+                "reference timed out, skipped"
             )
             continue
 
@@ -608,7 +633,7 @@ def main():
             print("  flags:", " ".join(flags))
             print("  stderr:", m.stderr.decode("utf-8", "replace")[:400].strip())
             if args.keep:
-                _save(inpath, refout, myout, name, n)
+                _save(faildir, args.seed, inpath, refout, myout, name, n)
             continue
         if r.returncode != 0:
             # The reference refusing an option set is not a port defect.
@@ -621,8 +646,11 @@ def main():
                 f"(ref={os.path.exists(refout)} mine={os.path.exists(myout)})"
             )
             if args.keep:
-                _save(inpath, refout, myout, name, n)
+                _save(faildir, args.seed, inpath, refout, myout, name, n)
             continue
+
+        # From here on this case is genuinely compared, whatever the outcome.
+        compared += 1
 
         with open(refout, "rb") as fh:
             a = fh.read()
@@ -631,7 +659,7 @@ def main():
         if a != b and known_divergence(flags, a, b):
             known += 1
             if args.keep:
-                _save(inpath, refout, myout, name, n)
+                _save(faildir, args.seed, inpath, refout, myout, name, n)
             continue
         if a != b:
             mismatches += 1
@@ -647,23 +675,37 @@ def main():
             if not shown:
                 print(f"  length differs: ref={len(a)} mine={len(b)}")
             if args.keep:
-                _save(inpath, refout, myout, name, n)
+                _save(faildir, args.seed, inpath, refout, myout, name, n)
 
+    timeouts = port_timeouts + ref_timeouts
     print(
         f"fuzz: {args.cases} cases, seed {args.seed}, "
+        f"{compared} compared, "
         f"{mismatches} mismatches, {known} known, "
-        f"{skipped} skipped (reference refused), {timeouts} timed out"
+        f"{skipped} skipped (reference refused), "
+        f"{timeouts} timed out (port {port_timeouts}, reference {ref_timeouts})"
     )
-    # A port timeout is a defect, so it fails the run on its own. The count is
-    # in the summary line as well so an aborted-looking run cannot be mistaken
-    # for a clean one by reading the output either.
-    return 1 if (mismatches or timeouts) else 0
+    # A port timeout is a defect, so it fails the run on its own. A reference
+    # timeout is not the port's fault and does not, but a run that compared
+    # nothing at all is the P1 bug again -- it happens when the reference
+    # refuses or hangs on every case, which is exactly what a wiped /tmp once
+    # caused. Zero comparisons is a broken environment, never a pass.
+    if compared == 0:
+        print(
+            "fuzz: FAIL -- 0 cases compared. The reference refused or hung on "
+            "every case, so this run checked nothing."
+        )
+        return 1
+    return 1 if (mismatches or port_timeouts) else 0
 
 
-def _save(inpath, refout, myout, name, n):
-    d = os.path.join(RUNDIR, "fuzz-fail")
+def _save(faildir, seed, inpath, refout, myout, name, n):
+    d = faildir
     os.makedirs(d, exist_ok=True)
-    base = os.path.join(d, f"{name}-{n}")
+    # The seed is part of the name: two runs of different seeds reach the same
+    # case index from the same source file, so `<name>-<n>` alone would have
+    # them overwrite each other's evidence.
+    base = os.path.join(d, f"{name}-{seed}-{n}")
     for src, ext in ((inpath, ".txt"), (refout, ".ref.html"), (myout, ".mine.html")):
         if os.path.exists(src):
             with open(src, "rb") as fh:

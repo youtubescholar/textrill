@@ -35,6 +35,15 @@ export MINE     := $(RELEASE_BIN)
 # either fixed or re-added with a precise signature.
 FUZZ_SEEDS ?= 99 424242 20260929 7 31337 555 90210 1
 FUZZ_CASES ?= 2000
+# P19: the seeds run concurrently. 8 x 2000 cases took ~99 min one at a time on
+# a 20-core machine, and a gate nobody runs is not a gate. Eight at a time is
+# ~13 min, which is short enough that `make verify` can actually include it.
+# Lower FUZZ_JOBS on a smaller box; the number is echoed at the start of a run.
+FUZZ_JOBS ?= 8
+# Each seed gets its own failure directory. Two seeds reach the same case index
+# from the same source file, so a shared directory would have them overwrite each
+# other's evidence -- see fuzz.py --fail-dir.
+FUZZ_FAILDIR ?= $(RS)/tests/corpus/fuzz-fail
 
 .PHONY: all verify build fmt fmt-check clippy test proptest alloctest corpus fuzz gui scale clean
 
@@ -101,27 +110,50 @@ corpus: build
 #
 # So: capture each seed's output and status, print the summary line as before,
 # print the whole log if the seed failed, and fail the target if any seed did.
-# --cases is per seed, so the total is 8 x FUZZ_CASES. That is ~99 minutes
-# single-threaded, on a 20-core machine, which is why this gate has so rarely
-# been run to completion -- and a gate nobody runs is not a gate. REMEDIATION-PLAN
-# P19 proposes running the seeds concurrently (~13 min) and P18 re-establishes
-# the fuzz figure once it can report failure. Until then `verify: OK` should be
-# read as "everything except the full fuzz sweep".
+# The seeds run concurrently (P19). Each writes its status to a file, and the
+# statuses are read back in seed order afterwards, so the report is stable
+# regardless of which seed finishes first. Deliberately NOT collecting status
+# through `wait $pid`: a seed that dies before it can write its status file
+# would then be silently absent rather than reported as a failure, which is
+# the exact bug class this target exists to rule out (P14). A missing status
+# file is a failure, and so is a seed whose log has no summary line -- a run
+# that printed nothing has proved nothing.
 fuzz: build
 	@rc=0; \
+	logdir=$$(mktemp -d) || exit 1; \
+	trap 'rm -rf "$$logdir"' EXIT; \
+	echo "fuzz: $(words $(FUZZ_SEEDS)) seeds x $(FUZZ_CASES) cases, $(FUZZ_JOBS) at a time"; \
+	launched=0; \
 	for seed in $(FUZZ_SEEDS); do \
-		log=$$(mktemp); \
-		( cd $(RS)/tests/corpus && $(PYTHON) fuzz.py --seed "$$seed" --cases $(FUZZ_CASES) ) \
-			>$$log 2>&1; \
-		st=$$?; \
-		printf 'seed %-10s ' "$$seed"; \
-		tail -1 $$log; \
-		if [ $$st -ne 0 ]; then \
+		( \
+			cd $(RS)/tests/corpus && $(PYTHON) fuzz.py \
+				--seed "$$seed" --cases $(FUZZ_CASES) \
+				--fail-dir '$(FUZZ_FAILDIR)/seed-'$$seed; \
+			echo $$? >"$$logdir/$$seed.status"; \
+		) >"$$logdir/$$seed.log" 2>&1 & \
+		launched=$$((launched+1)); \
+		if [ "$$launched" -ge $(FUZZ_JOBS) ]; then wait; launched=0; fi; \
+	done; \
+	wait; \
+	for seed in $(FUZZ_SEEDS); do \
+		if [ ! -f "$$logdir/$$seed.status" ]; then \
+			printf 'seed %-10s NO STATUS -- died before it could report\n' "$$seed"; \
+			rc=1; \
+			continue; \
+		fi; \
+		st=$$(cat "$$logdir/$$seed.status"); \
+		last=$$(tail -1 "$$logdir/$$seed.log" 2>/dev/null); \
+		printf 'seed %-10s %s\n' "$$seed" "$$last"; \
+		case "$$last" in \
+			"fuzz: "*) ;; \
+			*) echo "  --- no 'fuzz:' summary line; treating as failure ---"; rc=1 ;; \
+		esac; \
+		if [ "$$st" -ne 0 ]; then \
 			echo "  --- seed $$seed FAILED (exit $$st), full output: ---"; \
-			sed 's/^/  /' $$log; \
+			sed 's/^/  /' "$$logdir/$$seed.log"; \
+			echo "  --- failing inputs, if kept: $(FUZZ_FAILDIR)/seed-$$seed ---"; \
 			rc=1; \
 		fi; \
-		rm -f $$log; \
 	done; \
 	if [ $$rc -ne 0 ]; then echo "fuzz: FAILED"; exit 1; fi; \
 	echo "fuzz: OK"
