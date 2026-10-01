@@ -625,9 +625,9 @@ history to trust:
 | P15 | `run.sh` cannot fail — no exit statement at all | **done** |
 | P16 | One hanging converter silently ended a whole fuzz run | **done** |
 | P17 | `run.sh <stem>` dies on an unbound `GOLDEN_N` after printing PASS | **done** |
-| P18 | Re-establish the fuzz figure on an instrument that can report failure | **open** |
-| P19 | Run the eight fuzz seeds concurrently | **open** |
-| P20 | Guard `CLI[]`/`EXTRA[]` alignment so a typo cannot silently disable a case | **open** |
+| P18 | Re-establish the fuzz figure on an instrument that can report failure | **done** |
+| P19 | Run the eight fuzz seeds concurrently | **done** |
+| P20 | Guard `CLI[]`/`EXTRA[]` alignment so a typo cannot silently disable a case | **done** |
 
 ### P15. `run.sh` cannot fail — **done**
 
@@ -943,6 +943,14 @@ Demonstrated, by injecting each fault into `cases.sh`: a `CLI[]`-only case, an
 `EXTRA[]`-only case, a `NOGOLDEN` entry naming a nonexistent case, and a
 `NOGOLDEN` entry on `ci_dict`, which has no golden. All four fail the gate, the
 first two naming the case.
+
+**Cleanup, same commit.** The fuzzer's `KNOWN_DIVERGENCES` suppression table and
+its ~90 lines of matching machinery are gone, along with `PERL_DRIVER` — 25 lines
+of embedded Perl unreferenced since the initial import. The "reference refused
+this option set" skip went with them, and that one was a live false green rather
+than dead weight: measured with an injected reference failing on one input size in
+four, the old code printed `12 compared, 0 mismatches, 8 skipped` and exited 0,
+having discarded 40% of the sweep. `fuzz.py` is 719 lines and now 659.
 
 **One finding from writing the guard, not fixed here.** The reference tree has 32
 goldens and the corpus covers 31 of them: `good_empty.html` has no case, though
