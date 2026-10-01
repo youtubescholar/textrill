@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=61"]
+# >=77 for PEP 639: `license` as an SPDX expression plus `license-files`, which
+# is what puts the actual licence text in the wheel. Declaring a licence without
+# shipping it is the defect this fixes, so the floor is not optional.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +11,13 @@ version = "3.0.0"
 description = "Qt front end for txt2html, a Rust port of HTML::TextToHTML 3.0"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "GPL-3.0-or-later" }
+# SPDX expression, not free text: a machine-readable identifier is what a
+# distributor's licence scanner can actually act on. The companion
+# license-files line is what puts the licence in the built wheel; see the note
+# on the build-system floor above. The reasoning for choosing GPLv3 over the
+# LGPL option Qt also offers is in LICENSE.
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [{ name = "the txt2html-rs authors" }]
 dependencies = ["txt2html>=3.0", "PySide6>=6.6"]
 

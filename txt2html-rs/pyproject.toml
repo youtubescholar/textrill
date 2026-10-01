@@ -7,7 +7,8 @@ name = "txt2html"
 version = "3.0.0"
 description = "Rust port of HTML::TextToHTML - convert plain text to HTML"
 requires-python = ">=3.8"
-license = { text = "GPL-3.0-or-later" }
+# SPDX expression rather than free text, matching Cargo.toml and the GUI.
+license = "GPL-3.0-or-later"
 authors = [{ name = "the txt2html-rs authors" }]
 
 [project.optional-dependencies]
