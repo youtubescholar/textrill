@@ -3,12 +3,19 @@
 Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
-**Progress is recorded in §0.1 below. Done: P1–P3, P12, E1–E3, A1, A1b, A2–A7.
-Open: A8, A9, A10, P4–P11, P13.** Phase 0 work turned up three defects in the
-transformation logic itself (E1–E3), which corrects the original survey's
-central claim — see §0.1. Every High and Medium item from the attack pass is
-closed; what remains is three Low items (A8–A10), the Phase 2–4 backlog
-(P4–P11), and the P13 packaging decision.
+**Progress is recorded in §0.1 below. Done: P1–P3, P12, P14–P17, E1–E3, A1, A1b,
+A2–A7. Open: A8, A9, A10, P4–P11, P13, P18–P20.** Every High and Medium item from
+the attack pass is closed; what remains is three Low items (A8–A10), the Phase 2–4
+backlog (P4–P11), the P13 packaging decision, and a small Phase 0b group about the
+gate itself.
+
+> **Read Phase 0b before trusting any result in this document.** Checks in
+> `make verify` were found on 2026-10-01 to be structurally incapable of reporting
+> failure — most seriously `run.sh`, the primary differential gate, which printed
+> `PASS=0 FAIL=46` and exited 0. Two of these have been present since the initial
+> import, so **every green figure recorded before 2026-10-01 is weaker evidence
+> than it appears**. The standing rule is now in Phase 0b: *a gate that has never
+> been observed failing is not a gate.*
 
 **The Perl module is the oracle for most of the work below, but on non-ASCII
 input it is the defect, not the specification. Read the compatibility policy
@@ -45,13 +52,13 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 |---|---|
 | `cargo test --release` ✓ | **45/45** pass (14 lib, 5 linktest, 7 optionstest, 9 paratest, 4 alloctest, 6 cliexit) — was 33/33 |
 | GUI `unittest` (offscreen) ✓ | **45/45** pass, 1 skipped — was 30/30 |
-| corpus, clean `RUNDIR` ✓ | **46/46** byte-identical, 29/29 goldens (was 38/40, 2 false passes — see P1) |
-| `proptest.py` ✓ | OK — 30 known-open checks, all owned by A8 and printed, not silenced |
+| corpus, clean `RUNDIR` ✓ | **46/46** byte-identical, 29/29 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15 |
+| `proptest.py` ✓ | OK — 30 known-open checks, all owned by A8 and printed, not silenced. Verified to return 1 on failure |
 | `alloctest` ✓ | 4/4, at any `--test-threads` (see P12) |
 | `cargo fmt --check` ✓ | clean |
 | `cargo clippy --release --all-targets` ✓ | 0 errors, 51 lib warnings — deliberately warn-only, see §0.1 |
 | upstream Perl `t/*.t` ✓ | **102/102** assertions pass, 7 functional files (5 release-only files skipped) — the canary for P1 |
-| differential fuzz | 16 000 cases across 8 seeds, 0 mismatches (2026-09-30). Re-verified 2026-10-01 at **1 200** cases across all 8 seeds, 0 mismatches, ~32 MB peak — the full 16 000 was not re-run |
+| differential fuzz | **VOID — see P18.** The "16 000 cases, 8 seeds, 0 mismatches" figure was measured on a harness that could not report failure. Observed 2026-10-01: 1 200 cases, 8 seeds, 0 mismatches, ~32 MB peak. `make fuzz` is now ~99 min and has not been run to completion |
 | speed, `big_para` 1.1 MB ✓ | Rust **0.37 s** vs Perl **0.18 s** (~2.1x slower) |
 | speed, `big_para_crlf` 0.8 MB ✓ | Rust **0.37 s** vs Perl **0.41 s** — the port is *faster* here |
 
@@ -98,6 +105,9 @@ apart from P13.
 | non-ASCII delimiter predicate | **done** | `(?<!é)` was vacuous; predicates extracted so the tests exercise production code |
 | P12 | **done** | `proptest.py` (5 properties, no Perl oracle) + `alloctest.rs` (counting allocator); wired into `make verify` |
 | P12 harness fix | **done** | the allocation budgets raced on a process-global counter, so `cargo test` was intermittently red; serialised, commit `4f48dbd` |
+| P14–P15 | **done** | `make fuzz` and `run.sh` could not report failure at all; `run.sh` printed `FAIL=46` and exited 0. Both now gate |
+| P16–P17 | **done** | an uncaught `TimeoutExpired` killed a fuzz seed silently; `run.sh <stem>` died on an unbound `GOLDEN_N` after printing PASS |
+| P18–P20 | **open** | re-establish the fuzz figure; run the 8 seeds concurrently (99 min → ~13); guard `CLI[]`/`EXTRA[]` alignment |
 | P13 | **open** | packaging decision, blocks the scope of Tier 3 |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
@@ -135,9 +145,22 @@ the next person does not have to re-derive the ordering:
 9. **P13 — the packaging decision.** It scopes Tier 3 only and blocks nothing
    above, but answer it before starting any Tier 3 work.
 
-That was the agreed sequence, and items 1–8 are all closed. **P13 is the only
-item left from it.** After P13, the remaining backlog is A8, A9, A10, then the
-Phase 2–4 items P4–P11, in the order §0.1 originally gave them.
+That was the agreed sequence, and items 1–8 are all closed. **P13 is the only item
+left from it.** But see below: before any further feature work, **P19 then P18**,
+because the fuzz number this project reports is currently void (P18) and the run
+that would establish it takes 99 minutes (P19).
+
+Recommended order from here:
+
+1. **P19** — run the eight fuzz seeds concurrently. ~13 minutes instead of 99, and
+   it is what makes P18 possible at all.
+2. **P18** — re-measure the fuzz figure on the P14-fixed harness and replace the
+   void number in §0 with something earned.
+3. **P20** — the `CLI[]`/`EXTRA[]` guard. Three lines.
+4. **P13** — the packaging decision. Blocks Tier 3 scoping only.
+5. **A8** — escape `--title` / `--style_url`. Sole owner of the 30 known-open
+   `proptest` checks.
+6. **A9, A10**, then the Phase 2–4 items **P4–P11** in the order §0.1 gives them.
 
 Two lessons worth carrying to the next item, because both cost time here: a
 micro-benchmark of a helper API is not evidence about the tool's exposure to
@@ -157,6 +180,14 @@ healthy, which is the trap: the suite had a flag that made one entry point
 trustworthy and left the other lying. The fix is in commit `4f48dbd` and the
 lesson generalises — **a gate that passes for one reason you did not write down
 is not a gate.** See P12.
+
+**And a fourth, which is the most expensive of the four.** P14 and P15 found that
+`make fuzz` and `run.sh` — two of the three most load-bearing checks in the
+repository — had never been capable of failing. Both had been green, repeatedly,
+for the life of the project. Reading their output was never going to reveal it,
+because their output was correct; only their exit status was wrong. Phase 0b sets
+the standing rule: **deliberately break each gate and watch it fail, once.** The
+whole audit took about twenty minutes.
 
 Deliberately not doing yet: GitHub Actions (no remote, so it could not be run),
 and clippy `-D warnings` (the crate is not clean; the bulk fix deserves its own
@@ -496,6 +527,200 @@ in this review — but it only exists in `/tmp`. Move it into
 documented seed corpus (mutations of `tfiles/*.txt` rather than synthetic text,
 so failures are reproducible from the repo). Run it in CI with a modest count and
 allow a larger count locally.
+
+## Phase 0b — the harness still could not fail (P14–P20)
+
+_Added 2026-10-01. Phase 0 was closed on 2026-09-30 on the belief that the harness
+was trustworthy. It was not. Six gates in `make verify` were later found to be
+**structurally incapable of reporting failure**, which means every green run
+recorded before this section is weaker evidence than it looked._
+
+### The rule this section exists to establish
+
+> **A gate that has never been observed failing is not a gate. It is a script
+> that prints reassuring text.**
+
+So the bar for every check in this repository is no longer "does it pass" but
+**"show me it failing, on purpose."** A check is not finished until someone has
+fed it a deliberately broken input and watched it exit non-zero. That is a cheap
+test — it took about twenty minutes to run against the whole gate — and it is the
+only thing that distinguishes a check from a decoration.
+
+The general form of the bug is always the same: a status code is discarded on the
+way out. A pipe reports its *last* command. A script ends on a successful `echo`.
+A counter is printed for humans and never compared to anything. None of these look
+wrong when reading the output, which is precisely why reading the output is not
+enough.
+
+### What was found
+
+All four defects were found by deliberately breaking each gate in turn and checking
+the exit status — not by reading the code looking for bugs, and not by reading any
+output.
+
+Provenance matters here, because it says how much of this project's recorded
+history to trust:
+
+- **P15 and P17 date from the initial import `3bfc2c1`.** They were present for
+  every green figure this repository has ever recorded.
+- **P14 arrived with `1035268`** — the commit titled "one verify command". The gate
+  shipped structurally incapable of failing in the same commit that made it *the*
+  gate.
+
+| # | Item | State |
+|---|---|---|
+| P14 | `make fuzz` cannot fail — the recipe pipes into `tail -1` | **done** |
+| P15 | `run.sh` cannot fail — no exit statement at all | **done** |
+| P16 | One hanging converter silently ended a whole fuzz run | **done** |
+| P17 | `run.sh <stem>` dies on an unbound `GOLDEN_N` after printing PASS | **done** |
+| P18 | Re-establish the fuzz figure on an instrument that can report failure | **open** |
+| P19 | Run the eight fuzz seeds concurrently | **open** |
+| P20 | Guard `CLI[]`/`EXTRA[]` alignment so a typo cannot silently disable a case | **open** |
+
+### P15. `run.sh` cannot fail — **done**
+
+_The worst of the set, because this is the primary gate._
+
+`run.sh` counted `pass`/`fail` and printed `PASS=46 FAIL=0`, and compared 29
+goldens — but it never exited on either. Its only two `exit` statements, present
+since the initial import, were the `exit 2` guards on the reference smoke check,
+which is exactly why the script *looked* guarded: a reader sees two deliberate
+exits and reasonably concludes the failure paths are handled. The case and golden
+failure paths simply fell off the end, so the script's status was whatever the
+last `echo` returned — 0. `make corpus` runs it, and `make verify` depends on
+`make corpus`.
+
+Demonstrated with a stub converter that exits 0 and writes wrong output:
+
+```
+PASS=0 FAIL=46
+GOLDEN: 0/29 compared, 29 differing
+$ echo $?          ->  0
+```
+
+**Every case failed and `make corpus` reported success.**
+
+This is the Tier 1 invariant — "46/46 and 29/29", restated in this plan after
+almost every item since Phase 0 — and it was not being enforced by anything. It
+was being *reported*. Those are different things, and the difference is the whole
+of P15.
+
+It is also P1 one level up. P1 made a single crashed case count as a pass; P15
+made every crashed case count as a pass **without anyone counting**. The
+single-stem entry point (`run.sh <stem>`) had the same defect and is fixed the
+same way.
+
+Fix: compute a status and `exit` with it, on both paths. Verified in both
+directions — real corpus exits 0 at 46/46 with 29/29 goldens; the stub exits
+non-zero at `FAIL=46`; `run.sh list` alone exits 0 on the real port and non-zero
+on the stub.
+
+### P14. `make fuzz` cannot fail — **done**
+
+Same shape, one level up again. The recipe ended each seed in `| tail -1` to print
+the summary line, and a pipeline reports the status of its *last* command:
+
+```
+$ (python3 failing.py; exit 3) | tail -1 ; echo $?   ->  0
+```
+
+`fuzz` was the only recipe in `verify` that piped; the others were audited and do
+not discard a status. The recipe now captures each seed's output and status
+separately, prints the summary line as before, prints the whole log for any seed
+that failed, and fails the target if any seed did.
+
+### P16. One hanging converter silently ended a whole fuzz run — **done**
+
+Both converters are invoked with `timeout=120`, but nothing caught
+`subprocess.TimeoutExpired`, so it propagated out of the loop and terminated that
+seed after however many cases it had reached. This is not hypothetical: **P5, the
+inherited hang, is still open**, so a timeout is a plausible outcome — and
+combined with P14 it was reported as success.
+
+Now caught per case, so one bad input costs one case instead of the remaining
+~1 900. Deliberately asymmetric: the **port** hanging is a defect in the port and
+fails the run on its own, while the **reference** hanging says nothing about the
+port and is skipped like any other reference refusal — but counted, printed, and
+included in the exit status rather than folded into a clean-looking
+"0 mismatches". Timeouts appear in the summary line too, so an aborted run cannot
+be mistaken for a clean one by reading the output either.
+
+### P17. `run.sh <stem>` dies on an unbound `GOLDEN_N` — **done**
+
+`GOLDEN_N` was only initialised in the full-run branch, and `golden_check`
+increments it, so a single-stem invocation over any stem that has a golden died on
+`set -u` with `GOLDEN_N: unbound variable` — **after** printing `PASS` and
+`GOLDEN pass`. A misleading way to fail: the output looks like a pass right up to
+the error.
+
+Single-stem mode was therefore unusable for the 28 of 46 cases that have a golden,
+and nothing caught it, because no gate invokes it. This is the P2 shape again — a
+code path that exists, is correct-looking, and is never executed.
+
+### P18. Re-establish the fuzz figure — **open**
+
+**The plan's "16 000 cases across 8 seeds, 0 mismatches" is void.** It was measured
+on the P14 harness, where an aborted run and a clean run were indistinguishable
+from the exit status. It may have been a clean run; it may have been a seed that
+died on case 300. There is no way to tell from the record.
+
+It has to be re-measured on the fixed target before it is quoted again. Until
+then, the honest figure is the one actually observed: **1 200 cases across all 8
+seeds, 0 mismatches, ~32 MB peak** (2026-10-01), which was itself run before P14
+existed and so does not establish the full 16 000.
+
+Do this *after* P19, or the run will take 99 minutes for no reason.
+
+### P19. Run the eight fuzz seeds concurrently — **open**
+
+The full fuzz is **~99 minutes and single-threaded on a 20-core machine** (load
+average ~1). Measured: 0.37 s/case, 2 000 cases/seed, 8 seeds. This is the reason
+`make verify` is impractical to run, and it is why P18 has been hard to
+establish — the gate nobody runs gets no audit.
+
+Each seed already `mkdtemp`s its own scratch directory and writes no shared state,
+so the seeds are independent and can run concurrently. Expected ~13 minutes, and
+comfortably inside a window on a machine that is not being rebooted underneath it.
+
+Two things to get right, both of which are new failure modes this introduces:
+
+- **The aggregate exit status must still be reported.** P14 is exactly the mistake
+  this invites; a `wait` that is not checked, or a `| tail` around the parallel
+  launcher, reintroduces the same false green one level up.
+- **`RUNDIR/fuzz-fail` is shared.** `--keep` writes
+  `fuzz-fail/{name}-{case}`, so two seeds failing on the same stem and case index
+  would interleave writes into one file. Either give each seed its own failure
+  directory or make the filename seed-qualified.
+
+Memory is not a constraint: each seed peaks around 32 MB plus one Perl and one
+Rust child, so eight concurrent seeds is on the order of 1 GB against 4.3 GB free.
+
+> **Note on the 2026-10-01 machine reboot, so nobody re-investigates it.** The
+> host rebooted partway through a `make fuzz` run and the run was abandoned. It
+> was *not* memory exhaustion in the fuzzer: all eight seeds at 150 cases peaked
+> at a flat ~32 MB, and a timeout is CPU-bound rather than memory-bound. The
+> cause was external — a person rebooting the machine, or power / screen / lock
+> handling. No product defect is implied and none was found. Recorded because the
+> obvious hypothesis was wrong, and the expensive move would be to keep hunting a
+> memory bug that does not exist.
+
+### P20. Guard `CLI[]`/`EXTRA[]` alignment — **open**
+
+`run.sh` iterates `"${!EXTRA[@]}"` and reads `CLI[$stem]`. A stem present in
+`CLI[]` but absent from `EXTRA[]` would therefore never run — which is **P2**, the
+typo that silently disabled coverage, and nothing prevents a recurrence. The two
+arrays are aligned today (46 and 46, verified), but that is a fact about the
+current file, not an invariant the harness checks.
+
+The guard is three lines and should fail loudly on any asymmetry, the way P1's
+`RUNDIR` clearing and the reference smoke gate already do.
+
+### What this section does not claim
+
+The engine is unaffected by all of this. None of P14–P17 is a product defect, and
+none of them changed a byte of output. They are defects in the instrument, which
+is the harder class to see, because the instrument is what you trust when the
+product looks fine.
 
 ## Phase 1 — Turn crashes into errors
 

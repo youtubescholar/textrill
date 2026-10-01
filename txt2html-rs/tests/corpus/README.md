@@ -52,10 +52,12 @@ goldens reproduce byte for byte (the other two are the `NOGOLDEN` cases above).
 `t/30sample.t`, `t/50xsample.t` and `t/70bugs.t` from the reference
 distribution for the string-level API.
 
-## Two ways this reports success wrongly
+## Four ways this reported success wrongly
 
-Both were live bugs in this harness, and both produce a green run while
-comparing nothing, so they are worth stating rather than just fixing.
+All four were live bugs in this harness, and all four produce a green run while
+comparing nothing or nothing at all. They are worth stating rather than just
+fixing, because in every case the *output* was correct and only the exit status
+was wrong — which is exactly why reading the output never found them.
 
 1. **Both sides fail identically.** If `PERL5LIB` is wrong, every perl
    invocation exits non-zero and writes nothing, so comparing two absent files
@@ -73,6 +75,25 @@ comparing nothing, so they are worth stating rather than just fixing.
    ```sh
    MINE=$PWD/target/release/txt2html tests/corpus/run.sh
    ```
+3. **The runner could not fail at all** (`P15`, found 2026-10-01). It counted
+   `pass`/`fail` and printed `PASS=46 FAIL=0` — but had no `exit` statement, so
+   it ended on a successful `echo` and returned 0 whatever the counters said. A
+   stub converter that exits 0 and writes wrong output produced `PASS=0 FAIL=46`
+   with all 29 goldens differing, and `make corpus` reported success. The
+   Tier 1 invariant was being *reported*, not *enforced*. Both entry points now
+   compute a status and exit with it.
+4. **`run.sh <stem>` died after printing PASS** (`P17`, same date).
+   `GOLDEN_N` was only initialised in the full-run branch, so a single-stem
+   invocation over any stem with a golden hit `set -u` and aborted with
+   `GOLDEN_N: unbound variable` — after printing `PASS` and `GOLDEN pass`. That
+   is the P2 shape: a correct-looking path that no gate ever executes.
+
+> **The rule these four produced: a gate that has never been observed failing is
+> not a gate.** Before trusting any check here, break it on purpose and confirm it
+> exits non-zero. `MINE=/path/to/stub-that-writes-garbage tests/corpus/run.sh`
+> is the test, and it should print `PASS=0 FAIL=46` *and* exit non-zero. The
+> equivalent for `make fuzz` is a fuzzer stub that exits 3. See
+> `REMEDIATION-PLAN.md` Phase 0b.
 
 ## Fuzzer
 
@@ -90,6 +111,23 @@ tests/corpus/fuzz.py --seed 7 --dump 41 >case.txt   # case 41's input, to hand
 
 The default is small on purpose: each case is two converter invocations, and a
 gate nobody runs is not a gate. Longer sweeps are opt-in.
+
+Exit status and hangs, both found 2026-10-01 (`P14`, `P16`):
+
+- `fuzz.py` returns non-zero if any case mismatches **or any case times out on
+  the port**. A port timeout is a defect in the port. A *reference* timeout is
+  not, so it is skipped like any other reference refusal — but it is counted,
+  printed, and included in the exit status, never folded into a clean-looking
+  `0 mismatches`.
+- Both converters run under `timeout=120`, and that exception is now caught per
+  case. Uncaught, it terminated the whole seed silently after however many cases
+  it had reached.
+- `make fuzz` used to pipe through `tail -1`, and a pipeline reports the status of
+  its *last* command — so `make fuzz` was structurally incapable of failing and
+  reported a crashed or mismatching run to `make verify` as a pass. This is why
+  the "16 000 cases, 0 mismatches" figure in the remediation plan is marked void.
+- The full 8-seed sweep is ~99 minutes single-threaded. Parallelising it (`P19`)
+  is open work; until then, treat a complete `make fuzz` as expensive and rare.
 
 The oracle is `scripts/txt2html`, the reference's own command line tool, driven
 with the *same* argv as the port. An earlier version drove the module through

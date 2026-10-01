@@ -101,7 +101,12 @@ corpus: build
 #
 # So: capture each seed's output and status, print the summary line as before,
 # print the whole log if the seed failed, and fail the target if any seed did.
-# --cases is per seed, so the total is 8 x FUZZ_CASES.
+# --cases is per seed, so the total is 8 x FUZZ_CASES. That is ~99 minutes
+# single-threaded, on a 20-core machine, which is why this gate has so rarely
+# been run to completion -- and a gate nobody runs is not a gate. REMEDIATION-PLAN
+# P19 proposes running the seeds concurrently (~13 min) and P18 re-establishes
+# the fuzz figure once it can report failure. Until then `verify: OK` should be
+# read as "everything except the full fuzz sweep".
 fuzz: build
 	@rc=0; \
 	for seed in $(FUZZ_SEEDS); do \
