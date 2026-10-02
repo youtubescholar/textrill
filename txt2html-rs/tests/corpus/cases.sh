@@ -282,3 +282,44 @@ EXTRA[opt_injection]='title=>"</title><script>alert(3)</script>",style_url=>"x.c
 CLI[opt_injection]='--title "plain" --style_url "plain.css"'
 INPUT[opt_injection]="$HERE/inputs/pre_explicit_blank.txt"
 NOGOLDEN[opt_injection]='differential must fail: deliberate Tier 2 divergence: the reference interpolates --title and --style_url into the document unescaped, which is a live XSS. The port escapes them, so a byte comparison against the reference must fail and cannot be the oracle; the oracle is the XML well-formedness check in proptest.py'
+
+# --- P7.1: the 0x80-0x9F range, where the fallback decode used to be wrong ---
+#
+# read_any_file falls back to a single-byte decode when the bytes are not valid
+# UTF-8.  It decoded as Latin-1, but chars::demoronize_char's table is keyed on
+# the *CP1252* code points (U+201C and friends), so a Latin-1 decode of the same
+# byte produced U+009C/U+0092/U+0093 -- C1 control characters that are not in
+# the table.  Every substitution silently did nothing on exactly the files
+# demoronize exists to serve, and the C1 controls were re-emitted as UTF-8 into
+# the HTML, where they render as nothing.
+#
+# This case cannot be a differential PASS and is not a NOGOLDEN lie either: the
+# difference is in the *content* the reference gets right by accident.  Perl
+# emits the raw bytes and a browser guesses CP1252 for them, so the reference
+# renders " and -- correctly.  The port now decodes CP1252, demoronize fires, and
+# it emits the ASCII equivalents -- so the rendered text agrees while the bytes
+# do not, and the byte comparison below is expected to fail.  That is the whole
+# point of the case, and the oracle is encodingtest.rs's assertions on the
+# decoded code points, which are checked by cargo test and cannot silently rot.
+EXTRA[cp1252_smart]='make_tables=>0,xhtml=>1'
+CLI[cp1252_smart]='--no-make_tables --xhtml'
+INPUT[cp1252_smart]="$HERE/inputs/cp1252_smart.txt"
+NOGOLDEN[cp1252_smart]='differential must fail: P7.1. The reference emits CP1252 bytes verbatim and relies on the browser guessing CP1252; the port decodes CP1252 and demoronize rewrites the smart punctuation to ASCII. Both render the same text, the bytes differ, so a byte comparison cannot be the oracle. The oracle is tests/encodingtest.rs, which asserts the decoded code points and that no C1 control survives into the output'
+
+# --- P7.1: wide characters in an aligned table -----------------------------
+#
+# byte_slice cuts table cells by byte offset, and the offsets come from
+# table_columns over the OR-ed column map, so the whole thing is only coherent
+# when every row is the same *byte* length.  It is: this fixture is built with
+# every row exactly 21 bytes, including the row holding a 3-byte CJK character.
+#
+# The port gets this right and the reference does not -- Perl mangles the cell
+# into &aelig;...&not; because it demoronizes each byte of a multi-byte sequence
+# separately.  A second deliberate Tier 2 divergence, and here the port is
+# unambiguously the better one: the text survives intact.  Same shape as
+# cp1252_smart above -- differential expected to fail, unit tests are the
+# oracle.
+EXTRA[cjk_table]='make_tables=>1,xhtml=>1'
+CLI[cjk_table]='--make_tables --xhtml'
+INPUT[cjk_table]="$HERE/inputs/cjk_table.txt"
+NOGOLDEN[cjk_table]='differential must fail: P7.1. Perl demoronizes each byte of a multi-byte UTF-8 sequence independently and mangles the CJK cell into Latin-1 entities; the port decodes UTF-8 first and the text survives. Deliberate Tier 2 divergence where the port is better, so a byte comparison against the reference must fail and cannot be the oracle; the oracle is the port preserving the cell text, asserted in tests/encodingtest.rs'

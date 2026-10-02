@@ -4,7 +4,7 @@ Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
 **Progress is recorded in §0.1 below. Done: P1–P3, P8–P10, P12, P14–P19, P21–P23,
-E1–E3, A1, A1b, A2–A10. Open: P5–P7, P11, and Phase 6 (the GUI rewrite).**
+E1–E3, A1, A1b, A2–A10. Open: P5, P6, P11, and Phase 6 (the GUI rewrite).**
 P13 is answered: the deliverable is a single self-contained artifact, so the GUI
 is rewritten in Rust + Qt and **the engine is kept** — see P13 and Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
@@ -133,9 +133,12 @@ Tier 2 divergence — see the A8 section for why its verdict is inverted.
 
 E3 landed on 2026-10-01. P13, the last item on the agreed sequence, was answered
 the same day: one self-contained artifact, so the GUI is rewritten in Rust + Qt
-and the engine is kept. The rewrite itself is **Phase 6**, and P5–P7 and P11 are
-sequenced ahead of it — P7 first of all, because the encoding rule is currently
-implemented in both Rust and Python and the two copies disagree.
+and the engine is kept. The rewrite itself is **Phase 6**, and P5, P6 and P11 are
+sequenced ahead of it. P7 was sequenced there first of all — because the encoding
+rule is implemented in both Rust and Python and the two copies disagreed — and
+it is now **done**: both copies decode CP1252, the fallback is the one the
+converter's own `demoronize` table was written for, and the rewrite inherits one
+correct implementation instead of two.
 
 | Item | State | Note |
 |---|---|---|
@@ -150,7 +153,8 @@ implemented in both Rust and Python and the two copies disagree.
 | A2 | **done** | `ascii_re_cached` now takes `&'static str`, so only fixed literals can be cached and the leak is bounded by the source; verified by `make alloctest` |
 | A3 | **done** | five numeric options bounded, four deliberately not, from one table the GUI also reads; the difference is measured |
 | A4 | **done** | `PanicException` re-export; GUI worker reports Rust panics and always completes |
-| A5 | **done** | a file's encoding is remembered and written back, so a non-UTF-8 save no longer corrupts it |
+| A5 | **done** | a file's encoding is remembered and written back, so a non-UTF-8 save no longer corrupts it. Extended by P7, which found the remembered encoding was Latin-1 — the write-back was faithful and still wrong, because the editor and the converter were reading different documents |
+| P7 | **done** | the encoding fallback decoded as Latin-1 while `demoronize_char`'s table is keyed on CP1252, so the substitutions never fired on any real Windows file and C1 controls leaked into the output. Fallback is CP1252; `--encoding` and `--meta_charset` added; GUI and engine now agree; 17 new tests, 2 new corpus cases |
 | A6 | **done** | superseded conversions are cancelled; 85% of the CPU and 21 MB saved, not the wall-clock win first predicted |
 | A7 | **done** | no directories created on save; the `mkdir` was load-bearing for an unrelated test, found by a 30-minute hang |
 | non-ASCII delimiter predicate | **done** | `(?<!é)` was vacuous; predicates extracted so the tests exercise production code |
@@ -162,7 +166,7 @@ implemented in both Rust and Python and the two copies disagree.
 | P20 | **done** | a case wired into one table and not the other never ran, silently — the P2 shape. Now checked by name in both directions, and it aborts the run rather than summarising a subset |
 | fuzzer cleanup | **done** | removed `KNOWN_DIVERGENCES` and ~90 lines of matching machinery, plus a dead `PERL_DRIVER`. The "reference refused" skip turned out to be a real false green and is gone |
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
-| P13 | **decided** | single self-contained artifact. The GUI is rewritten in Rust + Qt; **the 5,644-line engine is kept**. P5–P7 and P11 are sequenced *ahead* of it — P7 especially, because the encoding rule is currently implemented twice and the copies disagree. Plan in **Phase 6** |
+| P13 | **decided** | single self-contained artifact. The GUI is rewritten in Rust + Qt; **the 5,644-line engine is kept**. P5, P6 and P11 are sequenced *ahead* of it. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6** |
 | Phase 6 | **planned** | the GUI rewrite: 1,365 lines of Python shell out, ~30 tests ported as acceptance criteria, pyo3 layer and venv deleted from the dependency graph. Open: Qt6 vs GTK4, CLI fate, replace-vs-coexist |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
@@ -199,9 +203,10 @@ the next person does not have to re-derive the ordering:
    is now empty rather than merely accurate.
 9. ~~**P13 — the packaging decision.**~~ **Decided 2026-10-01:** one
    self-contained artifact, so the GUI moves to Rust + Qt and the engine is
-   kept. Plan in **Phase 6**; P5–P7 and P11 are sequenced ahead of it, because
-   the encoding rule is currently implemented in two languages and the copies
-   disagree (P7).
+   kept. Plan in **Phase 6**; P5, P6 and P11 are sequenced ahead of it. Its
+   stated prerequisite P7 is **done**: the encoding rule was implemented in two
+   languages, the copies disagreed, and the disagreement was a real defect rather
+   than a byte difference.
 
 That was the agreed sequence, and items 1–8 are all closed. **P13 is the last of
 them.** But see below: before any further feature work, **P19 then P18**,
@@ -221,23 +226,26 @@ Recommended order from here:
 2. **P20** — the `CLI[]`/`EXTRA[]` guard. Three lines, and it closes the last
    known way to add a corpus case that silently never runs.
 3. ~~**P13** — the packaging decision.~~ **Decided:** single artifact, GUI to
-   Rust + Qt, engine kept. See Phase 6. P5–P7 and P11 now go **before** the
-   rewrite rather than after.
+   Rust + Qt, engine kept. See Phase 6. P5, P6 and P11 go **before** the rewrite
+   rather than after; the prerequisite P7 is **done**.
 4. ~~**A8** — escape `--title` / `--style_url`.~~ **Done.** It was the sole
    owner of the 30 known-open `proptest` checks; there are none left.
-5. **The Phase 2–4 items P5–P11**, in the order §0.1 gives them. A10 is done:
-   the pattern cache is bounded at a measured 6× the worst realistic working
-   set. Nothing in Phases A or B is open now.
+5. **The remaining Phase 2–4 items: P5, P6 and P11**, in the order §0.1 gives
+   them. A10 is done: the pattern cache is bounded at a measured 6× the worst
+   realistic working set. Nothing in Phases A or B is open now.
    Note that P4/P22 was what kept the GUI's panic handler honest, and it is the same
    panic seen from the CLI, where nothing catches it.
 6. **Phase 6, the GUI rewrite** — and only after the above. P13 answered the
    packaging question; Phase 6 is the work that follows from the answer, and its
-   prerequisite is **P7**, because the encoding rule is currently written twice
-   in two languages and the two copies do not agree. Do not start the shell
-   before that lands, or the port inherits the disagreement. Phase 5 (opt-in
-   features) is deferred past Phase 6 — it is engine-side and unaffected, but
-   every new option currently has to be added to two front ends, and after the
-   rewrite there is only one.
+   prerequisite was **P7**, because the encoding rule was written twice in two
+   languages and the two copies did not agree. **That prerequisite is now met.**
+   P7 turned out to be worth doing before the rewrite on its own terms: the
+   disagreement was a live defect, not a byte difference — the engine's
+   `demoronize` table had been unreachable for its entire existence, and the GUI
+   was showing a different document from the one it was previewing.
+   Phase 5 (opt-in features) is deferred past Phase 6 — it is engine-side and
+   unaffected, but every new option currently has to be added to two front ends,
+   and after the rewrite there is only one.
 
 Two lessons worth carrying to the next item, because both cost time here: a
 micro-benchmark of a helper API is not evidence about the tool's exposure to
@@ -1267,7 +1275,70 @@ converting only the visible region, until Phase 2 lands.
 
 ## Phase 3 — Encoding policy
 
-### P7. The documented deviation is narrower than the real one, and there is no charset
+### P7. The documented deviation is narrower than the real one, and there is no charset — **done**
+
+**The root cause was worse than this section assumed, and it was in the engine
+rather than in the documentation.** `read_any_file`'s fallback decoded as
+**Latin-1**, while `demoronize_char`'s table (`chars.rs:53-70`, not `22-38` —
+the P4 escaping work had shifted it) is keyed on the **CP1252** code points.
+Those two facts cancel out: a Latin-1 decode of `0x93` produces U+0093, which is
+not in the table, so **every substitution `demoronize` performs silently did
+nothing on exactly the files it exists to serve**, and the C1 control character
+was re-emitted as UTF-8 `c2 93` where the file said `93`. The two encodings
+differ only on `0x80`-`0x9F` — the whole of the rest of Latin-1 is identical to
+CP1252 — and no fixture had a byte in that range, so nothing was red.
+
+Measured, on the same `0x93 0x94 0x96 0x97` file the original analysis used:
+
+| | before | after |
+|---|---|---|
+| `0x93` in the editor and the output | U+0093, invisible | `"` |
+| `demoronize` | never fired | fires |
+| `resolved_encoding()` | did not exist | `cp1252` |
+
+Nothing about the divergence is now a byte-difference-only question, so the
+corpus cases below are declared Tier 2 divergences with unit tests as the
+oracle. Details of what landed, in the order the section asked for it:
+
+1. **`read_any_file` decodes CP1252, not Latin-1** (`convert.rs`). CP1252's five
+   undefined bytes (`81`, `8D`, `8F`, `90`, `9D`) stay Latin-1 control
+   characters so the decode is total, which is what browsers do and what
+   Python's own `cp1252` codec will not do.
+2. **Two corpus fixtures**, `cp1252_smart` and `cjk_table`, both recorded as
+   `differential must fail:` with the reason inline. `cjk_table` needed its rows
+   padded to a uniform **byte** length, because `byte_slice` cuts cells by byte
+   offset — the plan's claim that "the byte/char column logic is sound" is right,
+   but only for rows of equal byte length, which nothing had ever tested.
+3. **`tests/encodingtest.rs`**, 17 tests built from raw byte literals. A literal
+   `\u{201c}` in a test would pass under either decoder and prove nothing; each
+   one was checked by reverting the fix and watching it go red.
+4. **`lib.rs` wording corrected** to state the real scope, including that the
+   divergence is visible for *CP1252 input* and not only UTF-8 input.
+5. **`--encoding auto|utf-8|cp1252`** (`Encoding` in `options.rs`). `auto` is
+   the default and the probe; the forced values exist because a short CP1252
+   document can be valid UTF-8 by accident, and no amount of probing settles
+   that. Reported by `Converter::resolved_encoding()` and to Python as
+   `file_encoding()`.
+6. **`--meta_charset`**, default **off** so no golden moves, on by default in the
+   GUI where a browser is the consumer. It follows `lower_case_tags`, and the
+   newline belongs to the element rather than the option so the generator meta
+   keeps exactly the single trailing newline it always had.
+7. **GUI write-back preserves the encoding** — and this turned out to be the
+   part that mattered most, because the GUI had its *own* Latin-1 decode. The
+   editor was showing U+0093 while the preview showed `"`: the user was editing
+   one document and looking at another. `files.py` now mirrors the engine, with
+   its own CP1252 table for the reason in (1), and refuses to write a character
+   CP1252 cannot hold rather than substituting U+FFFD and losing the text.
+
+One A5 test asserted the Latin-1 reading and its comment defended the wrong
+answer at length — "the file says a control character and the file must keep
+saying so". True of Latin-1, and beside the point, since the converter decodes
+CP1252. It was rewritten to assert the agreement instead. Recording that
+because the comment was the kind that survives review: it was confident,
+specific, and wrong, and only measuring the converter settled it.
+
+The original analysis is preserved below because its *measurements* were right;
+only its attribution of the cause was wrong.
 
 `lib.rs:23-31` states the difference is visible "only for UTF-8 input containing
 characters whose encoding has a byte in the `0x80`-`0x9F` range". That is

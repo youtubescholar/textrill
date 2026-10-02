@@ -5,7 +5,7 @@
 //! booleans follow `Getopt::Long` as used by the reference script
 //! `scripts/txt2html`.
 
-use crate::options::{Options, TableTypeFlags};
+use crate::options::{Encoding, Options, TableTypeFlags};
 
 /// One option specification.
 pub struct Spec {
@@ -58,6 +58,8 @@ pub const SPECS: &[Spec] = specs![
     StrArray "Input file; repeat for several files." ["infile"],
     StrArray "Input string; repeat for several strings." ["instring"],
     Str "Delimiter that turns text into italic text." ["italic_delimiter"],
+    Str "How to decode input: auto, utf-8 or cp1252 (P7.3)." ["encoding", "enc"],
+    Flag "Emit <meta charset=\"utf-8\"> in the document head (P7.4)." ["meta_charset"],
     StrArray "Link dictionary to use; repeat for several." ["links_dictionaries", "link", "l"],
     Flag "Only convert URLs, leave the rest of the text alone." ["link_only", "linkonly", "LO"],
     Flag "Emit lower-case HTML tags." ["lower_case_tags", "lc_tags", "LC"],
@@ -144,7 +146,7 @@ pub fn set_value(opts: &mut Options, name: &str, value: &str) -> Result<(), Stri
             };
             set_bool(opts, spec, if negated { !v } else { v });
         }
-        Kind::Str => set_str(opts, spec, value),
+        Kind::Str => set_str(opts, spec, value)?,
         Kind::Int => {
             let n: i64 = value
                 .parse()
@@ -181,6 +183,8 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
         "infile" => opts.infile.join("\n"),
         "instring" => opts.instring.join("\n"),
         "italic_delimiter" => opts.italic_delimiter.clone(),
+        "encoding" => opts.encoding.name().to_string(),
+        "meta_charset" => opts.meta_charset.to_string(),
         "links_dictionaries" => opts.links_dictionaries.join("\n"),
         "link_only" => opts.link_only.to_string(),
         "lower_case_tags" => opts.lower_case_tags.to_string(),
@@ -285,7 +289,7 @@ pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
                     Some(v) => v,
                     None => take_value(&mut it, name)?,
                 };
-                set_str(opts, spec, &v);
+                set_str(opts, spec, &v)?;
             }
             Kind::Int => {
                 let v = match inline.take() {
@@ -352,6 +356,8 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         "link_only" => opts.link_only = value,
         "lower_case_tags" => opts.lower_case_tags = value,
         "mailmode" => opts.mailmode = value,
+        // P7.4.
+        "meta_charset" => opts.meta_charset = value,
         "make_anchors" => opts.make_anchors = value,
         "make_links" => opts.make_links = value,
         "make_tables" => opts.make_tables = value,
@@ -369,7 +375,7 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
     value
 }
 
-pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) {
+pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
     match spec.names[0] {
         "append_file" => opts.append_file = v.to_string(),
         "append_head" => opts.append_head = v.to_string(),
@@ -381,6 +387,10 @@ pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) {
         "default_link_dict" => opts.default_link_dict = v.to_string(),
         "doctype" => opts.doctype = v.to_string(),
         "italic_delimiter" => opts.italic_delimiter = v.to_string(),
+        // P7.3. The only string option whose value is not stored verbatim: an
+        // unrecognised encoding is a user error worth reporting, not a string
+        // to be discovered three files later.
+        "encoding" => opts.encoding = Encoding::parse(v).map_err(|e| e.to_string())?,
         "outfile" => opts.outfile = v.to_string(),
         "preformat_start_marker" => opts.preformat_start_marker = v.to_string(),
         "preformat_end_marker" => opts.preformat_end_marker = v.to_string(),
@@ -392,6 +402,7 @@ pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) {
             let _ = other;
         }
     }
+    Ok(())
 }
 
 pub fn set_int(opts: &mut Options, spec: &Spec, v: i64) {
@@ -530,5 +541,9 @@ pub fn usage() -> String {
         s.push_str(&format!("        {}\n", spec.help));
     }
     s.push_str("\nOptions can be abbreviated.  Boolean options take a `no` prefix to disable.\n");
+    // P7.3. --help lists the encoding names, because --encoding is the one
+    // option whose accepted values are not self-evident from its name, and a
+    // user who does not know the fallback is CP1252 will not know to ask.
+    s.push_str("\n--encoding values: auto (probe for UTF-8, else cp1252), utf-8, cp1252.\n");
     s
 }

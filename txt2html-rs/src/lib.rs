@@ -31,15 +31,32 @@
 //!   `instring` there always converts an empty paragraph.
 //! * `Options::inhandle` does not exist; pass a file instead, or feed
 //!   [`Converter::process_chunk`] / [`Converter::process_para`] directly.
-//! * [`convert::read_any_file`] decodes UTF-8 when the bytes are valid UTF-8
-//!   and falls back to Latin-1 (one byte, one code point) otherwise. Perl
-//!   reads input as raw bytes, so on a UTF-8 file its `demoronize` pass sees
-//!   each byte separately: `U+201C` (`e2 80 9c`) is mangled to `&acirc;` plus
-//!   two stray bytes, because `0x9c` falls in the `0x82`-`0x9F` range that
-//!   `demoronize_char` rewrites. Decoding first keeps the text intact. The
-//!   difference is visible only for UTF-8 input containing characters whose
-//!   encoding has a byte in the `0x80`-`0x9F` range, and only while
-//!   `demoronize` is on.
+//! * [`convert::read_any_file`] decodes UTF-8 when the bytes are valid UTF-8 and
+//!   falls back to **CP1252** otherwise. Perl reads input as raw bytes, so its
+//!   `demoronize` pass sees every byte separately: `U+201C` (`e2 80 9c`) is
+//!   mangled to `&acirc;` plus two stray bytes, because `0x9c` falls in the
+//!   `0x82`-`0x9F` range that `demoronize_char` rewrites. Decoding first keeps
+//!   the text intact.
+//!
+//!   This divergence is wider than "UTF-8 input". An earlier version of this
+//!   note said the difference shows up only for UTF-8 input containing a
+//!   character whose encoding has a byte in `0x80`-`0x9F`, which understated it
+//!   in both directions. It is also visible for **CP1252 input**, which is the
+//!   more common case: a file written on Windows holds raw `0x93 0x94 0x96
+//!   0x97`, the reference passes those bytes through for the browser to guess
+//!   at, and the port decodes them to U+201C/U+201D/U+2013/U+2014 and
+//!   demoronizes them to ASCII `"`, `"`, `-`, `--`. The rendered text agrees
+//!   and the bytes do not, so a byte comparison against the reference must fail
+//!   on such a file. The `cp1252_smart` corpus case records this.
+//!
+//!   The fallback was Latin-1 until P7.1, which made this divergence much
+//!   worse than a byte difference: `demoronize_char` is keyed on the *CP1252*
+//!   code points, and a Latin-1 decode of `0x93` produces U+0093, which is not
+//!   in the table. Every substitution silently did nothing on exactly the
+//!   files `demoronize` exists for, and the C1 control character was re-emitted
+//!   as UTF-8 `c2 93` into the HTML, where it renders as nothing at all. The
+//!   two encodings differ only on `0x80`-`0x9F` — the rest of Latin-1 is
+//!   identical to CP1252 — so no existing fixture noticed.
 //! * An input file that cannot be read is a failure, not a shrug. Perl prints
 //!   `Could not open …` and exits 0 having written a 0-byte output file, which
 //!   `make` and CI read as a successful build; the port exits 1. **The output

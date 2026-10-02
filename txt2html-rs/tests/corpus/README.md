@@ -238,8 +238,15 @@ input, in one of three ways:
 
 The corpus's non-ASCII fixtures do not cover any of this: `utf8.txt`,
 `umlauttest.txt` and `list-styles.txt` are all *invalid* UTF-8, so they take
-the Latin-1 fallback and come out byte-identical. Fixing the encoding story is
-P7, and the fuzzer's exclusion is not meant to paper over it.
+the single-byte fallback. `umlauttest.txt` and `list-styles.txt` only contain
+bytes `>= 0xA0`, and `0xA0`-`0xFF` is the entire range where Latin-1 and CP1252
+agree, so they stay byte-identical either way. `utf8.txt` is valid UTF-8.
+
+That is precisely the gap P7.1 closed. The `0x80`-`0x9F` range — where the two
+encodings differ, and where every CP1252 file written on Windows puts its
+punctuation — had no fixture at all, which is why the fallback decoded as
+Latin-1 and demoronize did nothing for so long without anything going red. The
+`cp1252_smart` and `cjk_table` cases below now cover it.
 
 **Trailing whitespace** is the trigger for two open divergences where the port
 drops a space the reference keeps: `'   e\n '` with `--indent_par_break`, and
@@ -268,7 +275,26 @@ So the rule matches the corpus's own: a divergence is a failing gate, and it
 becomes a passing gate by being fixed, in the same change. A defect that needs
 tracking goes in `cases.sh`, as a case that currently fails.
 
-### Fixed, and pinned
+Two cases are *expected* to fail the differential comparison, by design rather
+than by neglect, and both are recorded as `differential must fail:` in
+`cases.sh` so the alignment guard holds them to it. They share a shape: the
+reference's output is wrong and the port's is right, so there is no byte
+sequence the port could emit to match it.
+
+* `cp1252_smart` (P7.1) — a CP1252 file with smart quotes and dashes. The
+  reference emits the raw bytes and depends on the browser guessing CP1252; the
+  port decodes CP1252 and demoronize rewrites the punctuation to ASCII. Same
+  rendered text, different bytes.
+* `cjk_table` (P7.1) — a 3-byte CJK character in an aligned table. The
+  reference demoronizes each byte of the sequence independently and emits
+  `&aelig;`+`&yen;`+`&not;`; the port decodes UTF-8 first and the character
+  survives.
+
+The oracle for both is `tests/encodingtest.rs`, which asserts the decoded code
+points and that no C1 control character reaches the output. A unit test cannot
+rot into a false pass the way a suppressed corpus line can, and it fails the
+moment the decode regresses rather than waiting for a byte comparison nobody
+reads.
 
 ### Fixed, and pinned
 

@@ -10,7 +10,7 @@ use fancy_regex::Regex;
 
 use crate::chars;
 use crate::links::{self, LinkParser};
-use crate::options::Options;
+use crate::options::{Encoding, Options};
 
 /// One or more inputs that could not be opened, and the output built from
 /// whatever *was* readable (A9). The caller should write that output if it has
@@ -24,15 +24,139 @@ pub struct UnreadableInput {
     pub out: String,
 }
 
-/// Read a text file for conversion. Perl reads raw bytes and keeps 8-bit
-/// characters intact; mimic that by decoding UTF-8 when possible and
-/// falling back to Latin-1 (byte == code point).
-pub fn read_any_file(path: &str) -> Option<String> {
+/// How [`read_any_file`] resolved a file's bytes, so a caller can report it
+/// instead of guessing. `Auto` records which of the two decodings actually
+/// happened, because "auto" that silently becomes Latin-1 is indistinguishable
+/// from "auto" that silently became UTF-8 — and the difference is what P7.1's
+/// output divergence is made of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolved {
+    /// The bytes were valid UTF-8 and were decoded as such.
+    Utf8,
+    /// The bytes were not valid UTF-8. They were decoded as CP1252.
+    Cp1252,
+}
+
+impl Resolved {
+    /// A name for status bars, log lines and `--verbose` output.
+    pub fn name(self) -> &'static str {
+        match self {
+            Resolved::Utf8 => "utf-8",
+            Resolved::Cp1252 => "cp1252",
+        }
+    }
+}
+
+/// Read a text file for conversion, reporting which encoding was used.
+///
+/// Perl reads raw bytes and keeps 8-bit characters intact; mimic that by
+/// decoding UTF-8 when the bytes are valid UTF-8, and falling back to a
+/// single-byte encoding otherwise.
+///
+/// The fallback is **CP1252**, not Latin-1, and this is P7.1's root cause
+/// rather than a stylistic choice. The two agree on `0x00`-`0x7F` and on
+/// `0xA0`-`0xFF` — which is the entire range Latin-1 defines — and differ
+/// only on `0x80`-`0x9F`, where Latin-1 holds C1 control characters and CP1252
+/// holds the typographic punctuation every Windows text file actually uses.
+///
+/// Decoding as Latin-1 made `demoronize` unreachable on exactly the files it
+/// exists to serve. [`crate::chars::demoronize_char`] maps U+201C, U+2019,
+/// U+2013 and the rest — the CP1252 code points. A Latin-1 decode of the same
+/// byte produces U+009C, U+0092, U+0093, none of which are in the table, so
+/// every substitution silently did nothing. Measured on a CP1252 file
+/// containing `0x93 0x94 0x96 0x97`:
+///
+/// ```text
+/// Perl emits the raw bytes; a browser reading the result as CP1252 shows
+///   "hello" and dash -- .
+/// Latin-1 fallback emitted UTF-8 C2 93, C2 94, C2 96, C2 97 -- C1 control
+///   characters, which render as nothing at all.
+/// ```
+///
+/// CP1252 also defines `0x81`, `0x8D`, `0x8F`, `0x90` and `0x9D` as
+/// *undefined*. They are left as the Latin-1 control character, matching what
+/// browsers do, because inventing a glyph for them would be a guess and a
+/// visible one.
+pub fn read_any_file_with_encoding(path: &str) -> Option<(String, Resolved)> {
+    read_with(path, Encoding::Auto)
+}
+
+/// [`read_any_file_with_encoding`], but honouring an explicit `--encoding`.
+///
+/// The probe in [`Encoding::Auto`] cannot tell a CP1252 file whose bytes happen
+/// to be valid UTF-8 from a genuine UTF-8 file, and that is not a rare edge: a
+/// short CP1252 document can be valid UTF-8 by accident. `Utf8` and `Cp1252`
+/// exist so the caller can settle it, which is why this is a separate function
+/// rather than a parameter bolted onto the other.
+pub fn read_with(path: &str, encoding: Encoding) -> Option<(String, Resolved)> {
     let bytes = std::fs::read(path).ok()?;
-    Some(match String::from_utf8(bytes) {
-        Ok(s) => s,
-        Err(e) => e.into_bytes().into_iter().map(|b| b as char).collect(),
+    Some(match encoding {
+        Encoding::Auto => match String::from_utf8(bytes) {
+            Ok(s) => (s, Resolved::Utf8),
+            Err(e) => (
+                e.into_bytes().into_iter().map(cp1252_char).collect(),
+                Resolved::Cp1252,
+            ),
+        },
+        // Lossy on purpose, and only reachable when the caller has declared the
+        // encoding. `String::from_utf8_lossy` substitutes U+FFFD rather than
+        // failing, because a converter that aborts on one bad byte is not
+        // useful; the substitution is visible in the output instead of silent.
+        Encoding::Utf8 => (String::from_utf8_lossy(&bytes).into_owned(), Resolved::Utf8),
+        Encoding::Cp1252 => (
+            bytes.into_iter().map(cp1252_char).collect(),
+            Resolved::Cp1252,
+        ),
     })
+}
+
+/// Decode one byte as CP1252. Identical to `b as char` except on `0x80`-`0x9F`.
+fn cp1252_char(b: u8) -> char {
+    match b {
+        0x80 => '\u{20AC}', // EURO SIGN
+        0x82 => '\u{201A}', // SINGLE LOW-9 QUOTATION MARK
+        0x83 => '\u{0192}', // LATIN SMALL LETTER F WITH HOOK
+        0x84 => '\u{201E}', // DOUBLE LOW-9 QUOTATION MARK
+        0x85 => '\u{2026}', // HORIZONTAL ELLIPSIS
+        0x86 => '\u{2020}', // DAGGER
+        0x87 => '\u{2021}', // DOUBLE DAGGER
+        0x88 => '\u{02C6}', // MODIFIER LETTER CIRCUMFLEX ACCENT
+        0x89 => '\u{2030}', // PER MILLE SIGN
+        0x8A => '\u{0160}', // LATIN CAPITAL LETTER S WITH CARON
+        0x8B => '\u{2039}', // SINGLE LEFT-POINTING ANGLE QUOTATION MARK
+        0x8C => '\u{0152}', // LATIN CAPITAL LIGATURE OE
+        0x8E => '\u{017D}', // LATIN CAPITAL LETTER Z WITH CARON
+        0x91 => '\u{2018}', // LEFT SINGLE QUOTATION MARK
+        0x92 => '\u{2019}', // RIGHT SINGLE QUOTATION MARK
+        0x93 => '\u{201C}', // LEFT DOUBLE QUOTATION MARK
+        0x94 => '\u{201D}', // RIGHT DOUBLE QUOTATION MARK
+        0x95 => '\u{2022}', // BULLET
+        0x96 => '\u{2013}', // EN DASH
+        0x97 => '\u{2014}', // EM DASH
+        0x98 => '\u{02DC}', // SMALL TILDE
+        0x99 => '\u{2122}', // TRADE MARK SIGN
+        0x9A => '\u{0161}', // LATIN SMALL LETTER S WITH CARON
+        0x9B => '\u{203A}', // SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
+        0x9C => '\u{0153}', // LATIN SMALL LIGATURE OE
+        0x9E => '\u{017E}', // LATIN SMALL LETTER Z WITH CARON
+        0x9F => '\u{0178}', // LATIN CAPITAL LETTER Y WITH DIAERESIS
+        // 0x81, 0x8D, 0x8F, 0x90 and 0x9D are undefined in CP1252. Kept as the
+        // Latin-1 C1 control, so the decode is total and lossless.
+        _ => b as char,
+    }
+}
+
+/// Read a text file for conversion, discarding which encoding was resolved.
+pub fn read_any_file(path: &str) -> Option<String> {
+    read_any_file_with_encoding(path).map(|(text, _)| text)
+}
+
+/// [`read_any_file`], honouring an explicit `--encoding`. Used for the
+/// `append_file` / `append_head` / `prepend_file` options, which are read
+/// during the same run and so should obey the same encoding rule as the input
+/// rather than silently re-probing each one.
+pub fn read_file_with(path: &str, encoding: Encoding) -> Option<String> {
+    read_with(path, encoding).map(|(text, _)| text)
 }
 
 /// Chop trailing whitespace and a DOS CR, i.e. what the Perl
@@ -168,6 +292,8 @@ pub struct Converter {
     preformat_enabled: bool,
     re_cache: HashMap<String, Regex>,
     print_count: u32,
+    /// P7.3. Set by `try_txt2html`; read back with `resolved_encoding()`.
+    resolved: Resolved,
 }
 
 impl Converter {
@@ -211,6 +337,7 @@ impl Converter {
             preformat_enabled,
             re_cache: HashMap::new(),
             print_count: 0,
+            resolved: Resolved::Utf8,
         }
     }
 
@@ -2337,7 +2464,7 @@ impl Converter {
             out.push('\n');
 
             if self.opts.append_head_available() {
-                if let Some(contents) = read_any_file(&self.opts.append_head) {
+                if let Some(contents) = read_file_with(&self.opts.append_head, self.opts.encoding) {
                     out.push_str(&contents);
                 }
             }
@@ -2353,6 +2480,30 @@ impl Converter {
                     "meta",
                     TAG_EMPTY,
                     &format!(" NAME=\"generator\" CONTENT=\"{PROG} v{VERSION}\""),
+                ));
+            }
+            // P7.4. Optional, off by default, because the reference emits no
+            // charset declaration and byte-identical output is a stated goal of
+            // this port -- turning this on by default would move every golden.
+            // A GUI turns it on, because there the consumer is a browser that
+            // is about to guess, and it will guess wrong for exactly the
+            // CP1252-derived input this port decodes.
+            // The line break belongs to the element, not to the option: the
+            // generator meta above is written without one, and adding this
+            // second meta after it means someone has to. When meta_charset is
+            // off the push below is the only newline, so the generator keeps
+            // the exact single trailing newline it has always had and no golden
+            // moves.
+            if self.opts.meta_charset {
+                out.push('\n');
+                out.push_str(&self.get_tag(
+                    "meta",
+                    TAG_EMPTY,
+                    if self.opts.lower_case_tags {
+                        " charset=\"utf-8\""
+                    } else {
+                        " CHARSET=\"utf-8\""
+                    },
                 ));
             }
             out.push('\n');
@@ -2385,7 +2536,7 @@ impl Converter {
         }
 
         if !self.opts.prepend_file.is_empty() {
-            if let Some(contents) = read_any_file(&self.opts.prepend_file) {
+            if let Some(contents) = read_file_with(&self.opts.prepend_file, self.opts.encoding) {
                 out.push_str(&contents);
             }
         }
@@ -2409,6 +2560,11 @@ impl Converter {
         let mut sources: Vec<String> = Vec::new();
         let source_type;
         let mut unreadable: Vec<String> = Vec::new();
+        // P7.3. The worst encoding seen across the inputs, so `resolved_encoding`
+        // can report the one that actually mattered. UTF-8 is the floor: an
+        // ASCII file is valid UTF-8, so it must not be reported as CP1252
+        // merely because some other input in the same run was.
+        let mut worst = Resolved::Utf8;
         if !self.opts.infile.is_empty() {
             source_type = "file".to_string();
             for f in &self.opts.infile {
@@ -2419,8 +2575,13 @@ impl Converter {
                     let _ = std::io::stdin().read_to_string(&mut buf);
                     sources.push(buf);
                 } else {
-                    match read_any_file(f) {
-                        Some(c) => sources.push(c),
+                    match read_with(f, self.opts.encoding) {
+                        Some((c, resolved)) => {
+                            if resolved == Resolved::Cp1252 {
+                                worst = resolved;
+                            }
+                            sources.push(c);
+                        }
                         None => {
                             eprintln!("Could not open {f}\n");
                             // Kept going rather than bailing out, so that a
@@ -2439,12 +2600,24 @@ impl Converter {
             return Ok(String::new());
         }
 
+        self.resolved = worst;
         let out = self.convert_sources(sources, source_type == "string");
         if unreadable.is_empty() {
             Ok(out)
         } else {
             Err(UnreadableInput { unreadable, out })
         }
+    }
+
+    /// The encoding [`Converter::try_txt2html`] resolved the input with, for a
+    /// caller that wants to say so — a status bar, a `--verbose` line, or a GUI
+    /// that has to write the text back out in the encoding it came in.
+    ///
+    /// Only file inputs carry an encoding. `instring` and `process_chunk` hand
+    /// over a `str`, which is already decoded, so this reports `Utf8` for them
+    /// because UTF-8 is the encoding the port writes.
+    pub fn resolved_encoding(&self) -> Resolved {
+        self.resolved
     }
 
     /// As [`Converter::try_txt2html`], but discarding the unreadable-file error
@@ -2522,7 +2695,7 @@ impl Converter {
             out.push('\n');
         }
         if !self.opts.append_file.is_empty() {
-            if let Some(contents) = read_any_file(&self.opts.append_file) {
+            if let Some(contents) = read_file_with(&self.opts.append_file, self.opts.encoding) {
                 out.push_str(&contents);
             }
         }

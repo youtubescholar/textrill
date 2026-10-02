@@ -198,7 +198,7 @@ class FileTests(unittest.TestCase):
             path.write_bytes(original)
 
             text, encoding = read_text_file(path)
-            self.assertEqual(encoding, "latin-1")
+            self.assertEqual(encoding, "cp1252")
 
             # What the window does with it.
             write_text_file(path, text, encoding)
@@ -208,13 +208,70 @@ class FileTests(unittest.TestCase):
                 "opening and saving a CP1252 file changed its bytes",
             )
 
+    def test_a_cp1252_smart_quote_is_shown_as_punctuation_not_a_control(self):
+        """P7.1: the editor has to agree with the converter.
+
+        Both used to decode this file the same way and still disagreed about
+        what it contained. The converter's demoronize table is keyed on the
+        CP1252 code points, so a Latin-1 decode put U+0093 in the document where
+        the table looked for U+201C, every substitution silently did nothing,
+        and the C1 control character reached the output as UTF-8 `c2 93` -- an
+        invisible character in the file the user was editing and a different
+        invisible character in the preview.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "smart.txt"
+            path.write_bytes(b"He said \x93hi\x94 -- \x97dash\x97.\n")
+            text, encoding = read_text_file(path)
+            self.assertEqual(encoding, "cp1252")
+            self.assertIn("\u201chi\u201d", text)
+            self.assertIn("\u2014", text)
+            for control in ("\x93", "\x94", "\x97"):
+                self.assertNotIn(
+                    control, text, f"C1 control {control!r} reached the editor"
+                )
+            # And the bytes still survive a save.
+            write_text_file(path, text, encoding)
+            self.assertEqual(path.read_bytes(), b"He said \x93hi\x94 -- \x97dash\x97.\n")
+
+    def test_cp1252_undefined_bytes_are_readable_and_survive_a_save(self):
+        """The five bytes CP1252 leaves undefined must not break the editor.
+
+        Python's `cp1252` codec raises on them, which is why `files.py` carries
+        its own table. If this ever stops holding, opening an obscure file
+        becomes an exception instead of a document.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            for b in (0x81, 0x8D, 0x8F, 0x90, 0x9D):
+                raw = bytes([ord("a"), b, ord("b")])
+                path = Path(tmp) / f"u{b:02x}.txt"
+                path.write_bytes(raw)
+                text, encoding = read_text_file(path)
+                self.assertEqual(encoding, "cp1252", f"0x{b:02X}")
+                self.assertEqual(len(text), 3, f"0x{b:02X}")
+                write_text_file(path, text, encoding)
+                self.assertEqual(path.read_bytes(), raw, f"0x{b:02X}")
+
+    def test_saving_a_character_cp1252_cannot_hold_is_an_error(self):
+        """The user typed something the file's encoding has no byte for.
+
+        Writing U+FFFD and losing their text is the worse outcome, and saying so
+        lets them save as UTF-8 instead.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cjk.txt"
+            path.write_bytes(b"na\xefve\n")
+            _text, encoding = read_text_file(path)
+            with self.assertRaises(UnicodeEncodeError):
+                write_text_file(path, "na\u9580ve", encoding)
+
     def test_encoding_is_reported_for_each_kind_of_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             for name, data, expected in [
                 ("utf8.txt", "naïve 門牌\n".encode("utf-8"), "utf-8"),
                 ("bom.txt", b"\xef\xbb\xbfhello\n", "utf-8"),
-                # Not valid UTF-8, so Latin-1 by the converter's rule.
-                ("latin1.txt", b"caf\xe9\n", "latin-1"),
+                # Not valid UTF-8, so the single-byte fallback (P7.1).
+                ("cp1252.txt", b"caf\xe9\n", "cp1252"),
                 # 0x97 is a valid *UTF-8* sequence when followed by the right
                 # continuation byte, so this is a UTF-8 file containing a
                 # character that looks like a CP1252 quote.
@@ -281,7 +338,7 @@ class FileTests(unittest.TestCase):
             source = Path(tmp) / "cp1252.txt"
             source.write_bytes(b"na\xefve\n")
             _text, encoding = read_text_file(source)
-            self.assertEqual(encoding, "latin-1")
+            self.assertEqual(encoding, "cp1252")
 
             out = Path(tmp) / "out.html"
             write_text_file(out, "<p>naïve 門牌</p>", "utf-8")
@@ -580,15 +637,20 @@ class GuiTests(unittest.TestCase):
 
             self.window.load_file(str(source))
             drain(self.app, self.window)
-            self.assertEqual(self.window.encoding, "latin-1")
-            # The editor shows the characters, not control codes.
-            # The editor shows what Latin-1 says, which is the converter's rule:
-            # 0x97 is a C1 control character, not the em dash CP1252 would make
-            # of it. Displaying a prettier character than the encoding contains
-            # would be wrong in the other direction -- the file says a control
-            # character and the file must keep saying so.
-            self.assertIn("\u0097", self.window.editor.toPlainText())
-            self.assertNotIn("\u2014", self.window.editor.toPlainText())
+            self.assertEqual(self.window.encoding, "cp1252")
+            # The editor shows punctuation, not control codes (P7.1).
+            #
+            # This asserted the opposite, and the comment above it was a
+            # careful defence of the wrong answer: it said 0x97 is a C1 control
+            # "and the file must keep saying so". True of Latin-1, and
+            # irrelevant, because the converter decodes CP1252 -- so the editor
+            # was showing one document while the preview showed another. The
+            # bytes still round-trip either way; the disagreement was in what
+            # the user was looking at.
+            shown = self.window.editor.toPlainText()
+            self.assertIn("\u2014", shown)
+            self.assertIn("\u201cquotes\u201d", shown)
+            self.assertNotIn("\u0097", shown)
 
             self.window.save_text()
             saved = source.read_bytes()
@@ -626,7 +688,7 @@ class GuiTests(unittest.TestCase):
 
             self.window.load_file(str(first))
             drain(self.app, self.window)
-            self.assertEqual(self.window.encoding, "latin-1")
+            self.assertEqual(self.window.encoding, "cp1252")
 
             self.window.load_file(str(second))
             drain(self.app, self.window)

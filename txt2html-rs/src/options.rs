@@ -2,6 +2,51 @@
 //!
 //! Mirrors the option set of HTML::TextToHTML v3.0.
 
+/// P7.3. How to decode input bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Encoding {
+    /// Decode as UTF-8 when the bytes are valid UTF-8, and as CP1252
+    /// otherwise. This is the default and the pre-P7.1 behaviour, modulo the
+    /// fallback being CP1252 rather than the Latin-1 it used to be.
+    #[default]
+    Auto,
+    /// Decode as UTF-8 unconditionally. Bytes that are not valid UTF-8 are
+    /// replaced rather than interpreted, so this is lossy by construction and
+    /// is only right when the caller already knows the encoding.
+    Utf8,
+    /// Decode as CP1252 unconditionally, one byte to one code point, including
+    /// for bytes that would have been valid UTF-8. This is how to read a
+    /// CP1252 file that the UTF-8 probe would have misjudged.
+    Cp1252,
+}
+
+impl Encoding {
+    /// The name accepted by `--encoding` and reported by `--verbose`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Encoding::Auto => "auto",
+            Encoding::Utf8 => "utf-8",
+            Encoding::Cp1252 => "cp1252",
+        }
+    }
+
+    /// Parse a `--encoding` value. Accepts a few spellings of each, because a
+    /// user typing an encoding name should not have to know which one the
+    /// implementation happens to call it.
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "auto" | "detect" => Ok(Encoding::Auto),
+            "utf8" | "utf-8" | "utf_8" => Ok(Encoding::Utf8),
+            "cp1252" | "windows-1252" | "win1252" | "1252" | "latin-1" | "latin1" => {
+                Ok(Encoding::Cp1252)
+            }
+            other => Err(format!(
+                "Unknown encoding `{other}`; expected auto, utf-8 or cp1252"
+            )),
+        }
+    }
+}
+
 /// Per-table-type enable flags.
 #[derive(Debug, Clone, Copy)]
 pub struct TableTypeFlags {
@@ -83,6 +128,23 @@ pub struct Options {
     pub indent_width: usize,
     pub indent_par_break: bool,
     pub italic_delimiter: String,
+    /// P7.3. How `convert::read_any_file` should decode input that is not valid
+    /// UTF-8, and what to assume for text handed over in memory.
+    ///
+    /// `Auto` is the historical behaviour and the default. `Utf8` and `Cp1252`
+    /// force the fallback rather than probing, which matters when the probe is
+    /// wrong — a CP1252 file whose bytes happen to be valid UTF-8 is
+    /// indistinguishable from a UTF-8 file by inspection, and no amount of
+    /// probing settles it.
+    pub encoding: Encoding,
+    /// P7.4. Emit `<meta charset="utf-8">` in the document head.
+    ///
+    /// Default **off**, and that is a compatibility decision rather than a
+    /// preference: byte-identical output from the reference is a stated goal of
+    /// this port, and the reference emits no charset declaration, so turning
+    /// this on by default would move every golden. A GUI turns it on, because
+    /// there the consumer is a browser that is about to guess.
+    pub meta_charset: bool,
     pub links_dictionaries: Vec<String>,
     pub link_only: bool,
     pub lower_case_tags: bool,
@@ -147,6 +209,8 @@ impl Default for Options {
             indent_width: 2,
             indent_par_break: false,
             italic_delimiter: "*".to_string(),
+            encoding: Encoding::Auto,
+            meta_charset: false,
             links_dictionaries: Vec::new(),
             link_only: false,
             lower_case_tags: false,

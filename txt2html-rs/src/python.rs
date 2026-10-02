@@ -16,7 +16,28 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use crate::cli::{self, Kind};
-use crate::convert::{read_any_file, Converter};
+use crate::convert::{read_with, Converter};
+use std::sync::Mutex;
+
+/// P7.5. The encoding [`convert_file`] last read its input with.
+///
+/// A `thread_local` would be wrong in a way that only shows up under a GUI: a
+/// status line reading it from the UI thread after the read happened on a worker
+/// thread would see nothing, and "remember the encoding" would silently become
+/// "forget the encoding" for every file opened through the thread pool. The GUI
+/// is the only consumer, it is one process, and the cost of being wrong here is
+/// a mangled save.
+static LAST_FILE_ENCODING: Mutex<Option<String>> = Mutex::new(None);
+
+/// The encoding [`convert_file`] last read its input with, as a name.
+///
+/// This exists for the GUI's **Save text…** path. `files.py` writes UTF-8
+/// unconditionally, so saving a Latin-1 file silently transcoded it; a caller
+/// that knows the file arrived as CP1252 can write it back the same way.
+#[pyfunction]
+fn file_encoding() -> Option<String> {
+    LAST_FILE_ENCODING.lock().ok().and_then(|g| g.clone())
+}
 use crate::options::{self, Options};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -130,9 +151,16 @@ fn convert_file(
     path: &str,
     options: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<String> {
-    let text = read_any_file(path)
-        .ok_or_else(|| PyValueError::new_err(format!("Could not open {path}")))?;
+    // P7.3/P7.5. The options are parsed *before* the read, because the read now
+    // depends on `encoding` and the GUI needs to know which encoding a file was
+    // read with before it can write it back. `file_encoding` below is how.
     let opts = options_from_dict(options)?;
+    let (text, resolved) = read_with(path, opts.encoding)
+        .ok_or_else(|| PyValueError::new_err(format!("Could not open {path}")))?;
+    LAST_FILE_ENCODING
+        .lock()
+        .ok()
+        .and_then(|mut g| g.replace(resolved.name().to_string()));
     Ok(py.allow_threads(|| run(&text, opts)))
 }
 
@@ -196,6 +224,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(convert, m)?)?;
     m.add_function(wrap_pyfunction!(convert_file, m)?)?;
     m.add_function(wrap_pyfunction!(process_chunk, m)?)?;
+    m.add_function(wrap_pyfunction!(file_encoding, m)?)?;
     m.add_function(wrap_pyfunction!(option_specs, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add("__version__", VERSION)?;
