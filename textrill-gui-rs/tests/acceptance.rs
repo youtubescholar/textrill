@@ -11,10 +11,15 @@
 //! `draw` code the window uses, so a widget is queried by the label a user
 //! sees. No display, no windowing system.
 
+use std::time::{Duration, Instant};
+
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use textrill::options::Options;
 use textrill_gui::{options_panel, TextrillApp};
+
+/// `Options.demoronize` is on by default, so a click must turn it off.
+const DEMORONIZE: &str = "Convert Microsoft character codes into sensible HTML.";
 
 /// The help string is the panel's label for every kind, so a duplicated help
 /// string would make a by-label query ambiguous. Enforce that first.
@@ -35,7 +40,9 @@ fn option_help_strings_are_unique() {
 #[test]
 fn the_panel_exposes_every_option() {
     let mut harness = Harness::new_ui_state(
-        |ui, opts: &mut Options| options_panel::draw(ui, opts),
+        |ui, opts: &mut Options| {
+            options_panel::draw(ui, opts);
+        },
         Options::default(),
     );
     // The panel is taller than a default test window; give it room so nothing
@@ -51,9 +58,10 @@ fn the_panel_exposes_every_option() {
 /// A checkbox click reaches the engine's own option set.
 #[test]
 fn clicking_a_checkbox_writes_through_to_options() {
-    const DEMORONIZE: &str = "Convert Microsoft character codes into sensible HTML.";
     let mut harness = Harness::new_ui_state(
-        |ui, opts: &mut Options| options_panel::draw(ui, opts),
+        |ui, opts: &mut Options| {
+            options_panel::draw(ui, opts);
+        },
         Options::default(),
     );
     assert!(harness.state().demoronize, "default should be on");
@@ -67,19 +75,22 @@ fn clicking_a_checkbox_writes_through_to_options() {
     );
 }
 
-/// The conversion path really calls the engine.
+/// A queued conversion is applied to the preview when it finishes.
 #[test]
-fn convert_now_uses_the_engine() {
-    let mut app = TextrillApp {
-        input: "Hello".to_string(),
-        ..Default::default()
-    };
-    app.convert_now();
+#[allow(clippy::field_reassign_with_default)]
+fn a_conversion_reaches_the_preview() {
+    let mut app = TextrillApp::default();
+    app.input = "Hello".to_string();
+    app.request_conversion();
+    wait_for_conversion(&mut app, Duration::from_secs(10));
+
     assert!(
         app.output.contains("<p>Hello</p>"),
         "unexpected output: {}",
         app.output
     );
+    assert_eq!(app.completed, app.latest, "the preview never settled");
+    assert_ne!(app.status, "converting…", "the status never cleared");
 }
 
 /// The window has its controls, and the app draws without panicking.
@@ -93,4 +104,12 @@ fn the_app_exposes_its_controls() {
     harness.get_by_label("Convert");
     harness.get_by_label("HTML");
     harness.get_by_label("Options");
+}
+
+fn wait_for_conversion(app: &mut TextrillApp, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while app.completed < app.latest && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+        app.drain();
+    }
 }

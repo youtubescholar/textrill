@@ -19,20 +19,24 @@ use textrill::cli::{self, Kind};
 use textrill::options::{numeric_range, Options};
 
 /// Draw every option, in the engine table's order.
-pub fn draw(ui: &mut Ui, opts: &mut Options) {
+///
+/// Returns whether any widget was edited, so the caller can re-convert.
+pub fn draw(ui: &mut Ui, opts: &mut Options) -> bool {
+    let mut changed = false;
     for spec in cli::SPECS {
         let key = spec.names[0];
-        match spec.kind {
+        changed |= match spec.kind {
             Kind::Flag => flag(ui, opts, key, spec.help),
             Kind::Int => int(ui, opts, key, spec.help),
             Kind::Str => string(ui, opts, key, spec.help),
             Kind::StrArray => string_array(ui, opts, key, spec.help),
             Kind::TableType => table_type(ui, opts, spec.help),
-        }
+        };
     }
+    changed
 }
 
-fn flag(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) {
+fn flag(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) -> bool {
     let mut on = cli::get_value(opts, key)
         .map(|v| v == "true")
         .unwrap_or(false);
@@ -41,14 +45,17 @@ fn flag(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) {
         // reports it as "1" and `set_value` ignores writes. Render it disabled
         // rather than as a checkbox that silently springs back.
         ui.add_enabled(false, egui::Checkbox::new(&mut on, help));
-        return;
+        return false;
     }
     if ui.checkbox(&mut on, help).changed() {
         let _ = cli::set_value(opts, key, if on { "true" } else { "false" });
+        true
+    } else {
+        false
     }
 }
 
-fn int(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) {
+fn int(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) -> bool {
     let current = cli::get_value(opts, key)
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
@@ -64,22 +71,30 @@ fn int(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) {
     });
     if value != current {
         let _ = cli::set_value(opts, key, &value.to_string());
+        true
+    } else {
+        false
     }
 }
 
-fn string(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) {
+fn string(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) -> bool {
     let mut text = cli::get_value(opts, key).unwrap_or_default();
-    ui.horizontal(|ui| {
-        if ui.text_edit_singleline(&mut text).changed() {
-            if let Err(message) = cli::set_value(opts, key, &text) {
-                ui.colored_label(egui::Color32::RED, message);
-            }
+    let changed = ui
+        .horizontal(|ui| {
+            let response = ui.text_edit_singleline(&mut text);
+            ui.label(help);
+            response.changed()
+        })
+        .inner;
+    if changed {
+        if let Err(message) = cli::set_value(opts, key, &text) {
+            ui.colored_label(egui::Color32::RED, message);
         }
-        ui.label(help);
-    });
+    }
+    changed
 }
 
-fn string_array(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) {
+fn string_array(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) -> bool {
     let mut text = cli::get_value(opts, key).unwrap_or_default();
     ui.label(help);
     if ui
@@ -97,15 +112,20 @@ fn string_array(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) {
             "links_dictionaries" => opts.links_dictionaries = entries,
             _ => {}
         }
+        true
+    } else {
+        false
     }
 }
 
-fn table_type(ui: &mut Ui, opts: &mut Options, help: &str) {
+fn table_type(ui: &mut Ui, opts: &mut Options, help: &str) -> bool {
     ui.label(help);
+    let mut changed = false;
     ui.horizontal(|ui| {
-        ui.checkbox(&mut opts.table_type.align, "ALIGN");
-        ui.checkbox(&mut opts.table_type.pgsql, "PGSQL");
-        ui.checkbox(&mut opts.table_type.border, "BORDER");
-        ui.checkbox(&mut opts.table_type.delim, "DELIM");
+        changed |= ui.checkbox(&mut opts.table_type.align, "ALIGN").changed();
+        changed |= ui.checkbox(&mut opts.table_type.pgsql, "PGSQL").changed();
+        changed |= ui.checkbox(&mut opts.table_type.border, "BORDER").changed();
+        changed |= ui.checkbox(&mut opts.table_type.delim, "DELIM").changed();
     });
+    changed
 }

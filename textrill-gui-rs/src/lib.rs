@@ -18,5 +18,6 @@
 
 pub mod app;
 pub mod options_panel;
+pub mod worker;
 
 pub use app::TextrillApp;

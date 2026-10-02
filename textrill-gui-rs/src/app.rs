@@ -7,27 +7,31 @@
 
 //! Application state and layout.
 
+use std::sync::Arc;
+
 use egui::Ui;
-use textrill::convert::Converter;
 use textrill::options::Options;
 
 use crate::options_panel;
+use crate::worker::ConversionWorker;
 
 /// The whole front end.
-///
-/// This is a skeleton: it converts synchronously and keeps no worker. The
-/// generation-tagged, queue-dropping worker contract in `SURFACE.md` §3 lands
-/// next and replaces [`TextrillApp::convert_now`] as the preview's source.
 pub struct TextrillApp {
     /// The live option set. The panel writes straight through
     /// `textrill::cli::set_value`, so this is the same model the engine sees.
     pub opts: Options,
     /// Source text.
     pub input: String,
-    /// Rendered HTML, kept in sync on every edit.
+    /// Rendered HTML, or the error text after a failed conversion.
     pub output: String,
-    /// Last conversion outcome, shown next to the Convert control.
+    /// Status line: `Ready`, `converting…`, a summary, or `error`.
     pub status: String,
+    /// The newest conversion requested.
+    pub latest: u64,
+    /// The newest conversion applied. `latest > completed` means work is out.
+    pub completed: u64,
+    worker: Arc<ConversionWorker>,
+    waker_installed: bool,
 }
 
 impl Default for TextrillApp {
@@ -37,40 +41,66 @@ impl Default for TextrillApp {
             input: String::new(),
             output: String::new(),
             status: "Ready".to_string(),
+            latest: 0,
+            completed: 0,
+            worker: ConversionWorker::new(2),
+            waker_installed: false,
         }
     }
 }
 
 impl TextrillApp {
-    /// Convert `input` with the current options.
+    /// Queue a conversion of the current text and options.
     ///
-    /// A panic is caught and reported, not allowed to unwind into the event
-    /// loop. The engine's panic paths are the inherited-hang class (P5), and
-    /// the reference front end treated a converter panic as a user-visible
-    /// error for the same reason.
-    pub fn convert_now(&mut self) {
-        let converted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut converter = Converter::new(self.opts.clone());
-            converter.convert_text(&self.input)
-        }));
-        match converted {
-            Ok(html) => {
-                self.output = html;
-                self.status = "Ready".to_string();
+    /// Waiting work is dropped by the worker; a burst of edits leaves the
+    /// newest job waiting, not one copy of the document per keystroke.
+    pub fn request_conversion(&mut self) {
+        self.latest = self.worker.convert(&self.input, &self.opts);
+        self.status = "converting…".to_string();
+    }
+
+    /// Apply every finished conversion, dropping results older than the newest
+    /// request.
+    pub fn drain(&mut self) {
+        while let Some(outcome) = self.worker.poll() {
+            if outcome.generation < self.latest {
+                continue; // a newer conversion is already under way
             }
-            Err(_) => {
-                self.status = "The converter stopped on invalid input".to_string();
+            self.completed = outcome.generation;
+            match outcome.error {
+                Some(error) => {
+                    self.output = error;
+                    self.status = "error".to_string();
+                }
+                None => {
+                    let lines = if outcome.html.is_empty() {
+                        0
+                    } else {
+                        outcome.html.matches('\n').count() + 1
+                    };
+                    self.output = outcome.html;
+                    self.status = format!("{lines} lines · {:.0} ms", outcome.seconds * 1000.0);
+                }
             }
         }
     }
 
     /// Draw the whole UI into `ui`.
     pub fn draw(&mut self, ui: &mut Ui) {
+        // The worker asks for a redraw when a result lands, so the preview does
+        // not wait for the next input event to appear.
+        if !self.waker_installed {
+            let ctx = ui.ctx().clone();
+            self.worker.set_waker(move || ctx.request_repaint());
+            self.waker_installed = true;
+        }
+        self.drain();
+
         ui.heading("textrill");
         ui.horizontal(|ui| {
             ui.label("Input");
             if ui.button("Convert").clicked() {
-                self.convert_now();
+                self.request_conversion();
             }
             ui.label(&self.status);
         });
@@ -79,17 +109,23 @@ impl TextrillApp {
             .add(egui::TextEdit::multiline(&mut self.input).desired_rows(6))
             .changed()
         {
-            self.convert_now();
+            self.request_conversion();
         }
 
         ui.separator();
+        let mut options_changed = false;
         egui::CollapsingHeader::new("Options")
             .default_open(false)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .max_height(320.0)
-                    .show(ui, |ui| options_panel::draw(ui, &mut self.opts));
+                    .show(ui, |ui| {
+                        options_changed = options_panel::draw(ui, &mut self.opts);
+                    });
             });
+        if options_changed {
+            self.request_conversion();
+        }
 
         ui.separator();
         ui.label("HTML");
