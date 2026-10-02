@@ -1,19 +1,21 @@
-"""txt2html — convert plain text to HTML.
+"""textrill — convert plain text to HTML.
 
-A Rust port of `HTML::TextToHTML` 3.0 (and the ``txt2html`` script), wrapped
-for Python.  The conversion is byte-identical to the original Perl module.
+A Rust reimplementation of `HTML::TextToHTML` 3.0 (and the ``txt2html`` script
+by Seth Golub), wrapped for Python.  The conversion is byte-identical to the
+original Perl module across the upstream corpus, apart from declared
+divergences; see the project README for the details.
 
-    >>> import txt2html
-    >>> print(txt2html.convert("hello *world*", {"extract": True}).strip())
+    >>> import textrill
+    >>> print(textrill.convert("hello *world*", {"extract": True}).strip())
     <p>hello <em>world</em></p>
 
 Options may be given as a mapping.  Names can be abbreviated exactly as on the
 command line, booleans also accept the ``no`` prefix, and every value may be
 given in its command line spelling::
 
-    txt2html.convert(text, {"xhtml": False, "make_tables": True})
-    txt2html.convert(text, {"no_xhtml": True, "make_tables": "1"})
-    txt2html.convert(text, {"custom_heading_regexp": [r"^What: "]})
+    textrill.convert(text, {"xhtml": False, "make_tables": True})
+    textrill.convert(text, {"no_xhtml": True, "make_tables": "1"})
+    textrill.convert(text, {"custom_heading_regexp": [r"^What: "]})
 
 Use :func:`option_specs` to discover the available options, or :class:`Options`
 for an object with attribute access and validation.
@@ -79,7 +81,7 @@ class Options(Mapping[str, Any]):
 
         opts = Options(xhtml=False, make_tables=True)
         opts["custom_heading_regexp"] = [r"^What: "]
-        html = txt2html.convert(text, opts)
+        html = textrill.convert(text, opts)
 
     Unknown names raise :exc:`KeyError`, values of the wrong type raise
     :exc:`ValueError`, and :attr:`changed` tells you whether anything differs

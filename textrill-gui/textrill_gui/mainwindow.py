@@ -1,6 +1,6 @@
-# txt2html GUI — a Qt front end for the txt2html converter.
+# textrill-gui — a Qt front end for textrill.
 #
-# Copyright (C) 2026 the txt2html-rs authors.
+# Copyright (C) 2026 the textrill authors.
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import txt2html
+import textrill
 
 from .files import read_text_file, write_text_file
 from .optionspanel import OptionsPanel
@@ -76,14 +76,14 @@ class MainWindow(QMainWindow):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("txt2html")
+        self.setWindowTitle("textrill")
         self.resize(1100, 720)
         self.setAcceptDrops(True)
 
         # An explicit organization name lets the tests keep their settings in
         # a throw-away location instead of the user's real configuration.
-        org = QCoreApplication.organizationName() or "txt2html-gui"
-        app = QCoreApplication.applicationName() or "txt2html-gui"
+        org = QCoreApplication.organizationName() or "textrill-gui"
+        app = QCoreApplication.applicationName() or "textrill-gui"
         self.settings = QSettings(org, app)
         # path: the text file that was opened; output_path: where the HTML
         # was last written.  They are deliberately different files.
@@ -453,8 +453,8 @@ class MainWindow(QMainWindow):
     def about(self) -> None:
         QMessageBox.about(
             self,
-            "About txt2html",
-            f"<h3>txt2html {txt2html.version()}</h3>"
+            "About textrill",
+            f"<h3>textrill {textrill.version()}</h3>"
             "<p>A Rust port of <b>HTML::TextToHTML</b> 3.0, with a Qt front end.</p>"
             "<p>The conversion is byte-identical to the original Perl module.</p>"
             "<p>Released under the GNU General Public License, version 3 or later.</p>",
@@ -486,7 +486,7 @@ class MainWindow(QMainWindow):
         name = os.path.basename(self.path) if self.path else "untitled"
         # "*" marks unsaved text edits, "+" marks HTML not yet written out.
         mark = ("*" if self.dirty else "") + ("+" if self.output_stale else "")
-        self.setWindowTitle(f"{name}{mark} — txt2html")
+        self.setWindowTitle(f"{name}{mark} — textrill")
 
     def _restore_settings(self) -> None:
         geometry = self.settings.value("geometry")

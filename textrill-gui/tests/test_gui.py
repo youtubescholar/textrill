@@ -1,6 +1,6 @@
-# txt2html GUI — a Qt front end for the txt2html converter.
+# textrill-gui — a Qt front end for textrill.
 #
-# Copyright (C) 2026 the txt2html-rs authors.
+# Copyright (C) 2026 the textrill authors.
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -30,11 +30,11 @@ os.environ["XDG_CONFIG_HOME"] = tempfile.mkdtemp(prefix="t2h-gui-test-")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import txt2html  # noqa: E402
-from txt2html_gui.app import build_application  # noqa: E402
-from txt2html_gui.files import decode_bytes, read_text_file, write_text_file  # noqa: E402
-from txt2html_gui.optionspanel import TABLE_TYPES  # noqa: E402
-from txt2html_gui.worker import Converter  # noqa: E402
+import textrill  # noqa: E402
+from textrill_gui.app import build_application  # noqa: E402
+from textrill_gui.files import decode_bytes, read_text_file, write_text_file  # noqa: E402
+from textrill_gui.optionspanel import TABLE_TYPES  # noqa: E402
+from textrill_gui.worker import Converter  # noqa: E402
 from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QFileDialog, QMessageBox  # noqa: E402
 
@@ -65,13 +65,13 @@ def drain(app, window, timeout_ms: int = 20000) -> str:
 
 class ConverterTests(unittest.TestCase):
     def test_simple_conversion(self):
-        html = txt2html.convert("hello *world*", {"extract": True})
+        html = textrill.convert("hello *world*", {"extract": True})
         self.assertIn("<p>hello <em>world</em></p>", html)
 
     def test_xhtml_flag_changes_tags(self):
-        html = txt2html.convert("hi\n", {"xhtml": False})
+        html = textrill.convert("hi\n", {"xhtml": False})
         self.assertIn("<HTML>", html)
-        html = txt2html.convert("hi\n", {"xhtml": True})
+        html = textrill.convert("hi\n", {"xhtml": True})
         self.assertIn("<html", html)
 
     def test_table_type_flags(self):
@@ -86,15 +86,15 @@ class ConverterTests(unittest.TestCase):
             "\n(2 rows)\n"
         )
         base = {"make_tables": True, "extract": True}
-        self.assertIn("<table", txt2html.convert(text, base))
+        self.assertIn("<table", textrill.convert(text, base))
         self.assertNotIn(
             "<table",
-            txt2html.convert(text, dict(base, table_type={"BORDER": False})),
+            textrill.convert(text, dict(base, table_type={"BORDER": False})),
         )
         # the same table as a string spelling of the flags
         self.assertIn(
             "<table",
-            txt2html.convert(text, dict(base, table_type="BORDER=1 DELIM=1")),
+            textrill.convert(text, dict(base, table_type="BORDER=1 DELIM=1")),
         )
 
     def test_table_type_matches_the_reference(self):
@@ -104,11 +104,11 @@ class ConverterTests(unittest.TestCase):
         text, _ = read_text_file(os.path.join(source, "table-border.txt"))
         golden, _ = read_text_file(os.path.join(source, "good_table-border.html"))
         self.assertEqual(
-            txt2html.convert(text, {"make_tables": True, "extract": True}), golden
+            textrill.convert(text, {"make_tables": True, "extract": True}), golden
         )
 
     def test_option_specs_cover_the_whole_table(self):
-        specs = txt2html.option_specs()
+        specs = textrill.option_specs()
         self.assertGreater(len(specs), 40)
         names = set()
         for name, aliases, kind, default, _accepted, help_text in specs:
@@ -122,7 +122,7 @@ class ConverterTests(unittest.TestCase):
         )
 
     def test_aliases_are_usable_and_unique(self):
-        specs = txt2html.option_specs()
+        specs = textrill.option_specs()
         names = {s[0] for s in specs}
         seen = set()
         for name, aliases, kind, default, _accepted, _help in specs:
@@ -135,8 +135,8 @@ class ConverterTests(unittest.TestCase):
                 # the alias must behave like the option it stands for
                 options = {alias: default}
                 self.assertEqual(
-                    txt2html.convert("x\n", options),
-                    txt2html.convert("x\n", {name: default}),
+                    textrill.convert("x\n", options),
+                    textrill.convert("x\n", {name: default}),
                     f"alias {alias} does not mean {name}",
                 )
 
@@ -376,10 +376,10 @@ class FileTests(unittest.TestCase):
         """
         engine = (
             Path(__file__).resolve().parents[2]
-            / "txt2html-rs" / "target" / "debug" / "txt2html"
+            / "textrill" / "target" / "debug" / "textrill"
         )
         if not engine.exists():
-            self.skipTest("engine binary not built; run `cargo build` in txt2html-rs")
+            self.skipTest("engine binary not built; run `cargo build` in textrill/")
 
         expected = "Hello world.\nThis is plain prose.\n"
         with tempfile.TemporaryDirectory() as tmp:
@@ -627,7 +627,7 @@ class GuiTests(unittest.TestCase):
         reads the same table the engine validates against, so they cannot drift
         apart again.
         """
-        from txt2html_gui.optionspanel import load_specs
+        from textrill_gui.optionspanel import load_specs
 
         specs = {spec.name: spec for spec in load_specs()}
 
@@ -665,17 +665,17 @@ class GuiTests(unittest.TestCase):
         this test kept verifying whatever happened to be broken that week, and
         would have gone away silently with the last one.
         """
-        real_convert = txt2html.convert
+        real_convert = textrill.convert
 
         def panicking_convert(text, options):
-            raise txt2html.PanicException("injected for the A4 handler test")
+            raise textrill.PanicException("injected for the A4 handler test")
 
         self.window.editor.setPlainText("hello\n\tworld\n")
-        txt2html.convert = panicking_convert
+        textrill.convert = panicking_convert
         try:
             html = drain(self.app, self.window)
         finally:
-            txt2html.convert = real_convert
+            textrill.convert = real_convert
             self.window.options.reset_all()
         self.assertNotEqual(
             html.strip(), "", "the preview went blank with nothing to show for it"
@@ -719,14 +719,14 @@ class GuiTests(unittest.TestCase):
 
         pyo3 puts PanicException in `pyo3_runtime`, which is not importable, so
         without the re-export in python.rs no caller could write
-        `except txt2html.PanicException`.
+        `except textrill.PanicException`.
         """
-        self.assertTrue(hasattr(txt2html, "PanicException"))
+        self.assertTrue(hasattr(textrill, "PanicException"))
         self.assertFalse(
-            issubclass(txt2html.PanicException, Exception),
+            issubclass(textrill.PanicException, Exception),
             "if this ever becomes an Exception the test stops proving anything",
         )
-        self.assertTrue(issubclass(txt2html.PanicException, BaseException))
+        self.assertTrue(issubclass(textrill.PanicException, BaseException))
 
     def test_option_change_is_picked_up(self):
         self.window.editor.setPlainText("hi\n")
@@ -763,9 +763,9 @@ class GuiTests(unittest.TestCase):
             window.auto_checkbox.setChecked(was)
 
     def test_sample_text_exercises_the_converter(self):
-        from txt2html_gui.mainwindow import SAMPLE_TEXT
+        from textrill_gui.mainwindow import SAMPLE_TEXT
 
-        html = txt2html.convert(SAMPLE_TEXT, {"extract": True, "make_tables": True})
+        html = textrill.convert(SAMPLE_TEXT, {"extract": True, "make_tables": True})
         for what, fragment in [
             ("emphasis", "<em>emphasis</em>"),
             ("strong", "<strong>strong</strong>"),
@@ -1090,7 +1090,7 @@ class GuiTests(unittest.TestCase):
     def test_generated_html_from_the_panel_declares_utf8(self):
         """End to end, because forcing the option is only worth anything if the
         conversion honours it."""
-        html = txt2html.convert("Привет, мир!\n", self.window.options.values())
+        html = textrill.convert("Привет, мир!\n", self.window.options.values())
         self.assertIn("charset", html)
         self.assertIn("utf-8", html.lower())
 

@@ -1,6 +1,6 @@
-use txt2html::convert::Converter;
-use txt2html::links;
-use txt2html::options::Options;
+use textrill::convert::Converter;
+use textrill::links;
+use textrill::options::Options;
 
 #[test]
 fn literal_system_links_match() {
@@ -34,7 +34,7 @@ fn convert_string(text: &str, extract: bool) -> String {
     };
     opts.deal_with_options();
     let mut conv = Converter::new(opts);
-    conv.txt2html()
+    conv.convert()
 }
 
 /// A once-only link rule must see the text that precedes it.
@@ -126,7 +126,7 @@ fn conversions_are_independent_across_threads() {
 /// rather than passing in silence.
 #[test]
 fn large_heading_list_document_is_not_quadratic() {
-    // CARGO_MANIFEST_DIR is .../txt2html-rs, so the checkout root is one up.
+    // CARGO_MANIFEST_DIR is .../textrill, so the checkout root is one up.
     // Overridable, because a 26 MB fixture is the kind of thing a CI job may
     // want to place elsewhere.
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -160,7 +160,7 @@ fn large_heading_list_document_is_not_quadratic() {
         o.deal_with_options();
         let mut c = Converter::new(o);
         let t0 = std::time::Instant::now();
-        let out = c.txt2html();
+        let out = c.convert();
         (out, t0.elapsed().as_secs_f64())
     };
 

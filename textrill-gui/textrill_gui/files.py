@@ -1,6 +1,6 @@
-# txt2html GUI — a Qt front end for the txt2html converter.
+# textrill-gui — a Qt front end for textrill.
 #
-# Copyright (C) 2026 the txt2html-rs authors.
+# Copyright (C) 2026 the textrill authors.
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free

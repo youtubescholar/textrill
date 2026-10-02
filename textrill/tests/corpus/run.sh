@@ -11,7 +11,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # elsewhere. They are now derived from $HERE, and every one of them is still
 # overridable from the environment, so nothing here is load-bearing.
 #
-# $HERE is .../txt2html-rs/tests/corpus, so ROOT is the crate and REPO the
+# $HERE is .../textrill/tests/corpus, so ROOT is the crate and REPO the
 # checkout holding ref/ and the tracked upstream archives.
 ROOT="$(cd "$HERE/../.." && pwd)"
 REPO="$(cd "$ROOT/.." && pwd)"
@@ -19,7 +19,7 @@ REPO="$(cd "$ROOT/.." && pwd)"
 # YAML::Syck stub; see the `ref` target in the top-level Makefile.
 REFDIR="${REFDIR:-$REPO/ref/txt2html-3.0}"
 STUBS="${STUBS:-$REPO/ref/stubs}"
-MINE="${MINE:-$ROOT/target/debug/txt2html}"
+MINE="${MINE:-$ROOT/target/debug/textrill}"
 # Scratch directory for the two output sets. Derived from TMPDIR rather than
 # hardcoded, so it works on a machine that keeps its temporary files elsewhere.
 RUNDIR="${RUNDIR:-${TMPDIR:-/tmp}/txt2html-corpus}"

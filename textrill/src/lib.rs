@@ -1,4 +1,7 @@
-//! txt2html — a Rust port of HTML::TextToHTML v3.0.
+//! textrill — convert plain text to HTML.
+//!
+//! A Rust reimplementation of `HTML::TextToHTML` v3.0 and its `txt2html`
+//! script, originally by Seth Golub.
 //!
 //! Converts plain text to HTML. This crate provides the core conversion
 //! engine (`Converter`) plus the options model (`Options`).
@@ -87,7 +90,7 @@
 //!   and with several inputs the readable ones are still converted — so this
 //!   moves no golden. The reference's own message is still printed. An *empty*
 //!   file is not a failure: it is readable, and it exits 0. Use
-//!   [`Converter::try_txt2html`] to see which files could not be read;
+//!   [`Converter::try_convert`] to see which files could not be read;
 //!   [`Converter::txt2html`] keeps the reference's forgiving behaviour for
 //!   in-process callers that want a `String` regardless.
 

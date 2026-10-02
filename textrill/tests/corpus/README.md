@@ -9,7 +9,7 @@ The reference is not in version control. `make ref` builds it from the tracked
 
 ```sh
 make ref                      # extract the reference; run this first
-cd txt2html-rs
+cd textrill
 cargo build
 tests/corpus/run.sh          # all cases
 tests/corpus/run.sh sample   # a single case
@@ -27,7 +27,7 @@ script's own location, so a fresh checkout works; none of them is load-bearing:
 | `PERL5LIB`  | `$STUBS:$REFDIR/lib`                                   |
 
 `<checkout>` is the directory holding this repository and `ref/`; `<crate>` is
-`txt2html-rs`. These used to be the absolute path of the machine that developed
+`textrill`. These used to be the absolute path of the machine that developed
 the port, which meant a fresh clone had no working gate at all — the defaults
 pointed into a home directory that does not exist elsewhere, and `ref/` is
 gitignored, so there was nothing to point *at*. `run.sh` and `fuzz.py` now

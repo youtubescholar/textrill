@@ -1,4 +1,4 @@
-//! Command line option handling, shared by the `txt2html` binary and the
+//! Command line option handling, shared by the `textrill` binary and the
 //! Python bindings.
 //!
 //! The table of options, the abbreviation rules and the `--no` prefix for
@@ -518,8 +518,11 @@ fn set_one_table_type(opts: &mut Options, v: &str) -> Result<(), String> {
 
 pub fn usage() -> String {
     let mut s = String::new();
-    s.push_str("Usage: txt2html [ options ] [ file ... ]\n");
-    s.push_str("Convert plain text to HTML.  See the txt2html man page for details.\n\n");
+    s.push_str("Usage: textrill [ options ] [ file ... ]\n");
+    s.push_str(
+        "Convert plain text to HTML.  A reimplementation of txt2html 3.0; \
+         see the textrill README for details.\n\n",
+    );
     for spec in SPECS {
         let mut names = String::new();
         for (i, n) in spec.names.iter().enumerate() {

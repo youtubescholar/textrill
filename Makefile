@@ -8,7 +8,7 @@
 #   make scale       the 1 MB paragraph probes, timed against Perl
 #
 # Individual targets build first and pass the binary path explicitly. The
-# corpus runner defaults MINE to target/debug/txt2html, and a stale debug
+# corpus runner defaults MINE to target/debug/textrill, and a stale debug
 # binary is what made it report a false green twice during A1; exporting MINE
 # from here means no invocation can pick up a binary that was not just built.
 
@@ -16,11 +16,11 @@ TIME   ?= /usr/bin/time -f "  %es"
 CARGO  ?= cargo
 PYTHON ?= python3
 ROOT  := $(CURDIR)
-RS    := $(ROOT)/txt2html-rs
-GUI   := $(ROOT)/txt2html-gui
+RS    := $(ROOT)/textrill
+GUI   := $(ROOT)/textrill-gui
 VENV  ?= $(ROOT)/.venv
 
-RELEASE_BIN := $(RS)/target/release/txt2html
+RELEASE_BIN := $(RS)/target/release/textrill
 REFDIR      ?= $(ROOT)/ref/txt2html-3.0
 STUBS       ?= $(ROOT)/ref/stubs
 

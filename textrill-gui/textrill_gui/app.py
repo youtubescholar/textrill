@@ -1,6 +1,6 @@
-# txt2html GUI — a Qt front end for the txt2html converter.
+# textrill-gui — a Qt front end for textrill.
 #
-# Copyright (C) 2026 the txt2html-rs authors.
+# Copyright (C) 2026 the textrill authors.
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -22,7 +22,7 @@ from .mainwindow import MainWindow
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="txt2html-gui",
+        prog="textrill-gui",
         description="Convert plain text to HTML, with a live preview.",
     )
     parser.add_argument(
@@ -57,9 +57,9 @@ def build_application(argv: Optional[List[str]] = None):
     """
     args = parse_args(argv)
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    app.setApplicationName("txt2html")
-    app.setApplicationDisplayName("txt2html")
-    app.setOrganizationName("txt2html-gui")
+    app.setApplicationName("textrill")
+    app.setApplicationDisplayName("textrill")
+    app.setOrganizationName("textrill-gui")
     window = MainWindow()
     if args.file:
         window.load_file(args.file)
@@ -75,9 +75,9 @@ def build_application(argv: Optional[List[str]] = None):
 def main(argv: Optional[List[str]] = None) -> int:
     app, window, args = build_application(argv)
     if args.version:
-        import txt2html
+        import textrill
 
-        print(f"txt2html-gui for txt2html {txt2html.version()}")
+        print(f"textrill-gui for textrill {textrill.version()}")
         return 0
     window.show()
     return app.exec()

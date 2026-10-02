@@ -63,8 +63,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            txt2html-rs/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('txt2html-rs/Cargo.lock') }}
+            textrill/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('textrill/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Formatting
@@ -102,8 +102,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            txt2html-rs/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('txt2html-rs/Cargo.lock') }}
+            textrill/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('textrill/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       # The oracle. Built from the tracked tarball and stub, offline, so the
@@ -119,7 +119,7 @@ jobs:
       # on the runner to have cleaned it.
       - name: Differential corpus and goldens
         env:
-          RUNDIR: ${{ runner.temp }}/txt2html-corpus
+          RUNDIR: ${{ runner.temp }}/textrill-corpus
         run: make corpus
 
       # Fixed seeds, and the fuzzer's own exit status reaches make (P1 fixed the
@@ -169,8 +169,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            txt2html-rs/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('txt2html-rs/Cargo.lock') }}
+            textrill/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('textrill/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       # The venv is built here rather than cached, because the extension is

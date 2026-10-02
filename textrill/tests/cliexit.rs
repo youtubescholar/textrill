@@ -77,7 +77,7 @@ struct Run {
 }
 
 fn run(args: &[&str]) -> Run {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_txt2html"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_textrill"))
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -416,7 +416,7 @@ fn stdin_is_not_treated_as_an_unreadable_input() {
 // pattern is reported before any output exists.
 
 /// The options whose value is a regular expression, as the CLI spells them.
-const REGEXP_OPTIONS: &[&str] = txt2html::options::Options::REGEXP_OPTIONS;
+const REGEXP_OPTIONS: &[&str] = textrill::options::Options::REGEXP_OPTIONS;
 
 /// The CLI's own option table, which is the source of truth for which options
 /// take a regexp. Kept in sync with `Options::user_patterns` by
@@ -553,7 +553,7 @@ fn the_default_patterns_validate() {
 /// caller reading stdout never sees a half-converted document.
 #[test]
 fn a_rejected_pattern_writes_no_output() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_txt2html"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_textrill"))
         .args(["--custom_heading_regexp", "a(", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -589,7 +589,7 @@ fn a_bad_link_dictionary_pattern_is_reported_and_skipped() {
     let out_path = dir.join("out.html");
     let _ = std::fs::remove_file(&out_path);
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_txt2html"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_textrill"))
         .args([
             "--links_dictionaries",
             dict.to_str().expect("path"),
@@ -633,7 +633,7 @@ fn a_bad_link_dictionary_pattern_is_reported_and_skipped() {
 /// reading stdout never sees a half-converted document.
 #[test]
 fn rejection_happens_before_any_output() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_txt2html"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_textrill"))
         .args(["--tab_width=0", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

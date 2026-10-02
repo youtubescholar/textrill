@@ -1,7 +1,7 @@
-txt2html-gui
+textrill-gui
 ============
 
-A Qt/PySide6 desktop front end for txt2html-rs.  It is a derivative work of
+A Qt/PySide6 desktop front end for textrill.  It is a derivative work of
 txt2html and is distributed under the terms of the GNU General Public License,
 version 3 or (at your option) any later version.
 
@@ -27,7 +27,7 @@ This choice is not free of consequences, and they are worth stating plainly:
     corresponding source, which includes the Rust engine, the Python sources
     here, and the build inputs needed to regenerate them.
   * A downstream user who wants to combine this GUI with other LGPL-only code
-    cannot do so under the GPL terms.  They can start from txt2html-rs, which
+    cannot do so under the GPL terms.  They can start from textrill, which
     has no Qt dependency at all, instead.
 
 The licence of the Qt libraries themselves is unaffected by this choice: their
@@ -37,7 +37,7 @@ nothing here relicenses Qt.
 If you are redistributing this and would rather work under the LGPLv3, that is
 available to you.  Upstream txt2html is dual-licensed "under the same terms as
 Perl itself" (Artistic 1.0 or GPL), and Qt is used here under its LGPLv3
-option.  See ../txt2html-rs/LICENSE for the same discussion from the engine's
+option.  See ../textrill/LICENSE for the same discussion from the engine's
 side.
 
 Upstream copyright
@@ -48,13 +48,13 @@ Upstream copyright
     Copyright 2018-2019 Joao Eriberto Mota Filho
 
     This GUI is not part of any upstream txt2html distribution.  It is an
-    independent front end for the Rust port in ../txt2html-rs, which is itself
+    independent front end for the Rust port in ../textrill, which is itself
     a derivative of the works above.
 
 Modifications
 -------------
 
-    Copyright (C) 2026 the txt2html-rs authors.
+    Copyright (C) 2026 the textrill authors.
 
     Released under the GNU General Public License, version 3 or later, as
     permitted by the upstream grant quoted above.

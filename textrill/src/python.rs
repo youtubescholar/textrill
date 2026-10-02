@@ -1,13 +1,13 @@
-// Copyright (C) 2026 the txt2html-rs authors.
+// Copyright (C) 2026 the textrill authors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
 // Software Foundation, either version 3 of the License, or (at your option)
 // any later version.  See the LICENSE file for the full text.
 
-//! Python bindings, exposed as `txt2html._native`.
+//! Python bindings, exposed as `textrill._native`.
 //!
-//! The Python side is a thin wrapper in `txt2html/__init__.py`; this module
+//! The Python side is a thin wrapper in `textrill/__init__.py`; this module
 //! only exposes the conversion itself plus the option metadata that the GUI
 //! builds itself from.
 

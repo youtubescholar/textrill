@@ -1,6 +1,6 @@
-# txt2html GUI — a Qt front end for the txt2html converter.
+# textrill-gui — a Qt front end for textrill.
 #
-# Copyright (C) 2026 the txt2html-rs authors.
+# Copyright (C) 2026 the textrill authors.
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -11,7 +11,7 @@
 
 Nothing here hard-codes the option list: widgets, defaults, help texts and
 the grouping into "basic", "formatting", "tables", "lists", "preformatted",
-"links" and "document" all come from :func:`txt2html.option_specs`, so a new
+"links" and "document" all come from :func:`textrill.option_specs`, so a new
 option in the Rust library shows up without touching this file.
 """
 
@@ -151,10 +151,10 @@ class OptionSpec:
 
 def load_specs() -> List[OptionSpec]:
     """Read the option table from the extension module."""
-    import txt2html
+    import textrill
 
     specs = []
-    for name, aliases, kind, default, accepted, help_text in txt2html.option_specs():
+    for name, aliases, kind, default, accepted, help_text in textrill.option_specs():
         if name in HIDDEN:
             continue
         specs.append(
@@ -460,7 +460,7 @@ class OptionsPanel(QScrollArea):
         self.filter_box.clear()
 
     def values(self) -> Dict[str, Any]:
-        """The current options, ready to hand to :func:`txt2html.convert`.
+        """The current options, ready to hand to :func:`textrill.convert`.
 
         `meta_charset` is forced on. The engine defaults it **off** so that no
         golden file moves, which is the right default for a byte-compatible CLI

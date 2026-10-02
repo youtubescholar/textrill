@@ -1,13 +1,13 @@
-# txt2html GUI
+# textrill-gui
 
-A small Qt front end for [txt2html](../txt2html-rs), the Rust port of the Perl
-module `HTML::TextToHTML` 3.0.
+A small Qt front end for [textrill](../textrill), the Rust reimplementation
+of the Perl module `HTML::TextToHTML` 3.0.
 
 > **This front end is scheduled to be rewritten, 2026-10-01.** The project
-> settled that the deliverable is a *single self-contained artifact*, and this
+> settled that the deliverable is a *single Flatpak artifact*, and this
 > package needs a Python runtime plus PySide6 at run time, so it does not meet
 > that. The rewrite moves the shell to Rust + Qt. The converter in
-> `../txt2html-rs` is **not** being rewritten — it is the part that is finished
+> `../textrill` is **not** being rewritten — it is the part that is finished
 > and byte-verified against Perl, and a Rust GUI calls into it directly instead
 > of across the pyo3 boundary this package uses.
 >
@@ -15,9 +15,10 @@ module `HTML::TextToHTML` 3.0.
 > and `tests/test_gui.py` is treated as its acceptance criteria rather than as
 > code to translate. The 30 shell tests in it are the specification of what the
 > Rust GUI has to do. Nothing here is a dead end: the tests, the encoding rules
-> and the concurrency contract all carry over. Open questions before the port
-> starts are Qt6 vs GTK4, whether the CLI stays as a second binary, and whether
-> this package is replaced outright or kept runnable alongside during the port.
+> and the concurrency contract all carry over. Settled since then: the CLI stays, this package is kept runnable
+> alongside the new one until it passes the ported suite, and the artifact ships as
+> a Flatpak. Still open before the port starts is Qt6 vs GTK4, which Flatpak has
+> reduced to a choice of runtime.
 
 Type or open text on the left, watch the HTML appear on the right, and adjust
 the conversion options in the panel on the far right.  Every option, its
@@ -26,11 +27,11 @@ form cannot drift away from the library.
 
 ## Installing
 
-The GUI needs the `txt2html` extension module, which is built from this
+The GUI needs the `textrill` extension module, which is built from this
 repository with [maturin](https://www.maturin.rs/):
 
 ```sh
-cd ../txt2html-rs
+cd ../textrill
 python -m venv .venv
 . .venv/bin/activate
 pip install maturin
@@ -40,17 +41,17 @@ maturin develop --release
 Then install the GUI next to it:
 
 ```sh
-cd ../txt2html-gui
+cd ../textrill-gui
 pip install -e .
 ```
 
 ## Running
 
 ```sh
-txt2html-gui                    # empty editor
-txt2html-gui notes.txt          # open a file
-txt2html-gui --no-xhtml --tables sample.txt
-python -m txt2html_gui          # without installing the entry point
+textrill-gui                    # empty editor
+textrill-gui notes.txt          # open a file
+textrill-gui --no-xhtml --tables sample.txt
+python -m textrill_gui          # without installing the entry point
 ```
 
 Files are read as UTF-8, falling back to Latin-1, which is what the converter
@@ -93,11 +94,11 @@ between sessions.
 
 | File | What it does |
 |---|---|
-| `txt2html_gui/app.py` | argument parsing and startup |
-| `txt2html_gui/mainwindow.py` | the window, its actions and its shortcuts |
-| `txt2html_gui/optionspanel.py` | the options form, built from `option_specs()` |
-| `txt2html_gui/worker.py` | conversions on a `QThreadPool` |
-| `txt2html_gui/files.py` | reading and writing text files |
+| `textrill_gui/app.py` | argument parsing and startup |
+| `textrill_gui/mainwindow.py` | the window, its actions and its shortcuts |
+| `textrill_gui/optionspanel.py` | the options form, built from `option_specs()` |
+| `textrill_gui/worker.py` | conversions on a `QThreadPool` |
+| `textrill_gui/files.py` | reading and writing text files |
 | `tests/test_gui.py` | head-less tests |
 
 ## Tests

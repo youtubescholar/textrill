@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
-// txt2html — convert plain text to HTML.
+// textrill — convert plain text to HTML.
 //
-// Copyright (C) 2026 the txt2html-rs authors.
+// Copyright (C) 2026 the textrill authors.
 //
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -10,12 +10,12 @@
 
 use std::process::ExitCode;
 
-use txt2html::cli;
-use txt2html::convert::Converter;
-use txt2html::options::Options;
+use textrill::cli;
+use textrill::convert::Converter;
+use textrill::options::Options;
 
-const PROG: &str = "txt2html";
-const VERSION: &str = "3.0";
+const PROG: &str = "textrill";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -61,7 +61,7 @@ fn main() -> ExitCode {
     // Makefile or CI step reads a 0-byte output file as a successful build. The
     // output itself is unchanged -- an unreadable file contributed nothing to it
     // either way -- but the exit code now says what happened.
-    let (out, unreadable) = match conv.try_txt2html() {
+    let (out, unreadable) = match conv.try_convert() {
         Ok(out) => (out, Vec::new()),
         Err(e) => (e.out, e.unreadable),
     };
@@ -96,7 +96,7 @@ fn main() -> ExitCode {
     // still exit 0 and a successful conversion of the readable inputs is not
     // lost behind the diagnostic.
     if !unreadable.is_empty() {
-        // `try_txt2html` has already printed the reference's own
+        // `try_convert` has already printed the reference's own
         // `Could not open …` line; this says what it means for the exit code.
         eprintln!(
             "{PROG}: could not read {} input file(s), exiting non-zero",

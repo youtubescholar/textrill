@@ -1,5 +1,5 @@
-txt2html-rs
-==========
+textrill
+========
 
 This is a Rust reimplementation of txt2html, a Perl program originally written
 by Seth Golub.  It is a derivative work and is distributed under the terms of
@@ -14,10 +14,10 @@ as Perl itself", which is the Artistic License 1.0 or the GNU General Public
 License.  Selecting the GPL branch of that dual grant is a choice this project
 has made, not a requirement imposed by any dependency:
 
-  * Qt is not involved in this crate at all.  txt2html-rs is pure Rust and
+  * Qt is not involved in this crate at all.  textrill is pure Rust and
     links no Qt code, so nothing here is forced into a particular copyleft
     license by Qt.
-  * The GUI in ../txt2html-gui uses PySide6, which is licensed
+  * The GUI in ../textrill-gui uses PySide6, which is licensed
     "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only" and is used here as a set
     of dynamically linked shared libraries.  LGPLv3 would be available on those
     terms.  GPLv3 is used anyway so that this port and its GUI are covered by a
@@ -47,7 +47,7 @@ Modifications
 -------------
 
     This Rust implementation, and the changes made to the behaviour described
-    above, are Copyright (C) 2026 the txt2html-rs authors.
+    above, are Copyright (C) 2026 the textrill authors.
 
     Released under the GNU General Public License, version 3 or later, as
     permitted by the upstream grant quoted above.

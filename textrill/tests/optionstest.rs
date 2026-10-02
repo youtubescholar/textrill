@@ -1,8 +1,8 @@
 //! Regressions for Perl semantics that are easy to get wrong, plus the
 //! command line option lookup rules of `Getopt::Long`.
 
-use txt2html::cli;
-use txt2html::options::Options;
+use textrill::cli;
+use textrill::options::Options;
 
 // ---------------------------------------------------------------- options --
 

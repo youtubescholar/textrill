@@ -1,4 +1,4 @@
-//! The txt2html conversion engine.
+//! The textrill conversion engine.
 //!
 //! A faithful port of HTML::TextToHTML v3.0's `process_para`,
 //! `process_chunk`, `txt2html`, `do_file_start` and the associated helper
@@ -610,7 +610,7 @@ pub struct Converter {
     preformat_enabled: bool,
     re_cache: HashMap<String, Regex>,
     print_count: u32,
-    /// P7.3. Set by `try_txt2html`; read back with `resolved_encoding()`.
+    /// P7.3. Set by `try_convert`; read back with `resolved_encoding()`.
     resolved: Resolved,
 }
 
@@ -1786,7 +1786,7 @@ impl Converter {
             // confirmed rather than assumed. With `${$para_ref}` in place of
             // `${para_ref}`:
             //
-            //   printf '<pre>\na\n\n</pre>\n' | txt2html --use_preformat_marker
+            //   printf '<pre>\na\n\n</pre>\n' | textrill --use_preformat_marker
             //   reference      <pre class='quote_explicit'>\na\n&lt;/pre&gt;\n</pre>
             //   with deref     ...&lt;/pre&gt;</pre>\n<p>&lt;/pre&gt;</p>
             //
@@ -2410,7 +2410,7 @@ impl Converter {
             // lives *inside* that block, so without this the buffered lines
             // were dropped on the floor and only the tags survived:
             //
-            //   printf '<pre>\n\nX' | txt2html --use_preformat_marker
+            //   printf '<pre>\n\nX' | textrill --use_preformat_marker
             //   reference  <pre class='quote_explicit'>\nX\n</pre>
             //   port       <pre class='quote_explicit'>\n\n</pre>     (before)
             //
@@ -2862,7 +2862,7 @@ impl Converter {
     }
 
     /// Convert the whole input (could already be pre-split paragraphs)
-    /// through the full `txt2html` pipeline.
+    /// through the full conversion pipeline.
     ///
     /// A9: an input file that cannot be read is reported to the caller instead
     /// of being skipped. The reference prints `Could not open …` to stderr and
@@ -2874,7 +2874,7 @@ impl Converter {
     /// contributes nothing either way. When several inputs are given, the ones
     /// that are readable are still converted and the error carries that partial
     /// output, so this differs from the reference only in the exit code.
-    pub fn try_txt2html(&mut self) -> Result<String, UnreadableInput> {
+    pub fn try_convert(&mut self) -> Result<String, UnreadableInput> {
         let mut sources: Vec<String> = Vec::new();
         let source_type;
         let mut unreadable: Vec<String> = Vec::new();
@@ -2928,7 +2928,7 @@ impl Converter {
         }
     }
 
-    /// The encoding [`Converter::try_txt2html`] resolved the input with, for a
+    /// The encoding [`Converter::try_convert`] resolved the input with, for a
     /// caller that wants to say so — a status bar, a `--verbose` line, or a GUI
     /// that has to write the text back out in the encoding it came in.
     ///
@@ -2939,12 +2939,12 @@ impl Converter {
         self.resolved
     }
 
-    /// As [`Converter::try_txt2html`], but discarding the unreadable-file error
+    /// As [`Converter::try_convert`], but discarding the unreadable-file error
     /// so the output is always produced. This is the behaviour the reference
     /// has; it is what the Python bindings and the in-process tests use, and it
     /// is kept so that A9 is a change to the CLI's exit code only.
-    pub fn txt2html(&mut self) -> String {
-        match self.try_txt2html() {
+    pub fn convert(&mut self) -> String {
+        match self.try_convert() {
             Ok(out) => out,
             Err(e) => e.out,
         }

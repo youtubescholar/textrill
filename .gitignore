@@ -1,6 +1,6 @@
 # Build output. 1.7 GB of cargo artifacts; the corpus runner also defaults
-# MINE to target/debug/txt2html, so this path is load-bearing, not just noise.
-txt2html-rs/target/
+# MINE to target/debug/textrill, so this path is load-bearing, not just noise.
+textrill/target/
 
 # The reference (Perl) checkout the differential harness compares against.
 # Derived: `make ref` extracts the tracked txt2html-3.0.tar.gz into ref/ and
@@ -17,11 +17,11 @@ ref/
 
 # Packaging droppings and the extension module maturin builds in place.
 *.egg-info/
-txt2html-rs/python/txt2html/_native*.so
+textrill/python/textrill/_native*.so
 # setuptools' staging dirs, left behind by `python -m build` on the GUI
 # package. Untracked build output, not part of the sdist or wheel.
-txt2html-gui/build/
-txt2html-gui/dist/
+textrill-gui/build/
+textrill-gui/dist/
 
 # Python bytecode from the corpus runner and the fuzzer.
 __pycache__/

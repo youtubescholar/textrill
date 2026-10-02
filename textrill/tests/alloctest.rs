@@ -19,9 +19,9 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-use txt2html::convert::Converter;
-use txt2html::links;
-use txt2html::options::Options;
+use textrill::convert::Converter;
+use textrill::links;
+use textrill::options::Options;
 
 static CUMULATIVE: AtomicUsize = AtomicUsize::new(0);
 static LIVE: AtomicUsize = AtomicUsize::new(0);

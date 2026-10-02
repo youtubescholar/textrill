@@ -9,11 +9,11 @@
 //! literal `"\u{201c}"` in the test would pass under either decoder and prove
 //! nothing.
 
-use txt2html::chars::demoronize_char;
-use txt2html::convert::Converter;
-use txt2html::convert::{read_any_file_with_encoding, Resolved};
-use txt2html::options::Options;
-use txt2html::options::{Encoding, SingleByte};
+use textrill::chars::demoronize_char;
+use textrill::convert::Converter;
+use textrill::convert::{read_any_file_with_encoding, Resolved};
+use textrill::options::Options;
+use textrill::options::{Encoding, SingleByte};
 
 use std::io::Write;
 
@@ -116,7 +116,7 @@ fn demoronize_fires_on_a_decoded_cp1252_file() {
     let mut conv = Converter::new(Options::default());
     conv.opts.infile = vec![path.to_str().unwrap().to_string()];
     conv.opts.default_link_dict = String::new();
-    let out = conv.txt2html();
+    let out = conv.convert();
     let _ = std::fs::remove_file(&path);
 
     assert!(
@@ -159,7 +159,7 @@ fn resolved_encoding_reports_cp1252_after_conversion() {
     let mut conv = Converter::new(Options::default());
     conv.opts.infile = vec![path.to_str().unwrap().to_string()];
     conv.opts.default_link_dict = String::new();
-    let _ = conv.try_txt2html().unwrap();
+    let _ = conv.try_convert().unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(
         conv.resolved_encoding(),
@@ -184,7 +184,7 @@ fn wide_chars_survive_an_aligned_table() {
     conv.opts.infile = vec![path.to_str().unwrap().to_string()];
     conv.opts.make_tables = true;
     conv.opts.default_link_dict = String::new();
-    let out = conv.txt2html();
+    let out = conv.convert();
     let _ = std::fs::remove_file(&path);
 
     assert!(
@@ -204,7 +204,7 @@ fn encoding_auto_is_the_default_and_probes() {
     let raw = b"caf\xe9 \x93q\x94\n";
     let path = fixture("enc-auto", raw);
     let (text, resolved) =
-        txt2html::convert::read_with(path.to_str().unwrap(), txt2html::options::Encoding::Auto)
+        textrill::convert::read_with(path.to_str().unwrap(), textrill::options::Encoding::Auto)
             .unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(resolved, Resolved::Single(SingleByte::Cp1252));
@@ -219,7 +219,7 @@ fn encoding_cp1252_decodes_even_when_the_bytes_are_valid_utf8() {
     // read a short CP1252 document that happens to be valid UTF-8.
     let path = fixture("enc-cp", b"caf\xc3\xa9\n");
     let (text, resolved) =
-        txt2html::convert::read_with(path.to_str().unwrap(), txt2html::options::Encoding::Cp1252)
+        textrill::convert::read_with(path.to_str().unwrap(), textrill::options::Encoding::Cp1252)
             .unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(resolved, Resolved::Single(SingleByte::Cp1252));
@@ -238,7 +238,7 @@ fn encoding_utf8_is_lossy_and_says_so() {
     // A converter that exits 1 over one bad byte is not a converter.
     let path = fixture("enc-utf8", b"a \xe9 b\n");
     let (text, resolved) =
-        txt2html::convert::read_with(path.to_str().unwrap(), txt2html::options::Encoding::Utf8)
+        textrill::convert::read_with(path.to_str().unwrap(), textrill::options::Encoding::Utf8)
             .unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(resolved, Resolved::Utf8);
@@ -247,7 +247,7 @@ fn encoding_utf8_is_lossy_and_says_so() {
 
 #[test]
 fn encoding_names_round_trip() {
-    use txt2html::options::Encoding;
+    use textrill::options::Encoding;
     for e in [Encoding::Auto, Encoding::Utf8, Encoding::Cp1252] {
         assert_eq!(Encoding::parse(e.name()).unwrap(), e);
     }
@@ -266,7 +266,7 @@ fn meta_charset_is_off_by_default() {
     let mut conv = Converter::new(Options::default());
     assert!(!conv.opts.meta_charset);
     conv.opts.instring = vec!["hi".to_string()];
-    let out = conv.txt2html();
+    let out = conv.convert();
     assert!(
         !out.contains("charset"),
         "default output must not gain a meta: {out:?}"
@@ -279,7 +279,7 @@ fn meta_charset_emits_one_per_line_when_on() {
     conv.opts.meta_charset = true;
     conv.opts.xhtml = true;
     conv.opts.instring = vec!["hi".to_string()];
-    let out = conv.txt2html();
+    let out = conv.convert();
     assert!(out.contains("<meta charset=\"utf-8\"/>"), "{out:?}");
     assert!(
         out.contains("content=\"HTML::TextToHTML v3.0\"/>\n<meta charset"),
@@ -296,7 +296,7 @@ fn meta_charset_follows_lower_case_tags() {
     conv.opts.xhtml = false;
     conv.opts.lower_case_tags = false;
     conv.opts.instring = vec!["hi".to_string()];
-    let out = conv.txt2html();
+    let out = conv.convert();
     assert!(out.contains("<META CHARSET=\"utf-8\">"), "{out:?}");
 }
 
@@ -459,7 +459,7 @@ fn bomless_utf16_of_non_latin_text_is_detectable_only_when_named() {
     let path = fixture("nb-cyr", &bytes);
     let (auto_text, auto_resolved) = read_any_file_with_encoding(path.to_str().unwrap()).unwrap();
     let (named, _) =
-        txt2html::convert::read_with(path.to_str().unwrap(), Encoding::Utf16Le).unwrap();
+        textrill::convert::read_with(path.to_str().unwrap(), Encoding::Utf16Le).unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(named, ambiguous, "the flag must still recover it");
     assert_eq!(auto_resolved.name(), "utf-8");
@@ -603,7 +603,7 @@ fn naming_the_encoding_recovers_what_detection_cannot() {
     for (name, bytes, want) in cases {
         // Auto guesses CP1252 and is wrong for all three -- the pre-P7.4
         // behaviour, kept visible rather than deleted.
-        let (auto, auto_resolved) = txt2html::convert::decode_bytes_with(bytes, Encoding::Auto);
+        let (auto, auto_resolved) = textrill::convert::decode_bytes_with(bytes, Encoding::Auto);
         assert_eq!(
             auto_resolved.name(),
             "cp1252",
@@ -612,7 +612,7 @@ fn naming_the_encoding_recovers_what_detection_cannot() {
         assert_ne!(auto, *want, "{name} must not decode correctly by luck");
 
         let (got, resolved) =
-            txt2html::convert::decode_bytes_with(bytes, Encoding::parse(name).unwrap());
+            textrill::convert::decode_bytes_with(bytes, Encoding::parse(name).unwrap());
         assert_eq!(got, *want, "--encoding {name}");
         assert_eq!(resolved.name(), *name);
     }
@@ -626,12 +626,12 @@ fn an_explicitly_named_utf8_file_is_not_reinterpreted_as_cp1252() {
     const TEXT: &str = "Привет, мир!\n";
     let utf8 = TEXT.as_bytes();
     assert!(std::str::from_utf8(utf8).is_ok());
-    let (auto, resolved) = txt2html::convert::decode_bytes_with(utf8, Encoding::Auto);
+    let (auto, resolved) = textrill::convert::decode_bytes_with(utf8, Encoding::Auto);
     assert_eq!(auto, TEXT);
     assert_eq!(resolved.name(), "utf-8");
     // Every byte of that UTF-8 is a legal CP1252 byte, which is exactly why
     // "valid UTF-8" cannot be the only question asked.
-    let (as_cp1252, _) = txt2html::convert::decode_bytes_with(utf8, Encoding::Cp1252);
+    let (as_cp1252, _) = textrill::convert::decode_bytes_with(utf8, Encoding::Cp1252);
     assert_eq!(
         as_cp1252.chars().count(),
         utf8.len(),
@@ -745,7 +745,7 @@ fn every_table_entry_matches_python() {
         let encoding = Encoding::parse(codec).unwrap_or_else(|e| panic!("{codec}: {e}"));
         for (i, &want) in expected.iter().enumerate() {
             let byte = 0x80 + i as u8;
-            let (text, _) = txt2html::convert::decode_bytes_with(&[byte], encoding);
+            let (text, _) = textrill::convert::decode_bytes_with(&[byte], encoding);
             let got = text.chars().next().unwrap() as u32;
             // 0 means "undefined in this encoding"; the decoder is documented
             // to keep the Latin-1 reading, which is byte-as-char.
@@ -797,8 +797,8 @@ fn latin1_is_no_longer_an_alias_for_cp1252() {
     // spelling: a Latin-1 file's 0x93 is a C1 control, not a left double quote,
     // and the user asking for Latin-1 was asking for the C1 control.
     let bytes = [0x93u8, b'a', 0x94, b' ', 0x97];
-    let (l1, _) = txt2html::convert::decode_bytes_with(&bytes, Encoding::Latin1);
-    let (cp, _) = txt2html::convert::decode_bytes_with(&bytes, Encoding::Cp1252);
+    let (l1, _) = textrill::convert::decode_bytes_with(&bytes, Encoding::Latin1);
+    let (cp, _) = textrill::convert::decode_bytes_with(&bytes, Encoding::Cp1252);
     assert_eq!(l1, "\u{93}a\u{94} \u{97}");
     assert_eq!(cp, "\u{201c}a\u{201d} \u{2014}");
 }
@@ -812,7 +812,7 @@ fn resolved_encoding_ranks_a_wide_decode_above_a_legacy_guess() {
     let mut conv = Converter::new(Options::default());
     conv.opts.infile = vec![path.to_str().unwrap().to_string()];
     conv.opts.default_link_dict = String::new();
-    let _ = conv.try_txt2html().unwrap();
+    let _ = conv.try_convert().unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(conv.resolved_encoding().name(), "utf-16le");
 }
@@ -843,7 +843,7 @@ fn a_named_wide_encoding_still_strips_a_bom() {
     for encoding in [Encoding::Utf16Le, Encoding::Utf16Be, Encoding::Utf32Le] {
         let enc_name = encoding.name();
         let bytes = wide("bom and all\n", enc_name, true);
-        let (text, _) = txt2html::convert::decode_bytes_with(&bytes, encoding);
+        let (text, _) = textrill::convert::decode_bytes_with(&bytes, encoding);
         assert_eq!(text, "bom and all\n", "{enc_name}");
         assert!(!text.starts_with('\u{FEFF}'), "{enc_name} leaked its BOM");
     }

@@ -1,16 +1,17 @@
 [package]
-name = "txt2html"
-version = "3.0.0"
+name = "textrill"
+version = "0.1.0"
 edition = "2021"
-description = "A Rust port of HTML::TextToHTML / txt2html: convert plain text to HTML."
+description = "Convert plain text to HTML. A Rust reimplementation of HTML::TextToHTML / txt2html."
 license = "GPL-3.0-or-later"
+# TODO: set repository = "https://github.com/<you>/textrill" once the host account exists.
 
 [lib]
-name = "txt2html"
+name = "textrill"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "txt2html"
+name = "textrill"
 path = "src/main.rs"
 
 [dependencies]

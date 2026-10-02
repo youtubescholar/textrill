@@ -398,7 +398,7 @@ impl LinkParser {
         // The three option-level patterns are validated up front instead, in
         // `Options::validate`, where a `Result` already exists. See P22.
         if let Err(e) = try_compile_pattern(pattern, switches & LINK_NOCASE != 0) {
-            let msg = format!("txt2html: ignoring link-dictionary pattern {pattern:?}: {e}");
+            let msg = format!("textrill: ignoring link-dictionary pattern {pattern:?}: {e}");
             eprintln!("{msg}");
             self.rejected_patterns.push(msg);
             return;

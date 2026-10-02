@@ -1,6 +1,6 @@
-# txt2html GUI — a Qt front end for the txt2html converter.
+# textrill-gui — a Qt front end for textrill.
 #
-# Copyright (C) 2026 the txt2html-rs authors.
+# Copyright (C) 2026 the textrill authors.
 #
 # This program is free software: you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the Free
@@ -42,14 +42,14 @@ class _Job(QRunnable):
 
     @Slot()
     def run(self) -> None:  # executed on a worker thread
-        import txt2html
+        import textrill
 
         started = time.perf_counter()
         html = ""
         error = ""
         try:
-            html = txt2html.convert(self.text, self.options)
-        except txt2html.PanicException:
+            html = textrill.convert(self.text, self.options)
+        except textrill.PanicException:
             # A panic inside the engine. It is a BaseException, so a plain
             # `except Exception` does not see it and the result signal below
             # would never be emitted, leaving the window showing "converting…"
@@ -57,7 +57,7 @@ class _Job(QRunnable):
             error = (
                 "The converter stopped on invalid input.\n\n"
                 f"{traceback.format_exc(limit=0).strip()}\n\n"
-                "This is a bug in txt2html. The input is probably the cause."
+                "This is a bug in textrill. The input is probably the cause."
             )
         except Exception:  # keep the GUI alive whatever the input is
             error = traceback.format_exc(limit=3)

@@ -2,8 +2,8 @@
 //! process_chunk, is_fragment) and the option handling for caps_tag and the
 //! bold/italic delimiters.
 
-use txt2html::convert::Converter;
-use txt2html::options::Options;
+use textrill::convert::Converter;
+use textrill::options::Options;
 
 fn converter() -> Converter {
     let o = Options {
@@ -103,7 +103,7 @@ fn instring_round_trip() {
         ..Options::default()
     };
     let mut c = Converter::new(o);
-    let out = c.txt2html();
+    let out = c.convert();
     assert!(
         out.contains("<p>hello world</p>"),
         "unexpected output: {out:?}"

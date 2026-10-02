@@ -3,13 +3,13 @@ requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "txt2html"
-version = "3.0.0"
-description = "Rust port of HTML::TextToHTML - convert plain text to HTML"
+name = "textrill"
+version = "0.1.0"
+description = "Convert plain text to HTML. A Rust reimplementation of HTML::TextToHTML."
 requires-python = ">=3.8"
 # SPDX expression rather than free text, matching Cargo.toml and the GUI.
 license = "GPL-3.0-or-later"
-authors = [{ name = "the txt2html-rs authors" }]
+authors = [{ name = "the textrill authors" }]
 
 [project.optional-dependencies]
 gui = ["PySide6>=6.6"]
@@ -17,4 +17,4 @@ gui = ["PySide6>=6.6"]
 [tool.maturin]
 features = ["extension-module"]
 python-source = "python"
-module-name = "txt2html._native"
+module-name = "textrill._native"
