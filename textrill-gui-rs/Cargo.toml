@@ -1,0 +1,28 @@
+[package]
+name = "textrill-gui"
+version = "0.1.0"
+edition = "2021"
+description = "Native GUI for textrill, built with egui/eframe."
+license = "GPL-3.0-or-later"
+# TODO: set repository = "https://github.com/<you>/textrill" once the host account exists.
+
+[dependencies]
+textrill = { path = "../textrill" }
+egui = "0.36"
+# `glow` (OpenGL) rather than the default `wgpu`: it is the smaller tree, and
+# it is what was validated on this host. `default_fonts` bundles a font so the
+# app does not depend on the system having one. `accesskit` is deliberately
+# off: the OS accessibility bridge pulls in an async/D-Bus stack, and
+# `egui_kittest` builds its own access tree for tests without it.
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+
+[dev-dependencies]
+# Headless widget queries over AccessKit. `kittest` must match the version
+# `egui_kittest` re-exports, or the query trait methods do not resolve.
+egui_kittest = "0.36"
+kittest = "0.3"
+
+# This crate is built on its own; `textrill` is a path dependency, not a
+# workspace member, so the GUI's heavier dependency tree cannot leak into the
+# engine crate (or its musl/static CLI build).
+[workspace]

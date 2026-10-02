@@ -2,6 +2,10 @@
 # MINE to target/debug/textrill, so this path is load-bearing, not just noise.
 textrill/target/
 
+# The native GUI crate's build output. It has its own lockfile, which is
+# tracked, so only `target/` is ignored here.
+textrill-gui-rs/target/
+
 # The reference (Perl) checkout the differential harness compares against.
 # Derived: `make ref` extracts the tracked txt2html-3.0.tar.gz into ref/ and
 # copies the tracked stub at tests/refstub/YAML/Syck.pm into ref/stubs/. Both
