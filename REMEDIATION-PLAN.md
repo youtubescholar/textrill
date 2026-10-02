@@ -133,7 +133,9 @@ Tier 2 divergence — see the A8 section for why its verdict is inverted.
 
 E3 landed on 2026-10-01. P13, the last item on the agreed sequence, was answered
 the same day: one self-contained artifact, so the GUI is rewritten in Rust + Qt
-and the engine is kept. The rewrite itself is **Phase 6**, and P5, P6 and P11 are
+and the engine is kept. _Refined 2026-10-02: the artifact ships as **Flatpak**,
+and Qt is an assumption rather than a decision — both noted in "Licensing and
+distribution"._ The rewrite itself is **Phase 6**, and P5, P6 and P11 are
 sequenced ahead of it. P7 was sequenced there first of all — because the encoding
 rule is implemented in both Rust and Python and the two copies disagreed — and
 it is now **done**: both copies decode CP1252, the fallback is the one the
@@ -166,8 +168,9 @@ correct implementation instead of two.
 | P20 | **done** | a case wired into one table and not the other never ran, silently — the P2 shape. Now checked by name in both directions, and it aborts the run rather than summarising a subset |
 | fuzzer cleanup | **done** | removed `KNOWN_DIVERGENCES` and ~90 lines of matching machinery, plus a dead `PERL_DRIVER`. The "reference refused" skip turned out to be a real false green and is gone |
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
-| P13 | **decided** | single self-contained artifact. The GUI is rewritten in Rust + Qt; **the 5,644-line engine is kept**. P5, P6 and P11 are sequenced *ahead* of it. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6** |
-| Phase 6 | **planned** | the GUI rewrite: 1,365 lines of Python shell out, ~30 tests ported as acceptance criteria, pyo3 layer and venv deleted from the dependency graph. Open: Qt6 vs GTK4, CLI fate, replace-vs-coexist |
+| P13 | **decided** | single artifact. The GUI is rewritten off Python + PySide6; **the 5,644-line engine is kept**. P5, P6 and P11 are sequenced *ahead* of it. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6**. Delivery since refined: Flatpak, not a bundled binary, and the Qt assumption is open — see "Licensing and distribution" |
+| Phase 6 | **planned** | the GUI rewrite: 1,365 lines of Python shell out, ~30 tests ported as acceptance criteria, pyo3 layer and venv deleted from the dependency graph. CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Still open: Qt6 vs GTK4, now reduced to a Flathub runtime choice |
+| licensing | **decided** | engine and CLI stay **GPL-3.0-or-later**; GUI is **GPLv3**. BSD for the CLI was raised and declined as unnecessary — see "Licensing and distribution" |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
 ### Agreed sequence, 2026-09-30
@@ -521,6 +524,19 @@ _Answered 2026-10-01. The single self-contained artifact wins: the deliverable i
 one binary, so the GUI moves off Python + PySide6 onto Rust + Qt. Phase 5 below
 is the plan; P5–P11 are sequenced ahead of it._
 
+_Corrected 2026-10-02. The conclusion holds — one artifact, GUI off Python — but
+two mechanisms in this answer did not survive contact with the toolkit sizes, and
+one of them is a load-bearing claim. "One binary" is not achievable with either
+Qt or GTK: the CLI here is 2.4 MB, GTK4 alone is 20 MB of shared library plus
+glib, gdk, pango, cairo, gsk and harfbuzz transitively, and Qt Widgets is
+comparable. **Flatpak** delivers the single artifact instead, since its runtime
+carries the toolkit and every shared library. And **Qt was an assumption, not a
+reason**: no Qt is installed on the machine that ran the whole corpus suite, so
+the Qt preference rested on a plausible argument about PySide6 semantics that has
+never been measured against the GUI suite. Both are recorded rather than
+rewritten, because the reasoning trail is the point of this file. See "Licensing
+and distribution"._
+
 The question was whether "stands on its own" means one artifact or two. The CLI
 is a self-contained Rust binary; the GUI was not — `txt2html-gui` needs a Python
 runtime plus PySide6 at run time, and ships as a wheel. Meeting a
@@ -573,19 +589,26 @@ both are accepted deliberately:
   because it is the only place the shell's behaviour is written down. Treat it as
   the port's acceptance criteria (§5.3) rather than as code to translate.
 
-**Still open, and needed before Phase 5 starts** — the decision above settles
-the *architecture*, not the toolkit:
+**Resolved 2026-10-02. CLI stays; coexistence during the port; Flatpak packaging.**
+The decision above settles the *architecture*; these three settle delivery. All
+three were open and are now closed, leaving only the toolkit open:
 
-1. **Qt6 or GTK4.** The plan below assumes Qt6 Widgets, because it is the
-   closest match to PySide6 semantics and therefore minimises behavioural drift
-   across the GUI suite. If GTK4 is preferred, the port's widget mapping changes
-   but nothing in the engine work does.
-2. **Does the CLI stay?** Assumed yes, as a second binary linking the same
-   crate. It is nearly free once the engine is a library.
-3. **Replace `txt2html-gui`, or sit beside it during the port?** Replacing is
-   cleaner; beside it allows behavioural diffing. The plan assumes replace-at-
-   the-end, with the Python GUI kept runnable until the Rust one passes the
-   ported suite.
+1. **The CLI stays**, as a second binary linking the same crate, and is
+   distributable **independently** of the GUI. This is now settled rather than
+   assumed, and it is what makes P11 worth doing — `.txt2htmlrc` support has no
+   meaning without a CLI, so P11 would be dead work if the CLI were dropped.
+2. **Replace `txt2html-gui`, or sit beside it during the port?** Both, in
+   sequence: the Python GUI stays runnable until the Rust one passes the ported
+   suite, then it is replaced. Coexistence is not a hedge, it is what makes the
+   differential testing in §6.3 step 5 possible at all.
+3. **Packaging is Flatpak**, not a bundled binary. See "Licensing and
+   distribution" — this supersedes P13's "one self-contained binary" wording.
+4. **Qt6 or GTK4** remains open, but is now a much smaller decision: Flatpak
+   carries the toolkit and every shared library in its runtime, so neither
+   toolkit costs us anything at the artifact level. It is a choice of Flathub
+   runtime (both are published) and therefore of which widget model maps more
+   cleanly onto PySide6 across the 58-test GUI suite. GTK4 changes the widget
+   mapping and nothing in the engine.
 
 
 ### Corrections to the items above
@@ -1687,6 +1710,10 @@ against Perl by a differential corpus, and is the expensive part of this project
 — which is already paid for. What is rewritten is a 1,365-line shell, and the
 212-line pyo3 layer is deleted outright.
 
+_Updated 2026-10-02: "single self-contained artifact" is delivered as **Flatpak**
+rather than a bundled binary — see "Licensing and distribution". Qt is an
+assumption of this plan, not a decision; GTK4 is a live option._
+
 This is Phase 6 and not Phase 5 because Phase 5 is opt-in *feature* work that
 touches the engine, and doing it before the rewrite means doing it against a
 shell that is about to be deleted. Nothing in Phase 5 is lost by waiting; §6.5
@@ -1801,15 +1828,57 @@ deliberately:
 The architecture is decided; the toolkit is not. Three questions remain, and none
 of them blocks P5–P11:
 
-1. **Qt6 or GTK4.** The plan above assumes **Qt6 Widgets**, being the closest
-   match to PySide6 semantics and so the minimum behavioural drift across the
-   30 GUI tests. GTK4 changes the widget mapping and nothing else.
-2. **Does the CLI stay?** Assumed yes, as a second binary linking the same crate.
-   Nearly free once the engine is a library.
-3. **Replace or coexist during the port?** Assumed coexist until the ported
+1. **Qt6 or GTK4.** The only one still open. The plan above assumes **Qt6
+   Widgets**, being the closest match to PySide6 semantics and so the minimum
+   behavioural drift across the GUI tests. GTK4 changes the widget mapping and
+   nothing else. Flatpak removed the packaging cost that used to favour Qt.
+2. **Does the CLI stay?** Decided: yes, independently distributable. Nearly
+   free once the engine is a library.
+3. **Replace or coexist during the port?** Decided: coexist until the ported
    suite passes, then replace. Coexisting is what makes §6.3 step 5 possible.
 
-## Sequencing notes
+## Licensing and distribution
+
+_Decided 2026-10-02._
+
+**The engine and CLI stay GPL-3.0-or-later. The GUI is GPLv3.** This is the status
+quo, so it needs no change, and it is the branch of upstream's dual grant that
+every distro accepts without discussion.
+
+**Why a BSD CLI was considered and dropped.** The idea was to license the CLI
+permissively so it could be adopted anywhere, and keep the GUI copylefted. That
+split is legal in principle — a BSD library linked by a GPL application is
+compatible — but it is **not available here without upstream's permission.**
+txt2html 3.0 licenses itself "under the same terms as Perl itself", i.e.
+**Artistic-1.0 or GPL**, and `txt2html-rs/LICENSE` records that this port is "a
+derivative work". A derivative of GPL/Artistic code cannot be relicensed to BSD,
+because BSD removes the downstream copyleft that the upstream grant imposes. Only
+the upstream copyright holders can waive that:
+
+    Copyright 1994-2000 Seth Golub
+    Copyright 2002-2013 Kathryn Andersen
+    Copyright 2018-2019 Joao Eriberto Mota Filho
+
+**Artistic-1.0 is the permissive option that needs nobody's permission**, since
+upstream's dual grant already offers it and `txt2html-rs/LICENSE` already notes
+it is available. It was still declined, for two reasons: "Artistic" is not on most
+corporate allow-lists the way BSD/MIT/Apache are, so it does not actually buy the
+adoption it was meant to buy; and picking the unusual branch of a dual grant
+invites a packager question in every distro that touches the package. GPL-3.0-
+or-later is boring and nobody asks.
+
+**What the licence was never the blocker for.** The real cross-distro obstacle is
+naming, not licensing: `txt2html` is already packaged by Debian and by other
+distros as the Perl program, so a Rust port claiming the same name forces a
+replace-or-reparallel decision in each. That is a packaging-policy conversation,
+which is why going through the current upstream maintainer is the right route and
+not a detour around it. GPL-3.0-or-later is what gets a distro to own the package.
+
+**Cross-distro status.** No code here assumes systemd, D-Bus or XDG paths, so
+non-systemd systems are unaffected; Flatpak itself does not require systemd at
+run time. The CLI is a plain Rust binary with no init-system dependency. CI is
+`ubuntu-latest` only, which is the one real gap — see the musl note in the
+sequencing notes.
 
 - P1 and P2 gate everything. Nothing else can be trusted until they land.
 - P4 is done (as part of P22), so this ordering note is spent: it was
@@ -1819,6 +1888,11 @@ of them blocks P5–P11:
   so it is clear what actually helped.
 - P7.1 and P7.2 (tests and docs) are cheap and should land with Phase 0; P7.3-5
   are the real design work.
+- Add a **musl** build to CI (`cargo build --target x86_64-unknown-linux-musl`)
+  when P6 lands. Alpine is the one platform with real technical risk, since
+  glibc-linked binaries do not run there, and the engine needs nothing from
+  glibc. While the output is claimed byte-identical on every platform, building
+  on musl is the cheapest way to keep that claim honest.
 - P11 is independent of all of the above and can land any time; it is the only
   item in the plan that restores lost compatibility rather than fixing a defect,
   so it is the safest thing to hand to a new contributor.
