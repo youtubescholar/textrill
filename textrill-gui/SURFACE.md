@@ -121,12 +121,41 @@ instead of silently transcoding it to UTF-8.
   without losing the round-trip guarantee, and §6.2's "duplicated rule" count
   should be read as including it. Two defects were found and fixed in the
   process — see the plan's §6.3 step 2.
-- **Toolkit is unresolved.** Only Qt **5.15** is installed on this machine; Qt6
-  and GTK4 are both absent, and no Qt/GTK crates are vendored. Qt5 availability
-  makes an incremental build possible now, but the deliverable is a Flatpak and
-  Flathub ships the **Qt 6** runtime (`org.kde.Platform`/`org.freedesktop.Platform`
-  both track Qt6), so building on Qt5 now risks a port. This is the Phase 6
-  toolkit decision and it is still open.
+- **Toolkit: Qt 6, chosen, pending installation.** Only Qt **5.15** is installed on
+  this machine; Qt6 and GTK4 are both absent. The deliverable is a Flatpak, and
+  Flathub ships the **Qt 6** runtime (`org.kde.Platform` and
+  `org.freedesktop.Platform` both track Qt6), so building on Qt5 now would mean
+  porting the whole shell afterwards. Qt 6 is the target and `qt6-base-dev` 6.4.2
+  is in this machine's Ubuntu 24.04 repos.
+
+  The install, verified with `apt-get install --dry-run -s` — 48 packages, no
+  daemons restarted:
+
+  ```
+  sudo apt-get install -y \
+      qt6-base-dev \
+      xvfb \
+      appstream-util \
+      flatpak \
+      flatpak-builder
+  ```
+
+  | package | why |
+  |---|---|
+  | `qt6-base-dev` | Qt6Core/Gui/Widgets **and** `libqt6test6t64`, so it covers both the app and the test harness. Also brings `qt6-qpa-plugins`, which carries the `offscreen` platform plugin the headless tests need. |
+  | `xvfb` | probably unnecessary — the suite selects `QT_QPA_PLATFORM=offscreen` before Qt starts, which is how the PySide tests run today. Kept as a fallback, since some drag-and-drop behaviour differs under `offscreen`. |
+  | `appstream-util` | validates the AppStream metadata a Flatpak needs, catching a malformed `.metainfo.xml` locally rather than at Flathub review. |
+  | `flatpak`, `flatpak-builder` | the packaging target, so a bundle can be built and run locally. |
+
+  Deliberately **not** included: `cargo-fuzz` and `heaptrack`. `make fuzz` is the
+  Python differential harness (`tests/corpus/fuzz.py`), not cargo-fuzz, so
+  cargo-fuzz is not on the path this project verifies with. `heaptrack` would have
+  helped P6, but the deterministic allocation budget in `tests/alloctest.rs`
+  already guards that and heap tracking is not machine-independent enough to be a
+  gate.
+
+  Rust-side bindings come from cargo, not apt: `cxx-qt` 0.10.0 resolves on
+  crates.io and the registry is reachable from here.
 
 ## 6. Test disposition (`test_gui.py`, 1123 lines)
 
