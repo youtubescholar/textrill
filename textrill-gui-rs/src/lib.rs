@@ -19,7 +19,11 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod document;
 pub mod options_panel;
+pub mod settings;
 pub mod worker;
 
 pub use app::TextrillApp;
+pub use document::Document;
+pub use settings::Settings;

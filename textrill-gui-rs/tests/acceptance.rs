@@ -80,7 +80,7 @@ fn clicking_a_checkbox_writes_through_to_options() {
 #[allow(clippy::field_reassign_with_default)]
 fn a_conversion_reaches_the_preview() {
     let mut app = TextrillApp::default();
-    app.input = "Hello".to_string();
+    app.doc.text = "Hello".to_string();
     app.request_conversion();
     wait_for_conversion(&mut app, Duration::from_secs(10));
 
