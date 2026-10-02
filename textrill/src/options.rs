@@ -128,6 +128,18 @@ impl Encoding {
     /// user naming an encoding should not have to know which one the
     /// implementation happens to prefer — and because "latin-1" is what most
     /// people type for what this port has been calling CP1252.
+    /// How many bytes one code unit occupies, for the wide encodings.
+    ///
+    /// 2 for UTF-16 and 4 for UTF-32. Used by [`crate::encode`] to decide
+    /// whether a character needs a surrogate pair, and to lay out the bytes.
+    pub fn units_per_char(self) -> usize {
+        match self {
+            Encoding::Utf16Le | Encoding::Utf16Be => 2,
+            Encoding::Utf32Le | Encoding::Utf32Be => 4,
+            _ => 1,
+        }
+    }
+
     pub fn parse(s: &str) -> Result<Self, String> {
         match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
             "auto" | "detect" => Ok(Encoding::Auto),

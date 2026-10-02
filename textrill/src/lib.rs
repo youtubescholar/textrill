@@ -101,6 +101,7 @@ mod python;
 pub mod chars;
 pub mod cli;
 pub mod convert;
+pub mod encode;
 pub mod links;
 pub mod options;
 pub mod prefilter;

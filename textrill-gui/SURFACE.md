@@ -113,9 +113,14 @@ instead of silently transcoding it to UTF-8.
   globally — the comment's reasoning about the UI thread vs worker thread is
   about *where it is read*, not about global state being good. Flagged for the
   port, not fixed here.
-- **`process_chunk` has no caller in the GUI** as far as the current shell is
-  concerned. Confirm whether it is load-bearing before porting it; if it is not,
-  it should not be ported at all.
+- **`process_chunk` has no caller in the GUI**, confirmed by grep across
+  `textrill_gui/` and `tests/`. Do not port it unless something starts needing
+  it.
+- **The encoder now exists in the engine** (`src/encode.rs`), written while
+  porting `FileTests`. `files.py`'s Python encoder is therefore deletable
+  without losing the round-trip guarantee, and §6.2's "duplicated rule" count
+  should be read as including it. Two defects were found and fixed in the
+  process — see the plan's §6.3 step 2.
 - **Toolkit is unresolved.** Only Qt **5.15** is installed on this machine; Qt6
   and GTK4 are both absent, and no Qt/GTK crates are vendored. Qt5 availability
   makes an incremental build possible now, but the deliverable is a Flatpak and
@@ -128,7 +133,7 @@ instead of silently transcoding it to UTF-8.
 | class | count | fate |
 |---|---|---|
 | `ConverterTests` | 6 | **delete** — pure engine, already covered by cargo |
-| `FileTests` | 20 | **move to the engine's Rust tests** — the rule under test is Rust's |
+| `FileTests` | 20 | **done** — ten save-path tests now live in `tests/encodingtest.rs`; the rest were already covered by the decode-side tests there |
 | `BacklogTests` | 3 | **port** — acceptance criteria |
 | `GuiTests` | 29 | **port** — acceptance criteria |
 

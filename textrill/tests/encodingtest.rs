@@ -848,3 +848,180 @@ fn a_named_wide_encoding_still_strips_a_bom() {
         assert!(!text.starts_with('\u{FEFF}'), "{enc_name} leaked its BOM");
     }
 }
+
+// --- The save path -----------------------------------------------------------
+//
+// Phase 6 step 2. These are `FileTests` from `textrill-gui/tests/test_gui.py`,
+// moved here because the rule under test is now the engine's: the encode side
+// lives in `convert::encode`, and `files.py` is scheduled for deletion. A test
+// that guards a Python helper is work waiting to be thrown away.
+
+use textrill::convert::decode_bytes_with;
+use textrill::encode::{encode, write_with, EncodeError, WriteError};
+
+/// Read-then-write with no edits must leave the bytes alone. This is the
+/// property the whole encode module exists for.
+#[test]
+fn an_untouched_file_round_trips_byte_for_byte() {
+    let cases: &[(&[u8], Encoding)] = &[
+        (b"He said \x93hi\x94 -- \x97dash\x97.\n", Encoding::Auto),
+        (b"Caf\xe9 na\xefve\n", Encoding::Auto),
+        ("plain ascii\n".as_bytes(), Encoding::Auto),
+        // Undefined CP1252 slots must survive too, or an obscure file cannot be
+        // saved at all.
+        (b"a\x81b\x8dc\x8fd\x90e\x9df\n", Encoding::Auto),
+    ];
+    for (original, enc) in cases {
+        let (text, resolved) = decode_bytes_with(original, *enc);
+        assert_eq!(
+            encode(&text, resolved.encoding()).unwrap(),
+            *original,
+            "a save with no edits changed the bytes"
+        );
+    }
+}
+
+/// The five bytes CP1252 leaves undefined must not break a save. Python's
+/// `cp1252` codec raises on them, which is why the engine carries its own table.
+#[test]
+fn every_undefined_cp1252_slot_survives_a_save() {
+    for b in [0x81u8, 0x8D, 0x8F, 0x90, 0x9D] {
+        let raw = [b'a', b, b'b'];
+        let (text, resolved) = decode_bytes_with(&raw, Encoding::Auto);
+        assert_eq!(resolved.name(), "cp1252", "0x{b:02X}");
+        assert_eq!(text.chars().count(), 3, "0x{b:02X}");
+        assert_eq!(
+            encode(&text, resolved.encoding()).unwrap(),
+            raw,
+            "0x{b:02X}"
+        );
+    }
+}
+
+/// A BOM is metadata: it must not survive into the text a front end edits, and
+/// a save writes it back rather than dropping it.
+#[test]
+fn a_bom_is_not_content_but_is_written_back() {
+    let mut raw = vec![0xFF, 0xFE];
+    for u in "Hello world.\n".encode_utf16() {
+        raw.extend_from_slice(&u.to_le_bytes());
+    }
+    let (text, resolved) = decode_bytes_with(&raw, Encoding::Auto);
+    assert_eq!(resolved.name(), "utf-16le");
+    assert!(!text.contains('\u{feff}'), "the mark reached the text");
+    assert_eq!(encode(&text, resolved.encoding()).unwrap(), raw);
+}
+
+/// A character the encoding cannot hold must be reported, never substituted.
+/// A `?` would silently alter the user's document on save.
+#[test]
+fn an_unrepresentable_character_is_reported_not_substituted() {
+    let err = encode("Привет", Encoding::Cp1252).unwrap_err();
+    match err {
+        EncodeError::Unrepresentable { ch, at } => {
+            assert_eq!(ch, '\u{041f}');
+            assert_eq!(at, 0, "the offset lets an editor underline the character");
+        }
+        other => panic!("expected Unrepresentable, got {other:?}"),
+    }
+    // The same text is fine in an encoding that can hold it.
+    assert!(encode("Привет", Encoding::Cp1251).is_ok());
+}
+
+/// `auto` describes a decision made on input; there is nothing to detect on
+/// output, so it is refused rather than quietly defaulted to UTF-8.
+#[test]
+fn auto_is_refused_on_output() {
+    assert!(matches!(
+        encode("x", Encoding::Auto),
+        Err(EncodeError::UnknownEncoding(_))
+    ));
+}
+
+/// UTF-32LE's mark starts with UTF-16LE's. Writing the short one would produce
+/// a file that decodes as UTF-16 -- text-shaped, so wrong in a way that
+/// survives a glance.
+#[test]
+fn wide_encodings_are_written_with_the_right_bom() {
+    let u32le = encode("hi", Encoding::Utf32Le).unwrap();
+    assert_eq!(&u32le[..4], &[0xFF, 0xFE, 0x00, 0x00]);
+    let u16le = encode("hi", Encoding::Utf16Le).unwrap();
+    assert_eq!(&u16le[..2], &[0xFF, 0xFE]);
+    // And the round trip agrees with the decoder.
+    let (text, resolved) = decode_bytes_with(&u32le, Encoding::Utf32Le);
+    assert_eq!(text, "hi");
+    assert_eq!(encode(&text, resolved.encoding()).unwrap(), u32le);
+}
+
+/// A save into a directory that does not exist must fail, and must not invent
+/// the directory. One typo used to create five of them.
+#[test]
+fn writing_to_a_missing_directory_fails_and_creates_nothing() {
+    let tmp = std::env::temp_dir().join("textrill-save-test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let target = tmp.join("newtree/a/b/out.html");
+
+    let err = write_with(&target, "<p>x</p>", Encoding::Utf8).unwrap_err();
+    assert!(
+        matches!(err, WriteError::NoSuchDirectory(_)),
+        "expected NoSuchDirectory, got {err:?}"
+    );
+    assert!(
+        !tmp.join("newtree").exists(),
+        "the directory was created anyway"
+    );
+    assert_eq!(
+        std::fs::read_dir(&tmp).unwrap().count(),
+        0,
+        "nothing left behind"
+    );
+}
+
+/// Dropping the mkdir must not stop a save into a directory that exists.
+#[test]
+fn writing_into_an_existing_directory_works() {
+    let tmp = std::env::temp_dir().join("textrill-save-test-ok");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let target = tmp.join("out.html");
+
+    write_with(&target, "<p>x</p>", Encoding::Utf8).unwrap();
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "<p>x</p>");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// A UTF-16 file holding an emoji must decode to the emoji. Two U+FFFD in its
+/// place is the failure this guards: surrogate code units are half a character,
+/// and feeding them to `char::from_u32` one at a time replaces every character
+/// outside the BMP.
+#[test]
+fn an_astral_character_survives_a_utf16_round_trip() {
+    for enc in [Encoding::Utf16Le, Encoding::Utf16Be] {
+        let (text, resolved) = {
+            let bytes = encode("\u{1F600} ok", enc).unwrap();
+            decode_bytes_with(&bytes, enc)
+        };
+        assert_eq!(text, "\u{1F600} ok", "{enc:?}");
+        assert!(
+            !text.contains('\u{fffd}'),
+            "{enc:?} produced a replacement char"
+        );
+        let again = encode(&text, resolved.encoding()).unwrap();
+        let (_, r2) = decode_bytes_with(&again, enc);
+        assert_eq!(r2.encoding(), resolved.encoding());
+    }
+    // UTF-32 holds whole code points, so it must NOT surrogate-pair them.
+    let bytes = encode("\u{1F600}", Encoding::Utf32Le).unwrap();
+    assert_eq!(bytes.len(), 4 + 4, "BOM plus one 4-byte code point");
+    assert_eq!(decode_bytes_with(&bytes, Encoding::Utf32Le).0, "\u{1F600}");
+}
+
+/// A lone surrogate is a malformed file, not half of a character, so it becomes
+/// U+FFFD and the following unit still decodes on its own.
+#[test]
+fn a_lone_surrogate_is_a_replacement_not_half_a_character() {
+    let raw = b"\xff\xfe\x3d\xd8\x41\x00"; // BOM, high surrogate, 'A'
+    let (text, _) = decode_bytes_with(raw, Encoding::Auto);
+    assert_eq!(text, "\u{FFFD}A");
+}

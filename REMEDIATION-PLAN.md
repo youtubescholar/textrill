@@ -1915,13 +1915,27 @@ Three things exist only because two languages are in the path:
    process-global that should become a return value. Do not keep the pyo3 layer
    in sync during the port — it will be deleted, so maintaining it is work with
    no consumer.
-2. **Port the tests before the GUI.** `test_gui.py` (887 lines) is the spec, and
+2. **Port the tests before the GUI.** `test_gui.py` (1123 lines) is the spec, and
    the split matters:
    - `ConverterTests` (6) — pure engine, already covered by cargo tests.
      **Redundant; delete.**
-   - `FileTests` (10) — engine rules currently expressed in Python.
-     **Move to the engine's Rust tests**, where the rule lives. These are the
-     tests that should have been Rust all along.
+   - `FileTests` (20) — engine rules currently expressed in Python.
+     **Move to the engine's Rust tests**, where the rule lives. **Done** — ten
+     tests now cover the save path in `tests/encodingtest.rs`, and doing that
+     required adding the thing they were guarding, which did not exist in the
+     engine at all: `src/encode.rs`. The engine could decode but not encode, so
+     `files.py` had grown a private Python encoder, and Phase 6 would have
+     deleted `files.py` and the guarantee with it. Two defects surfaced while
+     porting, both now fixed:
+     - **The UTF-16 decoder replaced every astral character with two U+FFFD.**
+       `char::from_u32` is `None` for a surrogate, and each UTF-16 code unit was
+       being converted on its own, so a file containing one emoji decoded as a
+       pair of replacement glyphs. Anything outside the BMP was affected.
+       `units_to_string` now joins surrogate pairs, and a genuinely lone
+       surrogate still becomes U+FFFD.
+     - **`Encoding::Auto` was being offered as an output encoding.** There is
+       nothing to detect on output, and defaulting it to UTF-8 is precisely the
+       corruption that mangles a CP1252 file, so it is refused by name.
    - `BacklogTests` (3) and `GuiTests` (29) — 32 of the 58, and **the port's
      acceptance criteria.** Debounce, generation-counter cancellation,
      dirty-tracking, drag-and-drop, settings persistence, save semantics.
