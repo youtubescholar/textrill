@@ -11,13 +11,13 @@
 //! `draw` code the window uses, so a widget is queried by the label a user
 //! sees. No display, no windowing system.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use textrill::options::Options;
 use textrill_gui::options_panel::OptionsPanel;
-use textrill_gui::TextrillApp;
+use textrill_gui::{SaveAnswer, TextrillApp};
 
 /// `Options.demoronize` is on by default, so a click must turn it off.
 const DEMORONIZE: &str = "Convert Microsoft character codes into sensible HTML.";
@@ -234,6 +234,124 @@ fn the_display_controls_are_exposed() {
         harness.ctx.zoom_factor() > 1.0,
         "the Zoom in button did not scale the UI"
     );
+}
+
+// --------------------------------------------------------- unsaved changes
+
+/// A clean document runs `New` at once: there is nothing to lose.
+#[test]
+fn a_clean_document_does_not_ask_before_new() {
+    let mut app = TextrillApp::default();
+    app.new_document();
+    assert!(!app.is_prompting());
+    assert!(app.doc.text.is_empty());
+}
+
+/// An edited document holds `New` behind the prompt until it is answered.
+#[test]
+fn a_dirty_document_asks_before_new() {
+    let mut app = TextrillApp::default();
+    app.doc.text = "edited".to_string();
+    app.doc.dirty = true;
+    app.new_document();
+    assert!(app.is_prompting(), "the prompt did not open");
+    assert_eq!(app.doc.text, "edited", "New ran before it was answered");
+}
+
+/// `Cancel` leaves the edits and drops the waiting command.
+#[test]
+fn cancelling_the_prompt_keeps_the_edits() {
+    let mut app = TextrillApp::default();
+    app.doc.text = "edited".to_string();
+    app.doc.dirty = true;
+    app.new_document();
+    app.resolve_save_prompt(SaveAnswer::Cancel, &egui::Context::default());
+    assert!(!app.is_prompting());
+    assert_eq!(app.doc.text, "edited");
+}
+
+/// `Discard` throws the edits away and runs the command.
+#[test]
+fn discarding_the_prompt_runs_the_command() {
+    let mut app = TextrillApp::default();
+    app.doc.text = "edited".to_string();
+    app.doc.dirty = true;
+    app.new_document();
+    app.resolve_save_prompt(SaveAnswer::Discard, &egui::Context::default());
+    assert!(!app.is_prompting());
+    assert!(
+        app.doc.text.is_empty(),
+        "Discard did not clear the document"
+    );
+}
+
+/// `Save` writes the text to the opened file, then runs the command.
+#[test]
+fn saving_the_prompt_writes_the_text_then_runs_the_command() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let src = std::env::temp_dir().join(format!(
+        "textrill-prompt-{}-{nanos}.txt",
+        std::process::id()
+    ));
+    std::fs::write(&src, "original").expect("write source");
+
+    let mut app = TextrillApp::default();
+    app.load_file(&src).expect("load");
+    app.doc.text = "edited".to_string();
+    app.doc.dirty = true;
+    app.new_document();
+    assert!(app.is_prompting());
+
+    app.resolve_save_prompt(SaveAnswer::Save, &egui::Context::default());
+
+    assert!(!app.is_prompting());
+    assert!(
+        app.doc.text.is_empty(),
+        "the command did not run after saving"
+    );
+    assert_eq!(std::fs::read_to_string(&src).unwrap(), "edited");
+    let _ = std::fs::remove_file(&src);
+}
+
+/// With nowhere to write, `Save` cannot save, so the command is dropped and the
+/// edits stay -- the same result as cancelling Qt's file dialog.
+#[test]
+fn saving_with_nowhere_to_write_drops_the_command() {
+    let mut app = TextrillApp::default();
+    app.doc.text = "edited".to_string();
+    app.doc.dirty = true;
+    app.new_document();
+    app.resolve_save_prompt(SaveAnswer::Save, &egui::Context::default());
+    assert!(!app.is_prompting());
+    assert_eq!(app.doc.text, "edited", "the edits were lost without a save");
+    assert!(
+        app.status.contains("file dialogs pending"),
+        "status was {}",
+        app.status
+    );
+}
+
+/// The prompt is a real widget: it draws, and its buttons answer it.
+#[test]
+fn the_prompt_is_drawn_and_discard_works() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.state_mut().doc.text = "edited".to_string();
+    harness.state_mut().doc.dirty = true;
+    harness.state_mut().new_document();
+    harness.run();
+
+    harness.get_by_label("Unsaved changes");
+    harness.get_by_label("Discard").click();
+    harness.run();
+
+    assert!(!harness.state().is_prompting());
+    assert!(harness.state().doc.text.is_empty());
 }
 
 fn wait_for_conversion(app: &mut TextrillApp, timeout: Duration) {

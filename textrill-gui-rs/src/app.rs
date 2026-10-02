@@ -59,6 +59,25 @@ pub enum SaveRequest {
     NeedsName(PathBuf),
 }
 
+/// The user's answer to the unsaved-changes prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveAnswer {
+    /// Write the text back first, then carry out the waiting command.
+    Save,
+    /// Throw the edits away and carry out the waiting command.
+    Discard,
+    /// Do nothing.
+    Cancel,
+}
+
+/// The command waiting behind the unsaved-changes prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingAction {
+    New,
+    LoadSample,
+    Quit,
+}
+
 /// The whole front end.
 pub struct TextrillApp {
     /// The open document and its file state.
@@ -72,6 +91,11 @@ pub struct TextrillApp {
     pub show_options: bool,
     /// Whether the About window is open.
     pub about_open: bool,
+    /// The command held back until the unsaved-changes prompt is answered.
+    pending: Option<PendingAction>,
+    /// Set once the window has been told to close, so an in-flight
+    /// `close_requested` cannot re-open the prompt.
+    closing: bool,
     /// Rendered HTML, or the error text after a failed conversion.
     pub output: String,
     /// Status line: `Ready`, `converting…`, a summary, or `error`.
@@ -111,6 +135,8 @@ impl TextrillApp {
             panel: OptionsPanel::default(),
             show_options: true,
             about_open: false,
+            pending: None,
+            closing: false,
             output: String::new(),
             status: "Ready".to_string(),
             latest: 0,
@@ -229,14 +255,30 @@ impl TextrillApp {
 
     // ----------------------------------------------------------- documents
 
-    /// `File → New`.
+    /// `File → New`, after the unsaved-changes prompt when there are edits.
     pub fn new_document(&mut self) {
+        if self.doc.dirty {
+            self.pending = Some(PendingAction::New);
+        } else {
+            self.do_new();
+        }
+    }
+
+    fn do_new(&mut self) {
         self.doc.reset();
         self.convert_now();
     }
 
-    /// `File → Load example`.
+    /// `File → Load example`, after the prompt when there are edits.
     pub fn load_sample(&mut self) {
+        if self.doc.dirty {
+            self.pending = Some(PendingAction::LoadSample);
+        } else {
+            self.do_load_sample();
+        }
+    }
+
+    fn do_load_sample(&mut self) {
         self.doc.load_sample();
         self.convert_now();
     }
@@ -328,9 +370,60 @@ impl TextrillApp {
         }
     }
 
-    /// `File → Quit`.
-    pub fn quit(&self, ctx: &egui::Context) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    /// `File → Quit`. Asks about unsaved text first, like any editor.
+    pub fn quit(&mut self, ctx: &egui::Context) {
+        if self.doc.dirty {
+            self.pending = Some(PendingAction::Quit);
+        } else {
+            self.closing = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    /// Whether the unsaved-changes prompt is on screen.
+    pub fn is_prompting(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Answer the unsaved-changes prompt.
+    ///
+    /// `Save` writes the *text* (what the prompt is about), never the HTML, and
+    /// only carries out the waiting command if the write actually happened. A
+    /// `Save` that has nowhere to write is the same as the Python dialog being
+    /// cancelled: the command is dropped, not the edits.
+    pub fn resolve_save_prompt(&mut self, answer: SaveAnswer, ctx: &egui::Context) {
+        let Some(action) = self.pending else {
+            return;
+        };
+        match answer {
+            SaveAnswer::Cancel => self.pending = None,
+            SaveAnswer::Discard => self.perform(action, ctx),
+            SaveAnswer::Save => match self.save_text() {
+                Ok(SaveRequest::Saved(path)) => {
+                    self.status = format!("saved text to {}", path.display());
+                    self.perform(action, ctx);
+                }
+                Ok(SaveRequest::NeedsName(path)) => {
+                    self.pending = None;
+                    self.status =
+                        format!("would save to {} (file dialogs pending)", path.display());
+                }
+                Err(error) => {
+                    self.pending = None;
+                    self.status = error;
+                }
+            },
+        }
+    }
+
+    /// Carry out a command the prompt has cleared.
+    fn perform(&mut self, action: PendingAction, ctx: &egui::Context) {
+        self.pending = None;
+        match action {
+            PendingAction::New => self.do_new(),
+            PendingAction::LoadSample => self.do_load_sample(),
+            PendingAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+        }
     }
 
     // ------------------------------------------------------------------ ui
@@ -537,6 +630,38 @@ impl TextrillApp {
             });
     }
 
+    /// The modal three-way prompt Qt showed before a command could discard text.
+    fn save_prompt_window(&mut self, ctx: &egui::Context) {
+        if self.pending.is_none() {
+            return;
+        }
+        let mut answer = None;
+        let response = egui::Modal::new(egui::Id::new("unsaved-changes")).show(ctx, |ui| {
+            ui.set_max_width(340.0);
+            ui.heading("Unsaved changes");
+            ui.label("The text has unsaved changes.  Save them?");
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Save").clicked() {
+                    answer = Some(SaveAnswer::Save);
+                }
+                if ui.button("Discard").clicked() {
+                    answer = Some(SaveAnswer::Discard);
+                }
+                if ui.button("Cancel").clicked() {
+                    answer = Some(SaveAnswer::Cancel);
+                }
+            });
+        });
+        let answer = match answer {
+            Some(answer) => answer,
+            // Escape or a click on the backdrop is the same as Cancel.
+            None if response.should_close() => SaveAnswer::Cancel,
+            None => return,
+        };
+        self.resolve_save_prompt(answer, ctx);
+    }
+
     /// Draw the whole UI into `ui`.
     pub fn draw(&mut self, ui: &mut Ui) {
         // The worker asks for a redraw when a result lands, so the preview does
@@ -552,8 +677,21 @@ impl TextrillApp {
             ui.ctx().request_repaint_after(AUTO_CONVERT_DELAY);
         }
         self.set_title(ui.ctx());
-        self.handle_shortcuts(ui.ctx());
-        self.accept_dropped_files(ui.ctx());
+
+        // The window's own close button goes through the unsaved-changes prompt
+        // too, unless we are already closing.
+        if !self.closing && ui.ctx().input(|i| i.viewport().close_requested()) {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if self.doc.dirty {
+                self.pending = Some(PendingAction::Quit);
+            }
+        }
+        // A pending prompt owns the keyboard, so shortcuts cannot stack commands.
+        if self.pending.is_none() {
+            self.handle_shortcuts(ui.ctx());
+            self.accept_dropped_files(ui.ctx());
+        }
 
         self.menu_bar(ui);
         self.toolbar(ui);
@@ -587,6 +725,7 @@ impl TextrillApp {
         );
 
         self.about_window(ui.ctx());
+        self.save_prompt_window(ui.ctx());
     }
 }
 

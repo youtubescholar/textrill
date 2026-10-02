@@ -24,6 +24,6 @@ pub mod options_panel;
 pub mod settings;
 pub mod worker;
 
-pub use app::TextrillApp;
+pub use app::{SaveAnswer, TextrillApp};
 pub use document::Document;
 pub use settings::Settings;
