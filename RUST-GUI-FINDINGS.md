@@ -276,6 +276,26 @@ The following were confirmed by running them, not by reading docs:
 6. `cxx-qt` 0.10 exhibits the failures listed in §3.1.
 7. `qtbridge` 0.3.0 resolves on crates.io; its upstream README states a Qt 6.10+
    requirement.
+8. Whole-UI zoom is built into `egui` 0.36 and works with no extra code:
+   `Options::zoom_with_keyboard` defaults to `true`, and Ctrl/⌘ + `=`/`+`, `-`,
+   `0` change `Context::zoom_factor` in 0.1 steps, clamped to 0.2–5.0.
+   `egui::gui_zoom::{zoom_in, zoom_out, zoom_menu_buttons}` are public for a
+   menu or toolbar. Confirmed by `the_ui_zooms_with_the_keyboard` and
+   `the_display_controls_are_exposed`.
+9. OS DPI scaling is automatic and separate from user zoom. On X11, winit
+   0.30.13 reads `Xft/DPI` (xsettings, value ÷ 1024); on Wayland it reports the
+   output scale. egui then computes `pixels_per_point = zoom_factor *
+   native_pixels_per_point`, so a HiDPI panel and a 96 DPI projector are already
+   reconciled before the user touches anything, and user zoom multiplies on top.
+10. `eframe` persists window geometry and egui memory (which includes
+    `zoom_factor`) only with the non-default `persistence` feature, which pulls
+    in `egui/persistence`, `egui-winit/serde`, `serde` and `ron`. The current
+    feature set omits it, so zoom is per-session. The default window is winit's
+    800×600; the app now asks for 900×720 with a 360×300 minimum.
+11. `Context::send_viewport_cmd` requests a repaint. Sending the same `Title`
+    every frame therefore keeps the UI permanently awake and makes
+    `egui_kittest::Harness::run` fail with "exceeded max_steps". The title is now
+    sent only when it changes.
 
 ## 7. How to sequence this better next time
 

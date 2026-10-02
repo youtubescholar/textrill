@@ -55,6 +55,10 @@ pub struct TextrillApp {
     waker_installed: bool,
     /// When the debounced conversion is due, if one is pending.
     deadline: Option<Instant>,
+    /// The window title last sent to the platform, so it is only sent on
+    /// change. Sending it every frame requests a repaint every frame, which
+    /// never lets the UI go to sleep.
+    title_sent: Option<String>,
     settings: Settings,
 }
 
@@ -81,6 +85,7 @@ impl TextrillApp {
             worker: ConversionWorker::new(2),
             waker_installed: false,
             deadline: None,
+            title_sent: None,
             settings,
         };
         app.restore_settings();
@@ -263,9 +268,12 @@ impl TextrillApp {
         if self.deadline.is_some() {
             ui.ctx().request_repaint_after(AUTO_CONVERT_DELAY);
         }
-        ui.ctx()
-            .send_viewport_cmd(egui::ViewportCommand::Title(self.doc.title()));
-
+        let title = self.doc.title();
+        if self.title_sent.as_deref() != Some(title.as_str()) {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title_sent = Some(title);
+        }
         ui.heading("textrill");
         ui.horizontal(|ui| {
             ui.label("Input");
@@ -281,6 +289,37 @@ impl TextrillApp {
                 }
             }
             ui.label(&self.status);
+        });
+
+        // Whole-UI zoom, for the same reason a browser has it: a 4K laptop and
+        // a 96 DPI desktop should not dictate the same physical text size. The
+        // keyboard shortcuts (Ctrl/⌘ + / - / 0) work too; these buttons exist
+        // so the feature is discoverable. `zoom_factor` multiplies the OS's own
+        // scale factor, so a HiDPI screen is already handled before this.
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Display").small());
+            if ui
+                .button("Zoom out")
+                .on_hover_text("Zoom out (Ctrl+-)")
+                .clicked()
+            {
+                egui::gui_zoom::zoom_out(ui.ctx());
+            }
+            ui.label(format!("{:.0}%", ui.ctx().zoom_factor() * 100.0));
+            if ui
+                .button("Zoom in")
+                .on_hover_text("Zoom in (Ctrl+=)")
+                .clicked()
+            {
+                egui::gui_zoom::zoom_in(ui.ctx());
+            }
+            if ui
+                .button("Reset zoom")
+                .on_hover_text("Reset to 100% (Ctrl+0)")
+                .clicked()
+            {
+                ui.ctx().set_zoom_factor(1.0);
+            }
         });
 
         if ui

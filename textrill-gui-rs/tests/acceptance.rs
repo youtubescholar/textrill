@@ -106,6 +106,50 @@ fn the_app_exposes_its_controls() {
     harness.get_by_label("Options");
 }
 
+/// The whole UI scales at runtime, so a 4K panel and a 96 DPI projector are
+/// both readable. egui ships the keyboard shortcuts; this pins that they reach
+/// us, because a font/DPI refactor could silently drop them.
+#[test]
+fn the_ui_zooms_with_the_keyboard() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.run();
+    assert_eq!(harness.ctx.zoom_factor(), 1.0, "the UI starts at 100%");
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Plus);
+    harness.run();
+    let zoomed = harness.ctx.zoom_factor();
+    assert!(zoomed > 1.0, "Ctrl+= did not zoom in: {zoomed}");
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num0);
+    harness.run();
+    assert_eq!(harness.ctx.zoom_factor(), 1.0, "Ctrl+0 did not reset");
+}
+
+/// Zoom is also a visible control, not only a shortcut.
+#[test]
+fn the_display_controls_are_exposed() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.run();
+
+    harness.get_by_label("Zoom out");
+    harness.get_by_label("Zoom in");
+    harness.get_by_label("Reset zoom");
+
+    harness.get_by_label("Zoom in").click();
+    harness.run();
+    harness.run();
+    assert!(
+        harness.ctx.zoom_factor() > 1.0,
+        "the Zoom in button did not scale the UI"
+    );
+}
+
 fn wait_for_conversion(app: &mut TextrillApp, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     while app.completed < app.latest && Instant::now() < deadline {

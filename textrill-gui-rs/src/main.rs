@@ -10,9 +10,20 @@
 #![forbid(unsafe_code)]
 
 fn main() -> eframe::Result<()> {
+    // A window big enough for the input, the preview and the option panel
+    // without scrolling on a typical screen. The minimum keeps the controls
+    // reachable on something small; the user can scale the whole UI from the
+    // Display row, and the OS scale factor is applied on top of both.
+    let viewport = egui::ViewportBuilder::default()
+        .with_inner_size([900.0, 720.0])
+        .with_min_inner_size([360.0, 300.0]);
+    let options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
     eframe::run_native(
         "textrill",
-        eframe::NativeOptions::default(),
+        options,
         Box::new(|_cc| Ok(Box::new(textrill_gui::TextrillApp::default()))),
     )
 }
