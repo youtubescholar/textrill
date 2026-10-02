@@ -33,7 +33,38 @@ What is **not** done yet:
 - No Flatpak, no distro packaging yet.
 - Performance is roughly 2x slower than the Perl original. Not a correctness
   problem, but not good.
-- `.txt2htmlrc` config-file support is not yet restored.
+
+
+## Option files
+
+Options can come from the command line, from `@file` groups, or from an rc file.
+Precedence, lowest first:
+
+1. `@file` groups, in the order they appear on the command line
+2. `~/.txt2htmlrc`
+3. `./.txt2htmlrc`
+4. the command line
+
+One option per line, using the same spellings as the command line:
+
+```sh
+# .txt2htmlrc
+--extract
+--title "Release notes"
+--bold_delimiter "@"
+--custom_heading_regexp "^ *--[\\w\\s]+-- *$"
+```
+
+`#` starts a comment unless it is inside quotes, and a `--` line ends option
+processing, so everything after it is an input filename. A bad option is
+reported as `file:line: message`, naming both the file and the line.
+
+```sh
+textrill @opts.txt notes.txt
+```
+
+Both rc files are optional; a missing one is not an error. An `@file` that does
+not exist *is* an error, since the name was given explicitly.
 
 ## Install
 

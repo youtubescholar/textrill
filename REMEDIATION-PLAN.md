@@ -8,7 +8,8 @@ E1–E3, A1, A1b, A2–A10. P6 is **not met**: the two prescribed fixes are wort
 wall-clock, and the sound required-literal prefilter that followed them only buys
 another 5–15% of the link pass. The residual gap is `fancy_regex`'s backtracking
 engine, which `regex` cannot delegate to for patterns that need lookaround; see P6.
-Open: P11 and Phase 6 (the GUI rewrite).**
+P11 is done: `@file`, `~/.txt2htmlrc` and `./.txt2htmlrc` are read, with
+`file:line:` diagnostics. Open: Phase 6, the GUI rewrite.
 P13 is answered: the deliverable is a single self-contained artifact, so the GUI
 is rewritten in Rust + Qt and **the engine is kept** — see P13 and Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
@@ -1268,7 +1269,7 @@ Two decisions worth recording, both measured rather than assumed:
   (`(?:(?<=[A-Za-z0-9_])(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?=[A-Za-z0-9_]))`),
   so a `*` glob (`\b.*\b`) looks empty-capable in the source text and is not.
   Reasoning from the pattern text would have rejected legitimate globs and
-  dropped links the reference produces. All 52 built-in system-dictionary rules
+  dropped links the reference produces. All 65 loaded system-dictionary rules
   load and none match empty; a test asserts that against the real load path,
   not a hand-picked sample.
 - **`-o` and `-s` are deliberately *not* guarded.** They substitute at most once
@@ -1302,8 +1303,15 @@ measurement below can be explained by doing less work.
 | link processing | 2.70 s | 1.41 s |
 | everything else | 0.17 s | 0.06 s |
 
-The link phase is **94%** of Rust's runtime here — higher than the 60% originally
-recorded, because the rebuilt fixture is link-dense by design.
+The link phase is **~94%** of Rust's runtime on this fixture, which is link-dense
+by design. **This figure does not generalise, and an earlier draft of this plan
+presented it as if it did.** Direct phase timing on the 2 MB dense fixture measures
+the link pass at 0.649 s of roughly 4.3 s total, and on the 742 KB sparse fixture
+at 0.172 s of about 1.07 s -- i.e. **15% and 16% of wall-clock, not 94%**. The
+difference is the fixture: this 500 KB document has 60 432 link-ish tokens in
+4 945 paragraphs, whereas the other two are sparse. The 94% number is a property of
+this input, not of the engine, and the honest general statement is that the link
+phase is 15-94% of runtime depending on link density.
 
 **The two prescribed fixes were implemented, and they are worth ~0% of wall-clock.**
 
@@ -1324,8 +1332,8 @@ baseline 0.720s   fixed 0.720s   delta +0.0%
 
 **The plan's diagnosis was wrong.** Neither the clone nor the no-op `format!` was
 on the critical path. Instrumenting the pass shows where the time actually goes:
-**257 140 regex invocations** for 52 rules × 4 945 paragraphs, of which **81%
-match nothing**, and raw `is_match` over the same pairs alone costs 1.33 s of the
+**~321 000 regex invocations** for 65 loaded rules × 4 945 paragraphs, of
+which the large majority match nothing, and raw `is_match` over the same pairs alone costs 1.33 s of the
 2.70 s link phase. The bottleneck is `fancy_regex` being a backtracking engine
 where Perl uses PCRE, which prefilters internally.
 
@@ -1348,12 +1356,35 @@ regex that actually runs. `regex-automata`'s `from_hir_prefix` was not usable:
 it misses exactly the highest-value rules, the ~19 newsgroup patterns whose
 literal sits inside after a leading character class.
 
-Coverage on the shipped 41-rule dictionary: **38 of 41 rules get a literal**. The
-three that do not are `RFC ?(\d+)`, `\bSeth\ Golub\b` and `\btxt2html\b` -- all
-cases where the only literal is separated from its anchor, so nothing is provably
-required. It is a byte scan rather than a regex call, and the extractor returns
-`None` -- always run the regex -- whenever it cannot *prove* a literal, so the
-failure direction is wasted time, never a lost link.
+Coverage on the shipped dictionary, measured through the loader
+(`cargo run --release --example count_rules -- doc/txt2html.dict`): of **65 loaded
+rules, 56 get a literal and 9 do not**, with zero patterns rejected at load. The
+nine are cases where the only literal is separated from its anchor by a
+construct the analysis cannot cross, so nothing is provably required:
+
+```
+\bSeth\ Golub\b                      \btxt2html\b
+\b([[:alpha:]][\w])*ftp[\w]*(\.[\w+\-]+){2,}
+\b([[:alpha:]][\w])*www[\w]*(\.[\w+\-]+){2,}
+\bKathryn\ Andersen\b                \bHTML\:\:TextToHTML\b
+\bhypertoc\b                         \bHTML\:\:GenToc\b
+RFC ?(\d+)
+```
+
+The two `[[:alpha:]]`-prefixed host rules are the costly misses, not the trivia
+like `\bhypertoc\b`. It is a byte scan rather than a regex call, and the extractor
+returns `None` -- always run the regex -- whenever it cannot *prove* a literal, so
+the failure direction is wasted time, never a lost link.
+
+**A note on numbers here, because two earlier drafts of this section disagreed.**
+An intermediate measurement reported "38 of 41 rules" against a 41-rule subset.
+That was a real measurement of a real subset, not of the shipped dictionary: the
+loader produces 65 rules (54 rule lines, plus rules added by continuation-line
+joining and by the built-in URL group), and an earlier figure of "52 rules" was a
+line count of the dict file rather than a count of loaded rules. The 65/56 figures
+above are what `load_links` actually returns. The runtime table is unaffected --
+it was measured against whatever the loader produced at the time, and the loader
+has not changed since.
 
 Measured effect, and it is small:
 
@@ -1724,7 +1755,7 @@ what CI does.
   entire feature. Diff `ref/txt2html-3.0/scripts/txt2html` against `cli.rs`
   option by option instead.
 
-### P11. Config/rc file support was lost
+### P11. Config/rc file support was lost — **done**
 
 Found by the survey in `TOOL-SURVEY.md`, not by the original review.
 
@@ -1733,15 +1764,39 @@ The shipped upstream script reads option files. `scripts/txt2html:838-845` calls
 current=>1)`, and the POD at `scripts/txt2html:509,759-771` documents
 `~/.txt2htmlrc`, `./.txt2htmlrc`, and `@filename` grouping as active behaviour.
 
-The port has none of it. `txt2html @opts.txt` treats `@opts.txt` as an input
-filename and fails with `Could not open @opts.txt`, which is a confusing failure
-rather than an honest "unknown option".
+The port had none of it. `textrill @opts.txt` treated `@opts.txt` as an input
+filename and failed with `Could not open @opts.txt`, which is a confusing failure
+rather than an honest "unknown option". **Fixed**: `src/rcfile.rs` plus
+`cli::parse_args_with_rc`.
 
-Fix: accept `@file` as an option group, and read `~/.txt2htmlrc` and
-`./.txt2htmlrc`, with precedence `@file` < `~/.txt2htmlrc` < `./.txt2htmlrc` <
-command line to match upstream. Report a bad option inside an rc file as
-`file:line: unknown option`, which is the main ergonomic win over upstream. Note
-the GUI needs no equivalent — it has `optionspanel.py` and should not gain one.
+Precedence is `@file` < `~/.txt2htmlrc` < `./.txt2htmlrc` < command line, matching
+upstream, where `argvFile` prepends its expansion to `@ARGV` and the command line
+is therefore parsed last. Each layer was tested against the one below it rather
+than the whole stack being assumed correct.
+
+**A deliberate Tier 1 divergence, and the only one in this item.** Upstream reads
+the rc files only `if (eval("require Getopt::ArgvFile"))`, and that module **is not
+installed on this machine**, so the oracle used by the corpus reads no rc files at
+all. This port reads them unconditionally. The behaviour therefore cannot be
+checked against the reference here — only the option *values* can be, and those go
+through the same `set_value` path the command line uses. The alternative, matching
+the oracle by ignoring rc files unless a Perl module happens to be present, would
+make correct behaviour depend on an unrelated CPAN install; that is the reference's
+bug, not its specification. The corpus is unaffected because neither the corpus
+directory nor `$HOME` contains a `.txt2htmlrc`, and that is checked rather than
+assumed.
+
+Two smaller judgement calls:
+
+- A missing `@file` **is** an error; a missing rc file is not. The rc files are
+  documented as optional, whereas `@nope.txt` was a name the user typed.
+- `~/.txt2htmlrc` and `./.txt2htmlrc` are compared by path, so `HOME=$PWD` — common
+  in containers — reads the file once. Upstream would read it twice and duplicate
+  every array option.
+
+Beyond the reference, an error in an option file is reported as `file:line:
+message`, naming both. That is the ergonomic win over upstream, whose own error
+names neither.
 
 ## Phase 5 — Feature work
 

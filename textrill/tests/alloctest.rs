@@ -484,7 +484,7 @@ fn p6_link_pass_does_not_copy_the_paragraph_per_rule() {
     let large_per = per_para(&large);
     eprintln!("  P6 link pass: {small_per} bytes/para (50)  {large_per} bytes/para (200)");
 
-    // The saving under test is the per-rule copy: ~52 rules each cloning the
+    // The saving under test is the per-rule copy: the rules each cloning the
     // remaining paragraph. Measured: 5.5 KB/paragraph fixed, 12.4 KB/paragraph
     // with the clone and the unguarded format! restored. This bound sits
     // between the two so restoring either copy fails the test rather than

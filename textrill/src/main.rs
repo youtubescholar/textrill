@@ -34,7 +34,12 @@ fn main() -> ExitCode {
         }
     }
 
-    if let Err(e) = cli::parse_args(&args, &mut opts) {
+    // P11: `@file`, `~/.txt2htmlrc` and `./.txt2htmlrc` are read before the
+    // command line, so a command-line option always wins. The reference does the
+    // same via `Getopt::ArgvFile::argvFile`.
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    if let Err(e) = cli::parse_args_with_rc(&args, &mut opts, home.as_deref(), &cwd) {
         eprintln!("{PROG}: {e}");
         eprintln!("{PROG}: try `{PROG} --help` for more information");
         return ExitCode::from(1);

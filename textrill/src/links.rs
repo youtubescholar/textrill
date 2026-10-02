@@ -190,7 +190,7 @@ pub fn try_compile_pattern(pat: &str, nocase: bool) -> Result<Regex, fancy_regex
 /// Tested by matching against `""` rather than by inspecting the compiled form:
 /// the translation in [`translate_pattern`] rewrites `\b` into a zero-width
 /// lookaround alternation, so reasoning about "does this match empty" from the
-/// source text is not reliable. Every one of the 52 built-in system-dictionary
+/// source text is not reliable. Every one of the built-in system-dictionary
 /// patterns is non-empty-matching, so none of them is affected.
 ///
 /// This answers "could this hang", not "is this pattern well written". The

@@ -228,10 +228,31 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
     Ok(v)
 }
 
-pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
+/// Where an option came from, for diagnostics.
+#[derive(Clone, Debug)]
+pub enum Source {
+    CommandLine,
+    /// A file, with the label the user would recognise (`~/.txt2htmlrc`, ...).
+    File(String, usize),
+}
+
+impl std::fmt::Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Source::CommandLine => Ok(()),
+            Source::File(label, line) => write!(f, "{label}:{line}"),
+        }
+    }
+}
+
+/// Parse one argument list, reporting errors as `file:line: message` when the
+/// argument came from an option file.
+pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Result<(), String> {
     let mut it = args.iter().peekable();
     let mut table_type_seen = false;
     while let Some(arg) = it.next() {
+        let argline = || -> String { label.to_string() };
+        let at = |e: String| -> String { format!("{}: {e}", argline()) };
         let (name, mut inline) = if let Some(rest) = arg.strip_prefix("--") {
             match rest.split_once('=') {
                 Some((n, v)) => (n, Some(v.to_string())),
@@ -252,77 +273,189 @@ pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
             continue;
         };
 
-        // handle the "no" negation prefix for boolean options
-        let (spec, negated) = if let Some(stripped) = name
-            .strip_prefix("no-")
-            .or_else(|| name.strip_prefix("no_"))
-            .or_else(|| name.strip_prefix("no"))
-        {
-            match lookup(stripped) {
-                Some(s) => (s, true),
-                None => (
-                    lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?,
-                    false,
-                ),
-            }
-        } else {
-            (
-                lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?,
-                false,
-            )
-        };
+        let (spec, negated) = resolve(name).map_err(&at)?;
         if negated && !matches!(spec.kind, Kind::Flag) {
-            return Err(format!("Unknown option `{name}`"));
+            return Err(at(format!("Unknown option `{name}`")));
         }
 
         match spec.kind {
             Kind::Flag => {
-                let value = if let Some(v) = inline.take() {
-                    parse_bool(&v)?
-                } else {
-                    true
+                let value = match inline.take() {
+                    Some(v) => parse_bool(&v).map_err(&at)?,
+                    None => true,
                 };
                 set_bool(opts, spec, if negated { !value } else { value });
             }
             Kind::Str => {
                 let v = match inline.take() {
                     Some(v) => v,
-                    None => take_value(&mut it, name)?,
+                    None => take_value(&mut it, name).map_err(&at)?,
                 };
-                set_str(opts, spec, &v)?;
+                set_str(opts, spec, &v).map_err(&at)?;
             }
             Kind::Int => {
                 let v = match inline.take() {
                     Some(v) => v,
-                    None => take_value(&mut it, name)?,
+                    None => take_value(&mut it, name).map_err(&at)?,
                 };
                 let n: i64 = v
                     .parse()
-                    .map_err(|_| format!("Option {name} requires a number, got `{v}`"))?;
+                    .map_err(|_| at(format!("Option {name} requires a number, got `{v}`")))?;
                 set_int(opts, spec, n);
             }
             Kind::StrArray => {
                 let v = match inline.take() {
                     Some(v) => v,
-                    None => take_value(&mut it, name)?,
+                    None => take_value(&mut it, name).map_err(&at)?,
                 };
                 push_array(opts, spec, &v);
             }
             Kind::TableType => {
                 let v = match inline.take() {
                     Some(v) => v,
-                    None => take_value(&mut it, name)?,
+                    None => take_value(&mut it, name).map_err(&at)?,
                 };
-                // See reset_table_type: the command line names the whole set
-                // of table types, so the defaults are dropped on the first
+                // See reset_table_type: the command line names the whole set of
+                // table types, so the defaults are dropped on the first
                 // occurrence and later ones accumulate.
                 if !table_type_seen {
                     reset_table_type(opts);
                     table_type_seen = true;
                 }
-                set_table_type(opts, &v)?;
+                set_table_type(opts, &v).map_err(&at)?;
             }
         }
+    }
+    Ok(())
+}
+
+/// Look up an option name, handling the `no` negation prefix for booleans.
+///
+/// Split out of `parse_args` because the option-file path needs the same rules
+/// and they must not drift: an rc file that accepted `--noextract` while the
+/// command line did not would be a confusing asymmetry.
+fn resolve(name: &str) -> Result<(&'static Spec, bool), String> {
+    let stripped = name
+        .strip_prefix("no-")
+        .or_else(|| name.strip_prefix("no_"))
+        .or_else(|| name.strip_prefix("no"));
+    match stripped {
+        Some(rest) => match lookup(rest) {
+            Some(s) => Ok((s, true)),
+            None => match lookup(name) {
+                Some(s) => Ok((s, false)),
+                None => Err(format!("Unknown option `{name}`")),
+            },
+        },
+        None => match lookup(name) {
+            Some(s) => Ok((s, false)),
+            None => Err(format!("Unknown option `{name}`")),
+        },
+    }
+}
+
+/// Parse a command-line argument list.
+///
+/// Thin wrapper over [`parse_args_from`] so callers on the command line do not
+/// have to name a source.
+pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
+    parse_args_from(args, opts, "")
+}
+
+/// P11: expand `@file` and the rc files, then parse everything in order.
+///
+/// The reference reads option files before its command line
+/// (`Getopt::ArgvFile::argvFile` prepends its expansion to `@ARGV`), so a
+/// command-line value always wins. Precedence is therefore
+/// `@file` < `~/.txt2htmlrc` < `./.txt2htmlrc` < command line, and `@file` is
+/// expanded where it appears so a later command-line option overrides it.
+pub fn parse_args_with_rc(
+    args: &[String],
+    opts: &mut Options,
+    home: Option<&std::path::Path>,
+    current: &std::path::Path,
+) -> Result<(), String> {
+    let mut command_line: Vec<String> = Vec::new();
+
+    for a in args {
+        match a.strip_prefix('@') {
+            Some(path) if !path.is_empty() => {
+                let p = current.join(path);
+                let label = p.display().to_string();
+                read_option_file(&p, &label, opts, false)?;
+            }
+            // A bare `@` is not a group. Left for the input-file path, which
+            // reports it as an unopenable file -- the same as upstream.
+            _ => command_line.push(a.clone()),
+        }
+    }
+
+    for (path, label) in crate::rcfile::rc_files(home, current) {
+        read_option_file(&path, &label, opts, true)?;
+    }
+
+    parse_args(&command_line, opts)
+}
+
+/// Read one option file and apply it, one line at a time.
+///
+/// Lines rather than a flat token stream, because an option file is line
+/// oriented: `--bold_delimiter #` is one option with one value, and flattening
+/// it into tokens would make that indistinguishable from a bare
+/// `--bold_delimiter` missing its argument.
+fn read_option_file(
+    path: &std::path::Path,
+    label: &str,
+    opts: &mut Options,
+    optional_missing: bool,
+) -> Result<(), String> {
+    // The two rc files are optional, so a missing one is fine. An `@file` group
+    // is not: the user named it explicitly, so a typo must be an error rather
+    // than a silently ignored group.
+    let optional = optional_missing;
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && optional => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!("{label}: no such option file"))
+        }
+        Err(e) => return Err(format!("{label}: {e}")),
+    };
+    let mut table_type_seen = false;
+    for (idx, raw) in text.lines().enumerate() {
+        let where_ = format!("{label}:{}", idx + 1);
+        let line = crate::rcfile::strip_comment(raw.trim());
+        if line.is_empty() {
+            continue;
+        }
+        if line == "--" {
+            // Everything after this is an input filename. Option processing
+            // ends, which is the only way to name a file beginning with a dash.
+            for rest in text.lines().skip(idx + 1) {
+                let t = rest.trim();
+                if !t.is_empty() {
+                    opts.infile.push(t.to_string());
+                }
+            }
+            return Ok(());
+        }
+        let tokens: Vec<String> = crate::rcfile::split_tokens(line);
+        if tokens.is_empty() {
+            continue;
+        }
+        // `--table_type` names the whole set of table types, so the first
+        // occurrence in a file drops the defaults just as the first occurrence
+        // on the command line does. Per file, not per invocation, so a file's
+        // own repeat accumulates.
+        if !table_type_seen
+            && tokens
+                .first()
+                .is_some_and(|t| t == "--table_type" || t.starts_with("--table_type="))
+        {
+            reset_table_type(opts);
+            table_type_seen = true;
+        }
+        parse_args_from(&tokens, opts, &where_)?;
     }
     Ok(())
 }
@@ -544,6 +677,15 @@ pub fn usage() -> String {
         s.push_str(&format!("        {}\n", spec.help));
     }
     s.push_str("\nOptions can be abbreviated.  Boolean options take a `no` prefix to disable.\n");
+    // P11. Documented here rather than only in the README because this is the
+    // only place a user learns the precedence order without opening a second file.
+    s.push_str(
+        "\nOptions may also be read from @file groups, and from ~/.txt2htmlrc or\n\
+         ./.txt2htmlrc -- one option per line, `#` comments, and a `--` line to end\n\
+         option processing.  Lowest precedence first:\n\
+         \n\
+         \x20   @file < ~/.txt2htmlrc < ./.txt2htmlrc < command line\n",
+    );
     // P7.4. --help spells the detection order out, because --encoding is the
     // one option whose behaviour cannot be guessed from its name, and the
     // difference between "detected" and "guessed" decides whether a user

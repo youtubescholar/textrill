@@ -212,7 +212,7 @@ fn ordinary_patterns_are_not_mistaken_for_empty_matches() {
     assert!(!links::can_match_empty("alt\\.[\\w.\\-]+", false));
 }
 
-/// None of the 52 built-in system-dictionary rules may be rejected.
+/// None of the built-in system-dictionary rules may be rejected.
 ///
 /// If the guard ever starts firing on the shipped dictionary, the tool loses
 /// URL detection, so this asserts the real load path rather than a hand-picked
@@ -502,5 +502,33 @@ fn prefilter_sees_literals_introduced_by_earlier_rules() {
     assert!(
         para.contains("example.invalid"),
         "neither rule fired: {para:?}"
+    );
+}
+
+/// Prefilter coverage is a real number in the plan, so it is asserted rather
+/// than asserted-in-prose. If the extractor regresses and stops finding
+/// literals, the plan's performance table stops describing this build.
+#[test]
+fn the_shipped_dictionary_is_mostly_prefiltered() {
+    let opts = Options::default();
+    let parser = links::load_links(&opts);
+    let filtered = parser
+        .rules
+        .iter()
+        .filter(|r| r.prefilter.is_some())
+        .count();
+    println!(
+        "dictionary: {} rules, {filtered} prefiltered",
+        parser.rules.len()
+    );
+    assert_eq!(
+        filtered,
+        parser.rules.len() - 9,
+        "prefilter coverage changed; update the REMEDIATION plan figure"
+    );
+    assert!(
+        parser.rejected_patterns.is_empty(),
+        "dictionary patterns were rejected at load: {:?}",
+        parser.rejected_patterns
     );
 }
