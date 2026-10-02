@@ -623,7 +623,9 @@ impl LinkParser {
                         *para_ref = post;
                     }
                 }
-                *para_ref = format!("{line_with_links}{para_ref}");
+                if !line_with_links.is_empty() {
+                    *para_ref = format!("{line_with_links}{para_ref}");
+                }
             } else if rule_switches & LINK_SECT_ONCE != 0 {
                 if !self.sect_once_done[i] {
                     if let Some(caps) = self.rules[i].regex.captures(&*para_ref).ok().flatten() {
@@ -641,16 +643,22 @@ impl LinkParser {
                         *para_ref = post;
                     }
                 }
-                *para_ref = format!("{line_with_links}{para_ref}");
+                if !line_with_links.is_empty() {
+                    *para_ref = format!("{line_with_links}{para_ref}");
+                }
             } else {
                 loop {
-                    let cur = para_ref.clone();
-                    let caps_opt = self.rules[i].regex.captures(&cur).ok().flatten();
+                    // P6: this used to be `let cur = para_ref.clone();`, copying
+                    // the whole remaining paragraph once per match per rule.
+                    // Not needed: `split_front` returns owned Strings, so the
+                    // borrow `caps`/`m` holds on `para_ref` ends before the
+                    // reassignment below.
+                    let caps_opt = self.rules[i].regex.captures(para_ref).ok().flatten();
                     match caps_opt {
                         None => break,
                         Some(caps) => {
                             let m = caps.get(0).unwrap();
-                            let (pre, matched, post) = split_front(&cur, m.start(), m.end());
+                            let (pre, matched, post) = split_front(para_ref, m.start(), m.end());
                             line_with_links.push_str(&pre);
                             let mut linkme = matched;
                             if !self.in_link_context(&linkme, &line_with_links) {
@@ -661,7 +669,9 @@ impl LinkParser {
                         }
                     }
                 }
-                *para_ref = format!("{line_with_links}{para_ref}");
+                if !line_with_links.is_empty() {
+                    *para_ref = format!("{line_with_links}{para_ref}");
+                }
             }
         }
     }

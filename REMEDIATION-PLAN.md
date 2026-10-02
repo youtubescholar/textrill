@@ -4,7 +4,9 @@ Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
 **Progress is recorded in §0.1 below. Done: P1–P5, P8–P10, P12, P14–P19, P21–P23,
-E1–E3, A1, A1b, A2–A10. Open: P6, P11, and Phase 6 (the GUI rewrite).**
+E1–E3, A1, A1b, A2–A10. P6's two prescribed fixes are landed and are worth ~0% of
+wall-clock — the real bottleneck is 257 140 regex invocations with 81% no-match; see
+P6. Open: the P6 prefilter, P11, and Phase 6 (the GUI rewrite).**
 P13 is answered: the deliverable is a single self-contained artifact, so the GUI
 is rewritten in Rust + Qt and **the engine is kept** — see P13 and Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
@@ -1282,43 +1284,74 @@ could have covered it.
 
 ## Phase 2 — Performance
 
-### P6. The port is ~2x slower than the Perl it replaces
+### P6. The port is ~2x slower than the Perl it replaces — **fixes landed, goal NOT met**
 
-2 MB document, release build: Rust 2.94 s, Perl 1.51 s. Scaling is linear
-(measured 125 K -> 2 M), so this is a constant factor, not an algorithmic
-regression. Breakdown:
+2 MB link-dense document, release build: Rust 2.87 s, Perl 1.47 s. The original
+figure could not be reproduced from the tree — the 2 MB fixture was not kept, and
+`big_para.txt` contains no links at all, so it cannot exercise the link phase. A
+deterministic generator was written to rebuild an equivalent document (4 945
+paragraphs, 60 432 link-ish tokens); its output is byte-identical to Perl, so no
+measurement below can be explained by doing less work.
+
+**Measured phase breakdown** (`--no_make_links` isolates the link path):
 
 | Phase | Rust | Perl |
 |---|---|---|
-| link processing | 1.73 s | 0.52 s |
-| everything else | 1.13 s | 0.93 s |
-| total | 2.86 s | 1.45 s |
+| link processing | 2.70 s | 1.41 s |
+| everything else | 0.17 s | 0.06 s |
 
-Links are 60% of the time and ~3.3x slower than Perl. The causes are in
-`check_dictionary_links` (`links.rs:488-564`) and are straightforward:
+The link phase is **94%** of Rust's runtime here — higher than the 60% originally
+recorded, because the rebuilt fixture is link-dense by design.
 
-- `links.rs:544` — `let cur = para_ref.clone();` inside the innermost match
-  loop. The whole remaining paragraph is cloned for every match of every rule.
-  The clone is not needed for borrow-checking: `repl` takes `&self`
-  (`links.rs:566`), so the immutable borrows of `para_ref` and `caps` are dead
-  by the time it is called. Drop the clone and match on `para_ref` directly.
-- `links.rs:518`, `links.rs:541`, `links.rs:561` —
-  `*para_ref = format!("{line_with_links}{para_ref}");` runs for all ~40
-  system-dictionary rules on every paragraph even when the rule matched nothing,
-  where `line_with_links` is empty and the `format!` is a full copy of the
-  paragraph for a no-op. Guard with `if !line_with_links.is_empty()`.
+**The two prescribed fixes were implemented, and they are worth ~0% of wall-clock.**
 
-Those two changes should be worth a large fraction of the link-phase gap.
-Re-measure with the same 2 MB file, and add a timing guard to
-`tests/linktest.rs` next to the existing quadratic-regression test so this does
-not silently come back.
+- `links.rs` — dropped `let cur = para_ref.clone()` from the innermost match loop.
+  Confirmed it was never needed for borrow-checking: `split_front` returns owned
+  `String`s, so the borrow ends before the reassignment.
+- `links.rs` — guarded all three `*para_ref = format!("{line_with_links}{para_ref}")`
+  sites with `if !line_with_links.is_empty()`.
 
-A separate, larger question: Perl uses PCRE via `qr//` with a precompiled
-substitution hash; the port uses `fancy_regex`, a backtracking engine, and
-recompiles nothing but still runs every rule against every paragraph. If the
-gap remains after the two fixes above, the next step is a literal-prefix
-prefilter per rule so most rules can be skipped without invoking the engine at
-all. That is a real design change, so only do it with measurements in hand.
+Output stays byte-identical to Perl (corpus 59/59, goldens 33/33, 16 000 fuzz
+cases). They do cut the link pass from **11 602 to 5 510 bytes/paragraph, a 52%
+reduction in allocation**, so they are a real improvement and are kept. But
+measured wall-clock, pinned to one core, 15 reps of a 500 KB document, min-of-N:
+
+```
+baseline 0.720s   fixed 0.720s   delta +0.0%
+```
+
+**The plan's diagnosis was wrong.** Neither the clone nor the no-op `format!` was
+on the critical path. Instrumenting the pass shows where the time actually goes:
+**257 140 regex invocations** for 52 rules × 4 945 paragraphs, of which **81%
+match nothing**, and raw `is_match` over the same pairs alone costs 1.33 s of the
+2.70 s link phase. The bottleneck is `fancy_regex` being a backtracking engine
+where Perl uses PCRE, which prefilters internally.
+
+**Two things made the original numbers hard to act on, and both are now fixed.**
+The benchmark host has background load — a desktop greeter measured at 32% CPU,
+load average reaching 7.6 — which made every timing arm bimodal and produced
+successive "improvements" of -3% and +11% for the *same* binary. All timings are
+now A/B-interleaved with min-of-N, and the primary regression guard is the
+allocation budget rather than a wall-clock threshold, because allocation counts are
+deterministic and machine-independent.
+
+**What actually closes the gap** is the prefilter this section already flagged as
+the follow-up: skip the ~81% of rule/paragraph pairs that cannot match, using a
+required-literal test before invoking the regex engine. It is *not* implemented,
+and it is a real design decision rather than a mechanical fix:
+
+- `regex-automata`'s public `Prefilter` only exposes `from_hir_prefix`, and prefix
+  extraction misses exactly the highest-value rules — the ~19 newsgroup patterns
+  like `([^\w]\-)(alt\.[\w...]+)` where the literal sits *inside*, after a
+  leading character class.
+- The system dictionary and user dictionaries therefore need a sound
+  required-*substring* extractor. Hand-rolling one is feasible but is the exact
+  class of change where an unsound literal silently drops links, and this
+  project's worst failure mode.
+
+Recommendation: treat the prefilter as its own item with its own soundness proof
+(a property test asserting `prefilter_rejects(p) ⟹ !regex.matches(p)` across the
+corpus and fuzz inputs), not as a footnote to P6.
 
 Practical impact meanwhile: the GUI's 300 ms debounce
 (`mainwindow.py:41`) is exceeded past roughly 180 KB, so live preview stalls on

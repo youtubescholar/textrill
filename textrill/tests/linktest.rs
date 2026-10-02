@@ -315,3 +315,57 @@ fn the_pipe_delimited_form_still_links() {
         "expected Perl to become a link, got: {s}"
     );
 }
+
+/// P6: the link pass must not scale superlinearly with paragraph size.
+///
+/// The existing quadratic test above covers document shape; this one covers the
+/// dictionary path specifically, because P6's two changes were about work done
+/// per rule per paragraph. It asserts a *ratio*, not a wall-clock number: the
+/// benchmark host has background load (a desktop greeter measured at 32% CPU)
+/// that made every absolute timing bimodal, so a threshold in seconds would be
+/// either flaky or useless. The ratio survives that, because both arms run
+/// back to back in the same process.
+///
+/// The allocation budget in `alloctest.rs` is the primary guard; this is the
+/// wall-clock counterpart, and it is deliberately loose.
+#[test]
+fn link_work_scales_linearly_with_paragraph_count() {
+    let opts = Options::default();
+    let mut parser = links::load_links(&opts);
+    // Warm up: dictionary compilation is lazy and is not what is under test.
+    let mut warm = "see http://example.com/a and txt2html".to_string();
+    parser.check_dictionary_links(&mut warm);
+
+    let make = |n: usize| -> Vec<String> {
+        (0..n)
+            .map(|i| {
+                format!(
+                    "plain words with nothing to link here at all \
+                     see http://example{i}.com/a/b and txt2html for details"
+                )
+            })
+            .collect()
+    };
+    let mut run = |paras: &[String]| {
+        let t0 = std::time::Instant::now();
+        for p in paras {
+            let mut s = p.clone();
+            parser.check_dictionary_links(&mut s);
+        }
+        t0.elapsed().as_secs_f64()
+    };
+
+    let small = make(100);
+    let large = make(800);
+    let (t_small, t_large) = (run(&small), run(&large));
+    eprintln!("link pass: {t_small:.3}s for 100 paras, {t_large:.3}s for 800");
+
+    // 8x the work. Generous enough for a loaded box, tight enough to catch a
+    // reintroduced per-rule scan of the whole document.
+    let ratio = t_large / t_small.max(1e-6);
+    assert!(
+        ratio < 40.0,
+        "8x the paragraphs took {ratio:.1}x the time ({t_small:.3}s -> {t_large:.3}s); \
+         the link pass may be scanning the whole document per rule again"
+    );
+}

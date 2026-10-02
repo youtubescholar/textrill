@@ -422,3 +422,76 @@ fn the_instrument_works() {
          {live_delta}"
     );
 }
+
+// ---------------------------------------------------------------- P6
+//
+// P6 removed two per-rule copies from `check_dictionary_links`: the whole
+// remaining paragraph was cloned once per match per rule, and a `format!`
+// copied the paragraph again for every rule even when it matched nothing.
+//
+// Wall-clock did not show a reliable win on the benchmark host (background load
+// made every arm bimodal), so the win is asserted here instead. Allocation
+// count is deterministic and machine-independent -- a budget asserted against it
+// means the same thing on every machine, where a timing threshold on a loaded
+// box does not.
+//
+// The parser is built once, outside the measured window, on purpose. Building
+// it compiles all 52 system-dictionary patterns and costs ~86 MB of allocation
+// regardless of document size; measuring that would say nothing about the link
+// path and would drown the per-paragraph signal in a constant.
+
+fn link_paragraphs(n: usize) -> Vec<String> {
+    (0..n)
+        .map(|i| {
+            format!(
+                "plain words with nothing to link here at all \
+                 see http://example{i}.com/a/b and txt2html for details"
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn p6_link_pass_does_not_copy_the_paragraph_per_rule() {
+    let _g = exclusive();
+    let opts = Options {
+        default_link_dict: String::new(),
+        ..Options::default()
+    };
+    let mut parser = links::load_links(&opts);
+    assert!(!parser.rules.is_empty(), "system dict should load");
+    // Warm up so lazy compilation is not attributed to the measured window.
+    {
+        let mut s = link_paragraphs(1).remove(0);
+        parser.check_dictionary_links(&mut s);
+    }
+
+    let small = link_paragraphs(50);
+    let large = link_paragraphs(200);
+
+    let mut per_para = |paras: &[String]| -> usize {
+        let (cum, _) = measure(|| {
+            for p in paras {
+                let mut s = p.clone();
+                parser.check_dictionary_links(&mut s);
+                assert!(!s.is_empty());
+            }
+        });
+        cum / paras.len()
+    };
+    // once() so neither arm borrows parser twice at once
+    let small_per = per_para(&small);
+    let large_per = per_para(&large);
+    eprintln!("  P6 link pass: {small_per} bytes/para (50)  {large_per} bytes/para (200)");
+
+    // The saving under test is the per-rule copy: ~52 rules each cloning the
+    // remaining paragraph. Measured: 5.5 KB/paragraph fixed, 12.4 KB/paragraph
+    // with the clone and the unguarded format! restored. This bound sits
+    // between the two so restoring either copy fails the test rather than
+    // merely printing a worse number -- verified by reverting both and
+    // watching it go red.
+    assert!(
+        large_per < 9_000,
+        "link pass allocated {large_per} bytes/paragraph; a per-rule paragraph copy is back"
+    );
+}
