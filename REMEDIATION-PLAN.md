@@ -9,7 +9,9 @@ wall-clock, and the sound required-literal prefilter that followed them only buy
 another 5–15% of the link pass. The residual gap is `fancy_regex`'s backtracking
 engine, which `regex` cannot delegate to for patterns that need lookaround; see P6.
 P11 is done: `@file`, `~/.txt2htmlrc` and `./.txt2htmlrc` are read, with
-`file:line:` diagnostics. Open: Phase 6, the GUI rewrite.
+`file:line:` diagnostics. Phase 6 is **in progress**: the GUI/engine surface is
+frozen in `textrill-gui/SURFACE.md`. Open: the toolkit decision, which is now
+blocked on the fact that only Qt 5.15 is installed here while Flathub ships Qt 6.
 P13 is answered: the deliverable is a single self-contained artifact, so the GUI
 is rewritten in Rust + Qt and **the engine is kept** — see P13 and Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
@@ -175,7 +177,7 @@ correct implementation instead of two.
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
 | P5 | **done** | the inherited `/|.../` hang: an empty-matching dictionary pattern spun the substitution loop forever, in the Perl original too. Rejected at load with a diagnostic, reusing the P4 channel. The criterion is `re.is_match("")` because `translate_pattern` turns `\b` into a zero-width lookaround alternation and a `*` glob is not empty-matching. `-o`/`-s` deliberately unguarded: they substitute once, Perl accepts them, and guarding them would be a Tier 1 divergence |
 | P13 | **decided** | single artifact. The GUI is rewritten off Python + PySide6; **the 5,644-line engine is kept**. P5, P6 and P11 are sequenced *ahead* of it. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6**. Delivery since refined: Flatpak, not a bundled binary, and the Qt assumption is open — see "Licensing and distribution" |
-| Phase 6 | **planned** | the GUI rewrite: 1,365 lines of Python shell out, ~30 tests ported as acceptance criteria, pyo3 layer and venv deleted from the dependency graph. CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Still open: Qt6 vs GTK4, now reduced to a Flathub runtime choice |
+| Phase 6 | **in progress** | the GUI rewrite: 1,365 lines of Python shell out, 32 tests ported as acceptance criteria. Surface frozen in `textrill-gui/SURFACE.md` (§6.3 step 1), pyo3 layer and venv deleted from the dependency graph. CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Still open: Qt6 vs GTK4, now reduced to a Flathub runtime choice |
 | licensing | **decided** | engine and CLI stay **GPL-3.0-or-later**; GUI is **GPLv3**. BSD for the CLI was raised and declined as unnecessary — see "Licensing and distribution" |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
@@ -1902,11 +1904,17 @@ Three things exist only because two languages are in the path:
 
 ### 6.3 Order of work
 
-1. **Freeze the surface as a written spec, not as maintained code.** The five
-   `pyfunction`s plus `option_specs`' six fields (name, aliases, kind, default,
-   numeric range, help) are exactly what a Qt options panel needs. Write the
-   table down. Do not keep the pyo3 layer in sync during the port — it will be
-   deleted, so maintaining it is work with no consumer.
+1. ~~**Freeze the surface as a written spec, not as maintained code.**~~ **Done**
+   — `textrill-gui/SURFACE.md`. The six `pyfunction`s, `option_specs`' six fields,
+   the widget mapping, the A6 concurrency contract and the test disposition are
+   written down and checked against the build rather than from memory. Three
+   things it settled that were previously assumed: `option_specs()` returns
+   **54** options (20 bool / 18 str / 11 int / 4 str_array / 1 table_type);
+   `process_chunk` has **no caller anywhere in the GUI**, so it should not be
+   ported unless something starts needing it; and `file_encoding` is a
+   process-global that should become a return value. Do not keep the pyo3 layer
+   in sync during the port — it will be deleted, so maintaining it is work with
+   no consumer.
 2. **Port the tests before the GUI.** `test_gui.py` (887 lines) is the spec, and
    the split matters:
    - `ConverterTests` (6) — pure engine, already covered by cargo tests.
@@ -1914,9 +1922,12 @@ Three things exist only because two languages are in the path:
    - `FileTests` (10) — engine rules currently expressed in Python.
      **Move to the engine's Rust tests**, where the rule lives. These are the
      tests that should have been Rust all along.
-   - `BacklogTests` (3) and `GuiTests` (27) — 30 of the 46, and **the port's
+   - `BacklogTests` (3) and `GuiTests` (29) — 32 of the 58, and **the port's
      acceptance criteria.** Debounce, generation-counter cancellation,
      dirty-tracking, drag-and-drop, settings persistence, save semantics.
+   The class sizes above are counted from the actual `def test_` definitions in
+   `test_gui.py`, and sum to the 58 the suite runs; this section previously
+   claimed "27 / 46", which never matched the suite.
 3. **Port the shell**, in dependency order: `worker.py`'s concurrency contract →
    `optionspanel.py` from `cli::SPECS` → `mainwindow.py` → `app.py`.
 4. **Keep the A6 concurrency contract verbatim in intent.** `worker.py:75` solved
