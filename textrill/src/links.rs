@@ -144,6 +144,40 @@ pub fn try_compile_pattern(pat: &str, nocase: bool) -> Result<Regex, fancy_regex
     Regex::new(&translate_pattern(&full))
 }
 
+/// True if `pat` can match the empty string, which is what makes the
+/// substitution loop in [`LinkParser::check_dictionary_links`] spin forever.
+///
+/// A `/|Perl\b/`-delimited entry is an alternation whose first and last
+/// branches are both empty, so it matches at every position without
+/// consuming anything. The loop then splits the paragraph into
+/// `(pre, "", post)` where `post` is the whole paragraph again, reassigns
+/// `para_ref` to an unchanged value and matches empty again, forever.
+/// **Verified: the Perl original hangs identically**, so this is an upstream
+/// pathology rather than a port defect, and the differential corpus can never
+/// catch it -- the oracle hangs too.
+///
+/// The correct spelling is the `|...|` form, which is handled separately in
+/// `parse_dict` and is verified byte-identical to Perl for glob, literal,
+/// `-o`, `-i`, `-h` and `$1` templates.
+///
+/// Tested by matching against `""` rather than by inspecting the compiled form:
+/// the translation in [`translate_pattern`] rewrites `\b` into a zero-width
+/// lookaround alternation, so reasoning about "does this match empty" from the
+/// source text is not reliable. Every one of the 52 built-in system-dictionary
+/// patterns is non-empty-matching, so none of them is affected.
+///
+/// This answers "could this hang", not "is this pattern well written". The
+/// caller applies it only to the switch combinations that reach the loop;
+/// `-o` and `-s` substitute once and so terminate regardless. Rejecting those
+/// would diverge from Perl for no gain, and Tier 1 is byte-identical.
+pub fn can_match_empty(pat: &str, nocase: bool) -> bool {
+    match try_compile_pattern(pat, nocase) {
+        Ok(re) => re.is_match("").unwrap_or(false),
+        // Already reported by `add_regexp`; do not claim a second reason.
+        Err(_) => false,
+    }
+}
+
 /// [`try_compile_pattern`] for callers that have already validated, or that are
 /// compiling a pattern this crate wrote. A failure here is an internal bug, so
 /// it panics rather than being threaded through every call site.
@@ -399,6 +433,28 @@ impl LinkParser {
         // `Options::validate`, where a `Result` already exists. See P22.
         if let Err(e) = try_compile_pattern(pattern, switches & LINK_NOCASE != 0) {
             let msg = format!("textrill: ignoring link-dictionary pattern {pattern:?}: {e}");
+            eprintln!("{msg}");
+            self.rejected_patterns.push(msg);
+            return;
+        }
+        // P5: a pattern that matches the empty string spins the substitution
+        // loop in `check_dictionary_links` forever. See `can_match_empty`.
+        //
+        // Only guarded for the switch combinations that actually reach that
+        // loop. `-o` (LINK_ONCE) and `-s` (LINK_SECT_ONCE) substitute at most
+        // once per paragraph or per section, so the same pattern terminates
+        // there -- and Perl accepts them, so rejecting them would be a Tier 1
+        // byte-parity divergence for no benefit. Measured: `/|x/ -o-> url`
+        // emits an empty anchor in both implementations.
+        if switches & (LINK_ONCE | LINK_SECT_ONCE) == 0
+            && can_match_empty(pattern, switches & LINK_NOCASE != 0)
+        {
+            let msg = format!(
+                "textrill: ignoring link-dictionary pattern {pattern:?}: it matches the empty \
+                 string, which would never terminate. In a /.../ entry | is a regex alternation \
+                 operator, so /|x|/ matches nothing at every position; write |x| (no slashes) to use \
+                 the pipe-delimited dictionary form."
+            );
             eprintln!("{msg}");
             self.rejected_patterns.push(msg);
             return;

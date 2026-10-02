@@ -3,8 +3,8 @@
 Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
-**Progress is recorded in §0.1 below. Done: P1–P3, P8–P10, P12, P14–P19, P21–P23,
-E1–E3, A1, A1b, A2–A10. Open: P5, P6, P11, and Phase 6 (the GUI rewrite).**
+**Progress is recorded in §0.1 below. Done: P1–P5, P8–P10, P12, P14–P19, P21–P23,
+E1–E3, A1, A1b, A2–A10. Open: P6, P11, and Phase 6 (the GUI rewrite).**
 P13 is answered: the deliverable is a single self-contained artifact, so the GUI
 is rewritten in Rust + Qt and **the engine is kept** — see P13 and Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
@@ -168,6 +168,7 @@ correct implementation instead of two.
 | P20 | **done** | a case wired into one table and not the other never ran, silently — the P2 shape. Now checked by name in both directions, and it aborts the run rather than summarising a subset |
 | fuzzer cleanup | **done** | removed `KNOWN_DIVERGENCES` and ~90 lines of matching machinery, plus a dead `PERL_DRIVER`. The "reference refused" skip turned out to be a real false green and is gone |
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
+| P5 | **done** | the inherited `/|.../` hang: an empty-matching dictionary pattern spun the substitution loop forever, in the Perl original too. Rejected at load with a diagnostic, reusing the P4 channel. The criterion is `re.is_match("")` because `translate_pattern` turns `\b` into a zero-width lookaround alternation and a `*` glob is not empty-matching. `-o`/`-s` deliberately unguarded: they substitute once, Perl accepts them, and guarding them would be a Tier 1 divergence |
 | P13 | **decided** | single artifact. The GUI is rewritten off Python + PySide6; **the 5,644-line engine is kept**. P5, P6 and P11 are sequenced *ahead* of it. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6**. Delivery since refined: Flatpak, not a bundled binary, and the Qt assumption is open — see "Licensing and distribution" |
 | Phase 6 | **planned** | the GUI rewrite: 1,365 lines of Python shell out, ~30 tests ported as acceptance criteria, pyo3 layer and venv deleted from the dependency graph. CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Still open: Qt6 vs GTK4, now reduced to a Flathub runtime choice |
 | licensing | **decided** | engine and CLI stay **GPL-3.0-or-later**; GUI is **GPLv3**. BSD for the CLI was raised and declined as unnecessary — see "Licensing and distribution" |
@@ -813,8 +814,9 @@ that failed, and fails the target if any seed did.
 Both converters are invoked with `timeout=120`, but nothing caught
 `subprocess.TimeoutExpired`, so it propagated out of the loop and terminated that
 seed after however many cases it had reached. This is not hypothetical: **P5, the
-inherited hang, is still open**, so a timeout is a plausible outcome — and
-combined with P14 it was reported as success.
+inherited hang, was open when this was written** (it is guarded now), so a
+timeout was a plausible outcome — and combined with P14 it was reported as
+success.
 
 Now caught per case, so one bad input costs one case instead of the remaining
 ~1 900. Deliberately asymmetric: the **port** hanging is a defect in the port and
@@ -1237,7 +1239,7 @@ because the thing A4 verifies is the handler, and reaching for a new crashing
 input each time a fix lands meant the test was really verifying whichever defect
 happened to be open that week.
 
-### P5. Guard the inherited hang
+### P5. Guard the inherited hang — **done**
 
 A `/|.../`-delimited dictionary pattern (empty leading alternation, e.g.
 `/|Perl\b/ -> http://x/`) loops forever. **Verified: this hangs upstream Perl
@@ -1250,6 +1252,33 @@ empty at every position, and report it as a bad dictionary entry (reusing the
 P4 diagnostics). Correct usage is the `|...|` form, which is already handled
 and verified identical to Perl for glob, literal, `-o`, `-i`, `-h` and `$1`
 templates.
+
+**Implemented** in `links.rs` as `can_match_empty`, called from `add_regexp`
+alongside the P4 compile check, so a rejected entry reuses the existing
+`rejected_patterns` channel and the rest of the dictionary still loads.
+
+Two decisions worth recording, both measured rather than assumed:
+
+- **The criterion is `re.is_match("")`, not inspection of the compiled form.**
+  `translate_pattern` rewrites `\b` into a zero-width lookaround *alternation*
+  (`(?:(?<=[A-Za-z0-9_])(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?=[A-Za-z0-9_]))`),
+  so a `*` glob (`\b.*\b`) looks empty-capable in the source text and is not.
+  Reasoning from the pattern text would have rejected legitimate globs and
+  dropped links the reference produces. All 52 built-in system-dictionary rules
+  load and none match empty; a test asserts that against the real load path,
+  not a hand-picked sample.
+- **`-o` and `-s` are deliberately *not* guarded.** They substitute at most once
+  per paragraph or per section, so an empty-matching pattern terminates there,
+  and Perl accepts it. Guarding them would have been a Tier 1 byte-parity
+  divergence for no benefit: `/|x/ -o-> url` emits the same empty anchor in both.
+  A test pins that, since it is the kind of narrowing that later looks like an
+  oversight.
+
+6 tests in `tests/linktest.rs` (95 → 101). Verified end to end that the plain
+and `-i` cases now exit 0, that a dictionary mixing good and bad entries still
+links the good ones, and that the 16 000-case fuzzer and 59-case corpus are
+unaffected — the oracle hangs on this input, so nothing but a direct assertion
+could have covered it.
 
 ## Phase 2 — Performance
 
