@@ -16,6 +16,8 @@
 //! `egui::Ui` and no `eframe` frame. That is the seam the acceptance tests use:
 //! `egui_kittest` drives exactly the same code the window does.
 
+#![forbid(unsafe_code)]
+
 pub mod app;
 pub mod options_panel;
 pub mod worker;

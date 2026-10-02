@@ -1,7 +1,7 @@
 # Single entry point for the project's checks. Everything is one command:
 #
-#   make verify      fmt-check, clippy, Rust tests, differential corpus,
-#                    fuzzer, GUI suite
+#   make verify      fmt-check, clippy, Rust tests (engine and GUI), the
+#                    differential corpus, fuzzer, GUI suite
 #   make fix         what is safe to apply automatically: cargo fmt
 #   make test        just the Rust tests
 #   make corpus      the Perl differential corpus
@@ -18,6 +18,7 @@ PYTHON ?= python3
 ROOT  := $(CURDIR)
 RS    := $(ROOT)/textrill
 GUI   := $(ROOT)/textrill-gui
+GUI_RS := $(ROOT)/textrill-gui-rs
 VENV  ?= $(ROOT)/.venv
 
 RELEASE_BIN := $(RS)/target/release/textrill
@@ -45,11 +46,11 @@ FUZZ_JOBS ?= 8
 # other's evidence -- see fuzz.py --fail-dir.
 FUZZ_FAILDIR ?= $(RS)/tests/corpus/fuzz-fail
 
-.PHONY: all verify build fmt fmt-check clippy test proptest alloctest corpus fuzz gui scale clean
+.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz gui scale clean
 
 all: verify
 
-verify: fmt-check clippy test proptest alloctest corpus fuzz gui
+verify: fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz gui
 	@echo
 	@echo "verify: OK"
 
@@ -62,9 +63,11 @@ build:
 
 fmt:
 	cd $(RS) && $(CARGO) fmt
+	cd $(GUI_RS) && $(CARGO) fmt
 
 fmt-check:
 	cd $(RS) && $(CARGO) fmt --check
+	cd $(GUI_RS) && $(CARGO) fmt --check
 
 # Fails, not warns. This target deliberately only warned, on the reasoning that
 # a lint gate that is always red gets ignored. That reasoning was right about
@@ -72,11 +75,20 @@ fmt-check:
 # 09d13d9 cleared them, and a gate that reports without stopping anyone is not a
 # gate. The four remaining `#[allow]`s are reviewed exceptions with the reason
 # next to them, not a backlog.
+# The native GUI crate is linted in debug, not release: it pulls the ~300-crate
+# eframe tree and lints do not depend on optimisation. The engine stays release.
 clippy: build
 	cd $(RS) && $(CARGO) clippy --release --all-targets -- -D warnings
+	cd $(GUI_RS) && $(CARGO) clippy --all-targets -- -D warnings
 
 test: build
 	cd $(RS) && $(CARGO) test --release
+
+# The native GUI crate. It is the one that will replace the Python GUI, so it is
+# in the gate from the start rather than after the swap. The tests are headless
+# (`egui_kittest` drives the widget tree directly), so this needs no display.
+test-gui-rs:
+	cd $(GUI_RS) && $(CARGO) test
 
 # --- properties and resource bounds (P12) ------------------------------------
 

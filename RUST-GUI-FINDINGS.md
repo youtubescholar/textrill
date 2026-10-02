@@ -213,6 +213,49 @@ as long as the split is respected:
 
 Do **not** put `eframe` in the same crate/feature graph as the static CLI build.
 
+### 5.5 Licence, privacy and fingerprinting audit
+
+Run 2026-10-02 against the GUI crate's resolved graph
+(`cargo metadata --all-features`, which includes dev-dependencies; 316 packages).
+
+**Licences are all permissive or GPL-3.0-compatible.** No package is
+copyleft-only, AGPL, SSPL or non-free. The classes present:
+
+- MIT and/or Apache-2.0 (the large majority), plus `Zlib`,
+  `BSD-2/3-Clause`, `ISC`, `0BSD`, `BSL-1.0`, `Unlicense`, `Unicode-3.0`.
+- `r-efi` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`) and `self_cell`
+  (`Apache-2.0 OR GPL-2.0-only`) are dual-licensed; the permissive branch is
+  taken (default Cargo selection), which is compatible with our GPL-3.0-or-later.
+- `epaint_default_fonts` is `(MIT OR Apache-2.0) AND OFL-1.1 AND
+  Ubuntu-font-1.0` — the `default_fonts` feature bundles an emoji font (OFL) and
+  Ubuntu-Light (Ubuntu font licence), both redistributable. Distros that prefer
+  system fonts can drop `default_fonts`, at the cost of egui having no built-in
+  glyphs.
+- GPL-3.0-or-later: only our own two crates.
+
+**No network, telemetry or fingerprinting.** `cargo tree` contains no
+`reqwest`/`hyper`/`ureq`/`curl`/`openssl`/`rustls`/`tokio`/`async-std`. Our own
+source has no `std::net`, no `Command`, no `std::fs`/`std::env` reads (the
+engine's `Options::default()` reads `HOME` for the default link dictionary — the
+same local configuration the CLI already does — and `convert_text` is
+in-memory). The GUI crate now carries `#![forbid(unsafe_code)]`.
+
+Two dependencies pull data that looks sensitive but is not:
+
+- `gethostname` (via `x11rb`, which `winit` and `arboard` use) is called for the
+  local X11 connection's auth family and, with the `resource_manager` feature,
+  to locate `$HOME/.Xdefaults-<hostname>` (X resources). It is used to *find*
+  local files and authenticate to the local X server; nothing is transmitted off
+  the machine, and the value never leaves `x11rb`.
+- `getrandom` (via `ahash`, for HashMap seed randomisation) and `uuid` (via
+  `accesskit`, for widget node IDs) only produce in-process random identifiers.
+
+**Build-time probes.** `pkg-config` and `cc` appear as build-dependencies
+(`x11-dl`, `wayland-sys`, `smithay-client-toolkit`; `cc` for the wayland
+backend). They locate X11/Wayland headers if present, but the runtime link is
+`dlopen`, as `ldd` confirms (only libc/libgcc/libm). The hard runtime
+requirement remains just a GL stack.
+
 ## 6. Verified facts (reproducible)
 
 The following were confirmed by running them, not by reading docs:

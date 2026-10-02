@@ -55,7 +55,7 @@ jobs:
           cargo --version
 
       # Caching cargo's registry and build directory. The key includes the
-      # lockfile so a dependency change starts cold rather than building against
+      # lockfiles so a dependency change starts cold rather than building against
       # a stale cache and reporting a result nobody reproduced.
       - name: Cache cargo
         uses: actions/cache@v4
@@ -64,7 +64,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             textrill/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('textrill/Cargo.lock') }}
+            textrill-gui-rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('textrill/Cargo.lock', 'textrill-gui-rs/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Formatting
@@ -76,9 +77,10 @@ jobs:
       - name: Lints
         run: make clippy
 
-      - name: Unit, property and allocation tests
+      - name: Unit, property, allocation and native GUI tests
         run: |
           make test
+          make test-gui-rs
           make proptest
           make alloctest
 

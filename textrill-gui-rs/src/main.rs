@@ -7,6 +7,8 @@
 
 //! Window entry point.
 
+#![forbid(unsafe_code)]
+
 fn main() -> eframe::Result<()> {
     eframe::run_native(
         "textrill",

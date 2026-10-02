@@ -39,6 +39,9 @@ use textrill::options::Options;
 pub const PANIC_MESSAGE: &str = "The converter stopped on invalid input.\n\n\
      This is a bug in textrill. The input is probably the cause.";
 
+/// What the user sees when the OS refuses to start a worker thread.
+const SPAWN_ERROR: &str = "Could not start a converter thread; the system may be out of resources.";
+
 /// The result of one conversion.
 pub struct Outcome {
     /// The request this answers.
@@ -70,7 +73,18 @@ pub struct ConversionWorker {
     converter: Arc<ConvertFn>,
     inbox: Mutex<Receiver<Outcome>>,
     results: Sender<Outcome>,
-    waker: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+}
+
+/// Lock a mutex, recovering from poisoning.
+///
+/// The worker never mutates shared state from inside a conversion, so a panic
+/// cannot leave a half-written value behind. Recovering keeps a panic in a
+/// waker callback from wedging the UI on its next lock.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl ConversionWorker {
@@ -106,7 +120,7 @@ impl ConversionWorker {
 
     /// Set the callback that asks the UI to redraw when a result arrives.
     pub fn set_waker(&self, waker: impl Fn() + Send + Sync + 'static) {
-        *self.waker.lock().unwrap() = Some(Box::new(waker));
+        *lock(&self.waker) = Some(Arc::new(waker));
     }
 
     /// The newest generation handed out.
@@ -121,7 +135,7 @@ impl ConversionWorker {
 
     /// Whether a job is waiting for a free thread.
     pub fn has_pending(&self) -> bool {
-        self.pending.lock().unwrap().is_some()
+        lock(&self.pending).is_some()
     }
 
     /// Whether there is no running and no waiting work.
@@ -137,7 +151,7 @@ impl ConversionWorker {
             text: text.to_string(),
             opts: opts.clone(),
         };
-        *self.pending.lock().unwrap() = Some(job);
+        *lock(&self.pending) = Some(job);
         self.dispatch();
         generation
     }
@@ -147,7 +161,7 @@ impl ConversionWorker {
         // The sender lives in this struct, so the channel cannot be
         // disconnected while the worker exists; `None` just means no result is
         // ready yet.
-        self.inbox.lock().unwrap().try_recv().ok()
+        lock(&self.inbox).try_recv().ok()
     }
 
     /// Start a thread for the waiting job, up to `max_threads`.
@@ -167,19 +181,39 @@ impl ConversionWorker {
             {
                 continue;
             }
-            let job = self.pending.lock().unwrap().take();
+            let job = lock(&self.pending).take();
             match job {
                 Some(job) => {
+                    let generation = job.generation;
                     let worker = Arc::clone(self);
-                    std::thread::spawn(move || {
-                        let outcome = run(&*worker.converter, job);
-                        let _ = worker.results.send(outcome);
-                        if let Some(waker) = worker.waker.lock().unwrap().as_ref() {
-                            waker();
-                        }
-                        worker.in_flight.fetch_sub(1, Ordering::SeqCst);
-                        worker.dispatch();
-                    });
+                    let spawned = std::thread::Builder::new()
+                        .name("textrill-convert".to_string())
+                        .spawn(move || {
+                            let outcome = run(&*worker.converter, job);
+                            let _ = worker.results.send(outcome);
+                            // Clone the waker out and release the lock before
+                            // calling it, so a panic inside a foreign callback
+                            // cannot poison the mutex.
+                            let waker = lock(&worker.waker).clone();
+                            if let Some(waker) = waker {
+                                waker();
+                            }
+                            worker.in_flight.fetch_sub(1, Ordering::SeqCst);
+                            worker.dispatch();
+                        });
+                    if spawned.is_err() {
+                        // The OS refused a thread. Report it rather than leave
+                        // the UI on "converting…" forever, and release the slot
+                        // so later jobs can try again.
+                        let _ = self.results.send(Outcome {
+                            generation,
+                            html: String::new(),
+                            error: Some(SPAWN_ERROR.to_string()),
+                            seconds: 0.0,
+                        });
+                        self.in_flight.fetch_sub(1, Ordering::SeqCst);
+                        return;
+                    }
                 }
                 None => {
                     self.in_flight.fetch_sub(1, Ordering::SeqCst);

@@ -1952,7 +1952,12 @@ Three things exist only because two languages are in the path:
    two are **done** in `textrill-gui-rs`: the worker keeps the generation
    counter, queue-drop, bounded in-flight work and panic-to-error path, and the
    panel is generated from `cli::SPECS` with bounds from `numeric_range`. The
-   window behaviour and the rest of the 32 acceptance tests remain.
+   window behaviour and the rest of the 32 acceptance tests remain. The ported
+   worker was then hardened past the Python original: mutex locks recover from
+   poisoning instead of panicking, the worker thread is spawned with
+   `thread::Builder` and a spawn failure becomes a reported error (rather than a
+   stuck "converting…"), the repaint waker is invoked outside the lock, and the
+   GUI crate carries `#![forbid(unsafe_code)]`.
 4. **Keep the A6 concurrency contract verbatim in intent.** `worker.py:75` solved
    a real problem: a keystroke burst queues faster than the pool drains, so a
    backlog is also a memory backlog. Generation-counter plus queue-drop is the
@@ -1968,6 +1973,14 @@ The existing gate mostly survives, because the engine is untouched:
 `make fmt-check`, `make clippy` (`-D warnings`), `cargo test`, `make corpus`
 (48/48, 33/33 goldens), `make fuzz`, and upstream's `t/*.t` as a canary all
 apply unchanged. The GUI suite is the part that is rewritten.
+
+The native crate is now in the gate before the swap, so it cannot rot while the
+Python GUI still ships: `make fmt-check` and `make clippy` cover both crates,
+`make test-gui-rs` runs its headless `egui_kittest`/`kittest` suite (no display
+needed), and CI's `rust` job builds, lints and tests it. `verify` includes
+`test-gui-rs`. The crate's licence and privacy posture — all dependencies
+permissive or GPL-3.0-compatible, no network/telemetry crates, `gethostname`
+confined to local X11 auth — is recorded in `RUST-GUI-FINDINGS.md` §5.5.
 
 The corpus is the reason this rewrite is verifiable at all: a Rust GUI
 conversion can be compared byte-for-byte against Perl through the same harness
