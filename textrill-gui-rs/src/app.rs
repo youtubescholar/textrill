@@ -15,12 +15,37 @@ use egui::Ui;
 use textrill::options::Options;
 
 use crate::document::Document;
-use crate::options_panel;
+use crate::options_panel::OptionsPanel;
 use crate::settings::Settings;
 use crate::worker::ConversionWorker;
 
 /// How long to wait after the last change before converting.
 pub const AUTO_CONVERT_DELAY: Duration = Duration::from_millis(300);
+
+const NEW_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
+const SAVE_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
+const SAVE_TEXT_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers {
+        command: true,
+        shift: true,
+        ..egui::Modifiers::NONE
+    },
+    egui::Key::S,
+);
+const CONVERT_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
+const COPY_HTML_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers {
+        command: true,
+        shift: true,
+        ..egui::Modifiers::NONE
+    },
+    egui::Key::C,
+);
+const QUIT_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
 
 /// What a save command wants next.
 ///
@@ -41,6 +66,12 @@ pub struct TextrillApp {
     /// The live option set. The panel writes straight through
     /// `textrill::cli::set_value`, so this is the same model the engine sees.
     pub opts: Options,
+    /// The options form and its filter.
+    pub panel: OptionsPanel,
+    /// Whether the options pane is shown (`View → Show options`).
+    pub show_options: bool,
+    /// Whether the About window is open.
+    pub about_open: bool,
     /// Rendered HTML, or the error text after a failed conversion.
     pub output: String,
     /// Status line: `Ready`, `converting…`, a summary, or `error`.
@@ -77,6 +108,9 @@ impl TextrillApp {
         let mut app = Self {
             doc: Document::new(),
             opts: Options::default(),
+            panel: OptionsPanel::default(),
+            show_options: true,
+            about_open: false,
             output: String::new(),
             status: "Ready".to_string(),
             latest: 0,
@@ -252,31 +286,192 @@ impl TextrillApp {
         self.doc.suggested_output_name()
     }
 
+    // ------------------------------------------------------------- commands
+
+    /// `Edit → Reset options`.
+    pub fn reset_options(&mut self) {
+        self.opts = Options::default();
+        self.schedule_convert(Instant::now());
+    }
+
+    /// `Edit → Copy HTML`.
+    pub fn copy_html(&mut self, ctx: &egui::Context) {
+        ctx.copy_text(self.output.clone());
+        self.status = "HTML copied to the clipboard".to_string();
+    }
+
+    /// `File → Save`: write the HTML, or report the name we would propose.
+    ///
+    /// Without a file chooser the second case is the honest answer: the path is
+    /// shown so a drag-and-drop or the explicit-path API still has somewhere to
+    /// go, and the user is not left thinking nothing happened.
+    pub fn save_document_or_report(&mut self) {
+        match self.save_document() {
+            Ok(SaveRequest::Saved(path)) => self.status = format!("saved {}", path.display()),
+            Ok(SaveRequest::NeedsName(path)) => {
+                self.status = format!("would save to {} (file dialogs pending)", path.display());
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// `File → Save text…`, or report the name we would propose.
+    pub fn save_text_or_report(&mut self) {
+        match self.save_text() {
+            Ok(SaveRequest::Saved(path)) => {
+                self.status = format!("saved text to {}", path.display());
+            }
+            Ok(SaveRequest::NeedsName(path)) => {
+                self.status = format!("would save to {} (file dialogs pending)", path.display());
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// `File → Quit`.
+    pub fn quit(&self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
     // ------------------------------------------------------------------ ui
 
-    /// Draw the whole UI into `ui`.
-    pub fn draw(&mut self, ui: &mut Ui) {
-        // The worker asks for a redraw when a result lands, so the preview does
-        // not wait for the next input event to appear.
-        if !self.waker_installed {
-            let ctx = ui.ctx().clone();
-            self.worker.set_waker(move || ctx.request_repaint());
-            self.waker_installed = true;
-        }
-        self.drain();
-        self.tick(Instant::now());
-        if self.deadline.is_some() {
-            ui.ctx().request_repaint_after(AUTO_CONVERT_DELAY);
-        }
+    /// Send the window title, but only when it changes.
+    fn set_title(&mut self, ctx: &egui::Context) {
         let title = self.doc.title();
         if self.title_sent.as_deref() != Some(title.as_str()) {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title_sent = Some(title);
         }
-        ui.heading("textrill");
+    }
+
+    /// Act on the keyboard shortcuts the menu advertises.
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        let (mut new, mut save, mut save_text, mut convert, mut copy, mut quit) =
+            (false, false, false, false, false, false);
+        ctx.input_mut(|input| {
+            new = input.consume_shortcut(&NEW_SHORTCUT);
+            save = input.consume_shortcut(&SAVE_SHORTCUT);
+            save_text = input.consume_shortcut(&SAVE_TEXT_SHORTCUT);
+            convert = input.consume_shortcut(&CONVERT_SHORTCUT);
+            copy = input.consume_shortcut(&COPY_HTML_SHORTCUT);
+            quit = input.consume_shortcut(&QUIT_SHORTCUT);
+        });
+        if new {
+            self.new_document();
+        }
+        if save {
+            self.save_document_or_report();
+        }
+        if save_text {
+            self.save_text_or_report();
+        }
+        if convert {
+            self.convert_now();
+        }
+        if copy {
+            self.copy_html(ctx);
+        }
+        if quit {
+            self.quit(ctx);
+        }
+    }
+
+    /// Open the first file dropped onto the window, as the Python window did.
+    fn accept_dropped_files(&mut self, ctx: &egui::Context) {
+        let dropped: Vec<PathBuf> = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .map(|file| file.path().to_path_buf())
+                .collect()
+        });
+        if dropped.is_empty() {
+            return;
+        }
+        // Clear them, or the drop fires again on every frame.
+        ctx.input_mut(|input| input.raw.dropped_files.clear());
+        if let Some(path) = dropped.first() {
+            if let Err(error) = self.load_file(path) {
+                self.status = error;
+            }
+        }
+    }
+
+    fn menu_bar(&mut self, ui: &mut Ui) {
+        egui::MenuBar::new().ui(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("New").clicked() {
+                    self.new_document();
+                    ui.close();
+                }
+                if ui.button("Open…").clicked() {
+                    self.status = "Open needs a file dialog, which is not wired up yet".to_string();
+                    ui.close();
+                }
+                if ui.button("Save").clicked() {
+                    self.save_document_or_report();
+                    ui.close();
+                }
+                if ui.button("Save As…").clicked() {
+                    self.save_document_or_report();
+                    ui.close();
+                }
+                if ui.button("Save text…").clicked() {
+                    self.save_text_or_report();
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("Load example").clicked() {
+                    self.load_sample();
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("Quit").clicked() {
+                    self.quit(ui.ctx());
+                    ui.close();
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                if ui.button("Copy HTML").clicked() {
+                    self.copy_html(ui.ctx());
+                    ui.close();
+                }
+                if ui.button("Convert now").clicked() {
+                    self.convert_now();
+                    ui.close();
+                }
+                if ui.button("Reset options").clicked() {
+                    self.reset_options();
+                    ui.close();
+                }
+            });
+            ui.menu_button("View", |ui| {
+                ui.checkbox(&mut self.show_options, "Show options");
+                ui.separator();
+                egui::gui_zoom::zoom_menu_buttons(ui);
+            });
+            ui.menu_button("Help", |ui| {
+                if ui.button("About").clicked() {
+                    self.about_open = true;
+                    ui.close();
+                }
+            });
+        });
+    }
+
+    fn toolbar(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            ui.label("Input");
+            if ui.button("New").clicked() {
+                self.new_document();
+            }
+            if ui.button("Save").clicked() {
+                self.save_document_or_report();
+            }
+            if ui.button("Example").clicked() {
+                self.load_sample();
+            }
+            ui.separator();
             if ui.button("Convert").clicked() {
                 self.convert_now();
             }
@@ -288,15 +483,15 @@ impl TextrillApp {
                     self.deadline = None;
                 }
             }
-            ui.label(&self.status);
-        });
+            ui.separator();
+            ui.checkbox(&mut self.show_options, "Show options");
+            ui.separator();
 
-        // Whole-UI zoom, for the same reason a browser has it: a 4K laptop and
-        // a 96 DPI desktop should not dictate the same physical text size. The
-        // keyboard shortcuts (Ctrl/⌘ + / - / 0) work too; these buttons exist
-        // so the feature is discoverable. `zoom_factor` multiplies the OS's own
-        // scale factor, so a HiDPI screen is already handled before this.
-        ui.horizontal(|ui| {
+            // Whole-UI zoom, for the same reason a browser has it: a 4K laptop
+            // and a 96 DPI desktop should not dictate the same physical text
+            // size. The keyboard shortcuts (Ctrl/⌘ + / - / 0) work too; these
+            // buttons make the feature discoverable. `zoom_factor` multiplies
+            // the OS's own scale factor, so a HiDPI screen is already handled.
             ui.label(egui::RichText::new("Display").small());
             if ui
                 .button("Zoom out")
@@ -320,29 +515,67 @@ impl TextrillApp {
             {
                 ui.ctx().set_zoom_factor(1.0);
             }
-        });
 
+            ui.separator();
+            ui.label(&self.status);
+        });
+    }
+
+    fn about_window(&mut self, ctx: &egui::Context) {
+        if !self.about_open {
+            return;
+        }
+        egui::Window::new("About textrill")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut self.about_open)
+            .show(ctx, |ui| {
+                ui.label(format!("textrill {}", env!("CARGO_PKG_VERSION")));
+                ui.label("A Rust port of HTML::TextToHTML 3.0, with an egui front end.");
+                ui.label("The conversion is byte-identical to the original Perl module.");
+                ui.label("Released under the GNU General Public License, version 3 or later.");
+            });
+    }
+
+    /// Draw the whole UI into `ui`.
+    pub fn draw(&mut self, ui: &mut Ui) {
+        // The worker asks for a redraw when a result lands, so the preview does
+        // not wait for the next input event to appear.
+        if !self.waker_installed {
+            let ctx = ui.ctx().clone();
+            self.worker.set_waker(move || ctx.request_repaint());
+            self.waker_installed = true;
+        }
+        self.drain();
+        self.tick(Instant::now());
+        if self.deadline.is_some() {
+            ui.ctx().request_repaint_after(AUTO_CONVERT_DELAY);
+        }
+        self.set_title(ui.ctx());
+        self.handle_shortcuts(ui.ctx());
+        self.accept_dropped_files(ui.ctx());
+
+        self.menu_bar(ui);
+        self.toolbar(ui);
+
+        ui.label("Input");
         if ui
             .add(egui::TextEdit::multiline(&mut self.doc.text).desired_rows(6))
             .changed()
         {
-            let now = Instant::now();
-            self.on_edit(now);
+            self.on_edit(Instant::now());
         }
 
-        ui.separator();
-        let mut options_changed = false;
-        egui::CollapsingHeader::new("Options")
-            .default_open(false)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(320.0)
-                    .show(ui, |ui| {
-                        options_changed = options_panel::draw(ui, &mut self.opts);
-                    });
-            });
-        if options_changed {
-            self.schedule_convert(Instant::now());
+        if self.show_options {
+            ui.separator();
+            ui.label(egui::RichText::new("Options").strong());
+            let changed = egui::ScrollArea::vertical()
+                .max_height(320.0)
+                .show(ui, |ui| self.panel.draw(ui, &mut self.opts))
+                .inner;
+            if changed {
+                self.schedule_convert(Instant::now());
+            }
         }
 
         ui.separator();
@@ -352,6 +585,8 @@ impl TextrillApp {
                 .code_editor()
                 .desired_rows(8),
         );
+
+        self.about_window(ui.ctx());
     }
 }
 

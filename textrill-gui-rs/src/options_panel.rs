@@ -13,27 +13,97 @@
 //! without a second edit, and the panel cannot offer a value the engine
 //! rejects: the numeric bounds come from [`textrill::options::numeric_range`],
 //! the same table the engine validates against.
+//!
+//! The panel carries the filter text as state (as the Python `OptionsPanel`
+//! did), so it is a struct rather than a free function.
 
 use egui::Ui;
 use textrill::cli::{self, Kind};
 use textrill::options::{numeric_range, Options};
 
-/// Draw every option, in the engine table's order.
-///
-/// Returns whether any widget was edited, so the caller can re-convert.
-pub fn draw(ui: &mut Ui, opts: &mut Options) -> bool {
-    let mut changed = false;
-    for spec in cli::SPECS {
-        let key = spec.names[0];
-        changed |= match spec.kind {
-            Kind::Flag => flag(ui, opts, key, spec.help),
-            Kind::Int => int(ui, opts, key, spec.help),
-            Kind::Str => string(ui, opts, key, spec.help),
-            Kind::StrArray => string_array(ui, opts, key, spec.help),
-            Kind::TableType => table_type(ui, opts, spec.help),
-        };
+/// The options form and its filter.
+#[derive(Debug, Default)]
+pub struct OptionsPanel {
+    /// The filter box contents.
+    pub filter: String,
+}
+
+impl OptionsPanel {
+    /// Draw the filter row and every option it lets through.
+    ///
+    /// Returns whether any widget was edited, so the caller can re-convert.
+    pub fn draw(&mut self, ui: &mut Ui, opts: &mut Options) -> bool {
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.label("Filter");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.filter)
+                    .hint_text("Filter options…")
+                    .desired_width(160.0),
+            );
+            if ui
+                .button("Reset all options")
+                .on_hover_text("Put every option back to its default")
+                .clicked()
+            {
+                *opts = Options::default();
+                changed = true;
+            }
+        });
+
+        let needle = self.filter.trim().to_lowercase();
+        for spec in cli::SPECS {
+            if !spec_matches(spec, &needle) {
+                continue;
+            }
+            let key = spec.names[0];
+            changed |= match spec.kind {
+                Kind::Flag => flag(ui, opts, key, spec.help),
+                Kind::Int => int(ui, opts, key, spec.help),
+                Kind::Str => string(ui, opts, key, spec.help),
+                Kind::StrArray => string_array(ui, opts, key, spec.help),
+                Kind::TableType => table_type(ui, opts, spec.help),
+            };
+        }
+        changed
     }
-    changed
+
+    /// Whether `name` passes the current filter.
+    ///
+    /// This is the seam the filter tests use; the Python panel exposed the same
+    /// method. It does not depend on what is on screen, so it is meaningful
+    /// even when the options pane is hidden.
+    pub fn matches(&self, name: &str) -> bool {
+        let needle = self.filter.trim().to_lowercase();
+        cli::SPECS
+            .iter()
+            .find(|spec| spec.names[0] == name)
+            .map(|spec| spec_matches(spec, &needle))
+            .unwrap_or(false)
+    }
+
+    /// Clear the filter.
+    pub fn clear_filter(&mut self) {
+        self.filter.clear();
+    }
+}
+
+/// Whether an option matches the (already lowercased) needle.
+///
+/// The haystack is the option's names, its underscored name read as words, and
+/// its help text, so "unhyphenation" and "hyphen" both find the hyphen option
+/// and a user can search by what the option does rather than what it is called.
+fn spec_matches(spec: &cli::Spec, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if spec.help.to_lowercase().contains(needle) {
+        return true;
+    }
+    spec.names.iter().any(|name| {
+        let name = name.to_lowercase();
+        name.contains(needle) || name.replace('_', " ").contains(needle)
+    })
 }
 
 fn flag(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) -> bool {

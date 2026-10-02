@@ -1951,8 +1951,14 @@ Three things exist only because two languages are in the path:
    `optionspanel.py` from `cli::SPECS` → `mainwindow.py` → `app.py`. The first
    two are **done** in `textrill-gui-rs`: the worker keeps the generation
    counter, queue-drop, bounded in-flight work and panic-to-error path, and the
-   panel is generated from `cli::SPECS` with bounds from `numeric_range`. The
-   window behaviour and the rest of the 32 acceptance tests remain. The ported
+   panel is generated from `cli::SPECS` with bounds from `numeric_range`, now
+   with the Python panel's filter and reset. The document model, file state
+   (source and output paths, source encoding, dirty and output-stale flags,
+   last-saved HTML), the `QSettings`-compatible `auto` store, the 300 ms
+   debounce, runtime UI zoom, and the menu/toolbar/filter/drag-and-drop chrome
+   are ported. `Open` and `Save As` still reach the explicit-path API because the
+   native file chooser is deliberately deferred; the unsaved-changes prompt is
+   likewise not wired yet. The ported
    worker was then hardened past the Python original: mutex locks recover from
    poisoning instead of panicking, the worker thread is spawned with
    `thread::Builder` and a spawn failure becomes a reported error (rather than a
