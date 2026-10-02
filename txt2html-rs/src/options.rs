@@ -2,12 +2,62 @@
 //!
 //! Mirrors the option set of HTML::TextToHTML v3.0.
 
+/// A single-byte encoding: the guess, and the escape hatch.
+///
+/// None of these can be *detected*. They are mutually indistinguishable from
+/// the bytes alone — a CP1251 file is a valid CP1252 file, with different
+/// meanings for about 60 of its 128 high bytes — so `Auto` picks one and the
+/// user can name another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SingleByte {
+    Latin1,
+    Cp1252,
+    Cp1251,
+    Cp1253,
+    Koi8R,
+}
+
+impl SingleByte {
+    /// The [`Encoding`] that names this single-byte encoding.
+    pub fn encoding(self) -> Encoding {
+        match self {
+            SingleByte::Latin1 => Encoding::Latin1,
+            SingleByte::Cp1252 => Encoding::Cp1252,
+            SingleByte::Cp1251 => Encoding::Cp1251,
+            SingleByte::Cp1253 => Encoding::Cp1253,
+            SingleByte::Koi8R => Encoding::Koi8R,
+        }
+    }
+
+    /// The canonical name, as `--encoding` spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            SingleByte::Latin1 => "iso-8859-1",
+            SingleByte::Cp1252 => "cp1252",
+            SingleByte::Cp1251 => "cp1251",
+            SingleByte::Cp1253 => "cp1253",
+            SingleByte::Koi8R => "koi8-r",
+        }
+    }
+}
+
 /// P7.3. How to decode input bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Encoding {
-    /// Decode as UTF-8 when the bytes are valid UTF-8, and as CP1252
-    /// otherwise. This is the default and the pre-P7.1 behaviour, modulo the
-    /// fallback being CP1252 rather than the Latin-1 it used to be.
+    /// Detect. In order: a byte-order mark, then the NUL pattern that marks
+    /// UTF-16 or UTF-32, then UTF-8 validity, then [`SingleByte::Cp1252`].
+    ///
+    /// The ordering is the whole point and it is not arbitrary. A BOM is a
+    /// declaration by the writer, so it outranks every heuristic. The NUL
+    /// pattern is a structural fact about the bytes. UTF-8 validity is a weaker
+    /// signal than either, because UTF-16LE containing only ASCII is *also* valid
+    /// UTF-8 — so it cannot be checked first, which is exactly how a BOM-less
+    /// UTF-16 file used to decode as UTF-8 and reach the output with a NUL
+    /// between every character.
+    ///
+    /// The single-byte fallback is last because it is the only guess in the
+    /// list. It is right for Western European text and wrong for Cyrillic,
+    /// Greek or Turkish, which is why those are selectable instead.
     #[default]
     Auto,
     /// Decode as UTF-8 unconditionally. Bytes that are not valid UTF-8 are
@@ -18,30 +68,85 @@ pub enum Encoding {
     /// for bytes that would have been valid UTF-8. This is how to read a
     /// CP1252 file that the UTF-8 probe would have misjudged.
     Cp1252,
+    /// Latin-1. Kept as a real option rather than a historical curiosity: a file
+    /// that declares it should not be second-guessed, and it is what CP1252 was
+    /// mistaken for until P7.1.
+    Latin1,
+    /// Windows Cyrillic. Differs from CP1252 across most of `0x80`-`0xFF`, so a
+    /// bare Russian file is unreadable without naming it.
+    Cp1251,
+    /// Windows Greek.
+    Cp1253,
+    /// KOI8-R, the other common Russian encoding and the one Russian *Linux*
+    /// uses. CP1251 and KOI8-R disagree about almost every high byte, so naming
+    /// the wrong one is not a small error.
+    Koi8R,
+    /// UTF-16 little-endian, with or without a BOM. Named explicitly when the
+    /// file has no BOM and `Auto`'s NUL heuristic would otherwise be the only
+    /// evidence.
+    Utf16Le,
+    /// UTF-16 big-endian, with or without a BOM.
+    Utf16Be,
+    /// UTF-32 little-endian. Detected from a BOM; near-impossible to infer
+    /// reliably from structure alone, so `Auto` does not try.
+    Utf32Le,
+    /// UTF-32 big-endian, BOM only.
+    Utf32Be,
 }
 
 impl Encoding {
-    /// The name accepted by `--encoding` and reported by `--verbose`.
+    /// The name accepted by `--encoding` and reported by `resolved_encoding`.
     pub fn name(self) -> &'static str {
         match self {
             Encoding::Auto => "auto",
             Encoding::Utf8 => "utf-8",
             Encoding::Cp1252 => "cp1252",
+            Encoding::Latin1 => SingleByte::Latin1.name(),
+            Encoding::Cp1251 => SingleByte::Cp1251.name(),
+            Encoding::Cp1253 => SingleByte::Cp1253.name(),
+            Encoding::Koi8R => SingleByte::Koi8R.name(),
+            Encoding::Utf16Le => "utf-16le",
+            Encoding::Utf16Be => "utf-16be",
+            Encoding::Utf32Le => "utf-32le",
+            Encoding::Utf32Be => "utf-32be",
         }
     }
 
-    /// Parse a `--encoding` value. Accepts a few spellings of each, because a
-    /// user typing an encoding name should not have to know which one the
-    /// implementation happens to call it.
+    /// The single-byte encoding this is, if it names one.
+    pub fn single_byte(self) -> Option<SingleByte> {
+        match self {
+            Encoding::Cp1252 => Some(SingleByte::Cp1252),
+            Encoding::Latin1 => Some(SingleByte::Latin1),
+            Encoding::Cp1251 => Some(SingleByte::Cp1251),
+            Encoding::Cp1253 => Some(SingleByte::Cp1253),
+            Encoding::Koi8R => Some(SingleByte::Koi8R),
+            _ => None,
+        }
+    }
+
+    /// Parse a `--encoding` value. Accepts several spellings of each, because a
+    /// user naming an encoding should not have to know which one the
+    /// implementation happens to prefer — and because "latin-1" is what most
+    /// people type for what this port has been calling CP1252.
     pub fn parse(s: &str) -> Result<Self, String> {
-        match s.trim().to_ascii_lowercase().as_str() {
+        match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
             "auto" | "detect" => Ok(Encoding::Auto),
-            "utf8" | "utf-8" | "utf_8" => Ok(Encoding::Utf8),
-            "cp1252" | "windows-1252" | "win1252" | "1252" | "latin-1" | "latin1" => {
-                Ok(Encoding::Cp1252)
+            "utf8" | "utf-8" => Ok(Encoding::Utf8),
+            "cp1252" | "windows-1252" | "win1252" | "1252" => Ok(Encoding::Cp1252),
+            "latin-1" | "latin1" | "iso-8859-1" | "iso8859-1" | "iso88591" | "8859-1" => {
+                Ok(Encoding::Latin1)
             }
+            "cp1251" | "windows-1251" | "win1251" | "1251" => Ok(Encoding::Cp1251),
+            "cp1253" | "windows-1253" | "win1253" | "1253" => Ok(Encoding::Cp1253),
+            "koi8-r" | "koi8r" | "koi8" => Ok(Encoding::Koi8R),
+            "utf-16le" | "utf16le" | "utf-16" | "utf16" => Ok(Encoding::Utf16Le),
+            "utf-16be" | "utf16be" => Ok(Encoding::Utf16Be),
+            "utf-32le" | "utf32le" | "utf-32" | "utf32" => Ok(Encoding::Utf32Le),
+            "utf-32be" | "utf32be" => Ok(Encoding::Utf32Be),
             other => Err(format!(
-                "Unknown encoding `{other}`; expected auto, utf-8 or cp1252"
+                "Unknown encoding `{other}`; expected one of: \
+                 auto, utf-8, utf-16le, utf-16be, utf-32le, utf-32be, \
+                 iso-8859-1, cp1252, cp1251, cp1253, koi8-r"
             )),
         }
     }

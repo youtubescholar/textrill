@@ -31,8 +31,31 @@
 //!   `instring` there always converts an empty paragraph.
 //! * `Options::inhandle` does not exist; pass a file instead, or feed
 //!   [`Converter::process_chunk`] / [`Converter::process_para`] directly.
-//! * [`convert::read_any_file`] decodes UTF-8 when the bytes are valid UTF-8 and
-//!   falls back to **CP1252** otherwise. Perl reads input as raw bytes, so its
+//! * [`convert::read_any_file`] decodes input by *evidence*, in the order a
+//!   byte-order mark, then the NUL alignment of UTF-16, then UTF-8 validity,
+//!   then a **CP1252** guess — see [`options::Encoding::Auto`]. Output is
+//!   always UTF-8.
+//!
+//!   Three consequences are worth stating separately, because they have
+//!   different characters:
+//!
+//!   1. **A BOM is honoured**, so a UTF-16 file is read as UTF-16. Perl has no
+//!      UTF-16 concept at all and passes the bytes through.
+//!   2. **BOM-less UTF-16 of ASCII prose is decoded**, which is the case that
+//!      needed the order above: every byte is below `0x80`, so the file is *also
+//!      valid UTF-8*, and a UTF-8 validity check cannot distinguish it. Both
+//!      implementations used to accept it and emit a NUL between every letter.
+//!      The `utf16le_ascii`, `utf16be_ascii` and `utf16le_bom` corpus cases
+//!      record this.
+//!   3. **The CP1252 fallback remains a guess**, and it is wrong for CP1251,
+//!      KOI8-R, CP1253 and Turkish. Those encodings cannot be detected from the
+//!      bytes — they are mutually indistinguishable — so they are selectable
+//!      with [`options::Encoding`] and `--encoding` rather than guessed at. With
+//!      the default, the port and the reference mangle such a file identically;
+//!      the `cp1251_cyrillic`, `koi8r_cyrillic` and `cp1253_greek` corpus cases
+//!      pin that equality, so a later change that starts guessing is visible.
+//!
+//!   Perl reads input as raw bytes, so its
 //!   `demoronize` pass sees every byte separately: `U+201C` (`e2 80 9c`) is
 //!   mangled to `&acirc;` plus two stray bytes, because `0x9c` falls in the
 //!   `0x82`-`0x9F` range that `demoronize_char` rewrites. Decoding first keeps

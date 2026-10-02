@@ -541,9 +541,24 @@ pub fn usage() -> String {
         s.push_str(&format!("        {}\n", spec.help));
     }
     s.push_str("\nOptions can be abbreviated.  Boolean options take a `no` prefix to disable.\n");
-    // P7.3. --help lists the encoding names, because --encoding is the one
-    // option whose accepted values are not self-evident from its name, and a
-    // user who does not know the fallback is CP1252 will not know to ask.
-    s.push_str("\n--encoding values: auto (probe for UTF-8, else cp1252), utf-8, cp1252.\n");
+    // P7.4. --help spells the detection order out, because --encoding is the
+    // one option whose behaviour cannot be guessed from its name, and the
+    // difference between "detected" and "guessed" decides whether a user
+    // bothers to read this at all.
+    s.push_str(
+        "\n--encoding values:\n\
+         \n  auto        probe in order: byte-order mark, then the NUL pattern\n\
+         \x20             that marks UTF-16, then UTF-8 validity, then cp1252.\n\
+         \x20             The first two are evidence; cp1252 is a guess, and it\n\
+         \x20             is wrong for Cyrillic, Greek and Turkish.\n\
+         \x20 utf-8 / cp1252\n\
+         \x20 latin-1 (= iso-8859-1), cp1251, cp1253, koi8-r\n\
+         \x20             Single-byte encodings, which cannot be detected from\n\
+         \x20             the bytes -- name the right one for non-Western text.\n\
+         \x20 utf-16le / utf-16be, utf-32le / utf-32be\n\
+         \x20             For a BOM-less file whose text has too little ASCII\n\
+         \x20             for the probe to see it as UTF-16.\n\
+         \nOutput is always UTF-8.\n",
+    );
     s
 }

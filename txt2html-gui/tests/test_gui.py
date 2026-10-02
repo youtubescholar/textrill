@@ -14,6 +14,7 @@ need no display: the offscreen Qt platform is selected before Qt starts.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -251,6 +252,157 @@ class FileTests(unittest.TestCase):
                 self.assertEqual(len(text), 3, f"0x{b:02X}")
                 write_text_file(path, text, encoding)
                 self.assertEqual(path.read_bytes(), raw, f"0x{b:02X}")
+
+    def test_a_bom_is_a_declaration_and_utf16_is_decoded_as_such(self):
+        """`FF FE` means UTF-16LE. Treating it as a decode error is P7.4's bug.
+
+        The pre-P7.4 editor decoded it as CP1252, where those bytes have no
+        meaning, so the document opened as `\u00ff\u00feHello` -- mojibake in the
+        editor for a file the converter would have read correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, data, expected in [
+                ("le.txt", b"\xff\xfe" + "Hello world.\n".encode("utf-16-le"), "utf-16le"),
+                ("be.txt", b"\xfe\xff" + "Hello world.\n".encode("utf-16-be"), "utf-16be"),
+                ("u32.txt", b"\xff\xfe\x00\x00" + "Hello.\n".encode("utf-32-le"), "utf-32le"),
+            ]:
+                path = Path(tmp) / name
+                path.write_bytes(data)
+                text, encoding = read_text_file(path)
+                self.assertEqual(encoding, expected, name)
+                self.assertEqual(text, "Hello world.\n" if "u32" not in name else "Hello.\n")
+                self.assertNotIn("\ufeff", text, f"{name}: the mark is metadata")
+
+    def test_bomless_utf16_of_ascii_is_not_shown_with_a_nul_between_letters(self):
+        """The failure that made UTF-16 worth handling: `H\0e\0l\0l\0o\0`.
+
+        This file is *valid UTF-8* -- every byte is below 0x80 -- so the editor
+        accepted it and displayed a document with control characters threaded
+        through it, and the converter produced the same thing. Only the position
+        of the NULs distinguishes it, which is why detection looks there.
+        """
+        raw = "Hello world.\nThis is plain ASCII prose.\n".encode("utf-16-le")
+        self.assertEqual(raw.decode("utf-8"), raw.decode("utf-8"))  # trivially valid
+        with tempfile.TemporaryDirectory() as tmp:
+            for enc, expected in (("utf-16-le", "utf-16le"), ("utf-16-be", "utf-16be")):
+                path = Path(tmp) / f"{expected}.txt"
+                path.write_bytes("Hello world.\nThis is prose.\n".encode(enc))
+                text, encoding = read_text_file(path)
+                self.assertEqual(encoding, expected)
+                self.assertEqual(text, "Hello world.\nThis is prose.\n")
+                self.assertNotIn("\x00", text)
+
+    def test_a_utf32le_file_is_not_read_as_utf16le(self):
+        """UTF-32LE's mark starts with UTF-16LE's, so order decides.
+
+        Checked the short way round, the file decodes as pairs of Latin-1
+        characters: still text-shaped, so wrong in a way that survives a glance.
+        """
+        raw = b"\xff\xfe\x00\x00" + "abcd\U0001F600ef".encode("utf-32-le")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "u32.txt"
+            path.write_bytes(raw)
+            text, encoding = read_text_file(path)
+            self.assertEqual(encoding, "utf-32le")
+            self.assertEqual(text, "abcd\U0001F600ef")
+
+    def test_naming_the_encoding_recovers_what_detection_cannot(self):
+        """Russian in CP1251 or KOI8-R is not detectable, so it must be askable.
+
+        CP1251 and KOI8-R disagree about nearly every high byte and both are
+        valid CP1252, so `auto` picks CP1252 and is wrong for both. There is no
+        evidence in the bytes to do better; the user knowing is the only source.
+        """
+        text = "Привет, мир!\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            for codec, name in (("cp1251", "cp1251"), ("koi8-r", "koi8-r")):
+                path = Path(tmp) / f"{name}.txt"
+                path.write_bytes(text.encode(codec))
+                _auto, auto_encoding = read_text_file(path)
+                self.assertEqual(auto_encoding, "cp1252", name)
+                self.assertNotEqual(decode_bytes(path.read_bytes(), name), "Привет, мир!")
+                got, encoding = read_text_file(path, encoding=name)
+                self.assertEqual(got, text, name)
+                self.assertEqual(encoding, name)
+
+    def test_latin1_is_no_longer_an_alias_for_cp1252(self):
+        """`latin-1` used to mean CP1252 here.
+
+        Not a harmless spelling: a Latin-1 file's `0x93` is a C1 control, and a
+        user asking for Latin-1 was asking for the C1 control, not for a quote.
+        """
+        raw = b"\x93quoted\x94\n"
+        self.assertEqual(decode_bytes(raw, "latin-1"), "\u0093quoted\u0094\n")
+        self.assertEqual(decode_bytes(raw, "cp1252"), "\u201cquoted\u201d\n")
+
+    def test_the_editor_tables_match_the_codecs_the_engine_generated_from(self):
+        """`files.py` is a second implementation of an engine rule, and it drifts.
+
+        The engine's tables in `src/convert.rs` were generated from Python's own
+        codecs by `tests/gen_encoding_tables.py`, and the Rust test
+        `every_table_entry_matches_python` checks them against the same
+        reference. So both sides agree with Python by construction, and this
+        asserts the GUI half of that: all 128 high bytes of all five encodings.
+
+        Only a real disagreement can come from the one thing the shared
+        reference does not express -- a byte the encoding leaves undefined, which
+        each side must fall back to the Latin-1 reading for.
+        """
+        for encoding in ("iso-8859-1", "cp1252", "cp1251", "cp1253", "koi8-r"):
+            for byte in range(0x80, 0x100):
+                raw = bytes([byte])
+                try:
+                    want = raw.decode(encoding)
+                except UnicodeDecodeError:
+                    want = chr(byte)  # undefined: Latin-1 C1, as the engine does
+                got = decode_bytes(raw, encoding)
+                self.assertEqual(
+                    got, want, f"{encoding} 0x{byte:02x}: {got!r} != {want!r}"
+                )
+
+    def test_the_engine_and_the_editor_read_a_utf16_file_the_same_way(self):
+        """End-to-end parity, without parsing the engine's HTML.
+
+        Comparing decoded text against the converter's output would require
+        unwrapping markup to get back to something comparable, which is a second
+        source of disagreement. Instead the engine is asked to convert the file
+        and the *decoded words* are looked for in its output, while the editor's
+        decode is asserted against the same expected string. Both sides are then
+        pinned to one expectation, which is the property that matters: a user
+        editing one document and previewing another.
+
+        Skipped rather than failed when the engine is not built, so the GUI
+        suite stays runnable on its own.
+        """
+        engine = (
+            Path(__file__).resolve().parents[2]
+            / "txt2html-rs" / "target" / "debug" / "txt2html"
+        )
+        if not engine.exists():
+            self.skipTest("engine binary not built; run `cargo build` in txt2html-rs")
+
+        expected = "Hello world.\nThis is plain prose.\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, data, encoding in [
+                ("le", "Hello world.\nThis is plain prose.\n".encode("utf-16-le"), "utf-16le"),
+                ("bele", b"\xff\xfe" + "Hello world.\nThis is plain prose.\n".encode("utf-16-le"), "utf-16le"),
+                ("be", "Hello world.\nThis is plain prose.\n".encode("utf-16-be"), "utf-16be"),
+                ("u32", b"\xff\xfe\x00\x00" + expected.encode("utf-32-le"), "utf-32le"),
+            ]:
+                path = Path(tmp) / f"{name}.txt"
+                path.write_bytes(data)
+
+                text, got_encoding = read_text_file(path)
+                self.assertEqual(got_encoding, encoding, name)
+                self.assertEqual(text, expected, f"editor, {name}")
+
+                out = subprocess.run(
+                    [str(engine), "--default_link_dict", "", str(path)],
+                    capture_output=True,
+                )
+                html = out.stdout.decode("utf-8")
+                self.assertIn("Hello world.", html, f"engine, {name}")
+                self.assertNotIn("\x00", html, f"engine left NULs, {name}")
 
     def test_saving_a_character_cp1252_cannot_hold_is_an_error(self):
         """The user typed something the file's encoding has no byte for.
@@ -919,6 +1071,28 @@ class GuiTests(unittest.TestCase):
             target = Path(tmp) / "out.html"
             self.window._save(str(target))
             self.assertEqual(target.read_text(encoding="utf-8"), html)
+
+    def test_the_gui_declares_the_charset_it_writes(self):
+        """The plan said the GUI turns `meta_charset` on. It did not.
+
+        The engine defaults it off so no golden moves, which is right for a
+        byte-compatible CLI and wrong for a panel whose consumer is a browser
+        reading a file this program wrote. Without a declaration the browser
+        guesses, and a document containing e.g. Cyrillic can render as mojibake
+        for want of two bytes of markup.
+        """
+        self.assertTrue(self.window.options.values()["meta_charset"])
+        # And it survives a reset and a settings round trip, since both go
+        # through values().
+        self.window.options.reset_all()
+        self.assertTrue(self.window.options.values()["meta_charset"])
+
+    def test_generated_html_from_the_panel_declares_utf8(self):
+        """End to end, because forcing the option is only worth anything if the
+        conversion honours it."""
+        html = txt2html.convert("Привет, мир!\n", self.window.options.values())
+        self.assertIn("charset", html)
+        self.assertIn("utf-8", html.lower())
 
     def test_reset_restores_defaults(self):
         self.window.options.set_value("bold_delimiter", "^")

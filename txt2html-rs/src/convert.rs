@@ -10,7 +10,7 @@ use fancy_regex::Regex;
 
 use crate::chars;
 use crate::links::{self, LinkParser};
-use crate::options::{Encoding, Options};
+use crate::options::{Encoding, Options, SingleByte};
 
 /// One or more inputs that could not be opened, and the output built from
 /// whatever *was* readable (A9). The caller should write that output if it has
@@ -33,8 +33,35 @@ pub struct UnreadableInput {
 pub enum Resolved {
     /// The bytes were valid UTF-8 and were decoded as such.
     Utf8,
-    /// The bytes were not valid UTF-8. They were decoded as CP1252.
-    Cp1252,
+    /// A single-byte encoding, by guess (`Auto`) or because it was named.
+    Single(SingleByte),
+    /// UTF-16 or UTF-32, little- or big-endian.
+    ///
+    /// These are carried separately from [`SingleByte`] rather than folded into
+    /// one "other" case so a status bar can say `utf-16le` without the caller
+    /// having to re-derive it.
+    Wide(Wide),
+}
+
+/// A multi-byte encoding, all of which are UTF-based.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wide {
+    Utf16Le,
+    Utf16Be,
+    Utf32Le,
+    Utf32Be,
+}
+
+impl Wide {
+    fn from_encoding(encoding: Encoding) -> Option<Self> {
+        match encoding {
+            Encoding::Utf16Le => Some(Wide::Utf16Le),
+            Encoding::Utf16Be => Some(Wide::Utf16Be),
+            Encoding::Utf32Le => Some(Wide::Utf32Le),
+            Encoding::Utf32Be => Some(Wide::Utf32Be),
+            _ => None,
+        }
+    }
 }
 
 impl Resolved {
@@ -42,7 +69,44 @@ impl Resolved {
     pub fn name(self) -> &'static str {
         match self {
             Resolved::Utf8 => "utf-8",
-            Resolved::Cp1252 => "cp1252",
+            Resolved::Single(sb) => sb.name(),
+            Resolved::Wide(w) => match w {
+                Wide::Utf16Le => "utf-16le",
+                Wide::Utf16Be => "utf-16be",
+                Wide::Utf32Le => "utf-32le",
+                Wide::Utf32Be => "utf-32be",
+            },
+        }
+    }
+
+    /// How loudly this result deserves to be reported, when several inputs in
+    /// one run resolved differently and only one can be named.
+    ///
+    /// UTF-8 is the silent default and ranks lowest, so an ASCII file cannot
+    /// hijack the report. A single-byte legacy encoding ranks above it, because
+    /// that is a *guess* and the user most wants to know about it -- a CP1251
+    /// file read as CP1252 is the failure this reporting exists to make visible.
+    /// UTF-16/32 outranks both: it means the bytes needed structural detection to
+    /// be understood at all, so it is the most surprising thing that could have
+    /// happened, and the one most worth naming.
+    fn notice_rank(self) -> u8 {
+        match self {
+            Resolved::Utf8 => 0,
+            Resolved::Single(_) => 1,
+            Resolved::Wide(_) => 2,
+        }
+    }
+
+    /// The [`Encoding`] this is, for callers that want to round-trip it back
+    /// through the option layer.
+    pub fn encoding(self) -> Encoding {
+        match self {
+            Resolved::Utf8 => Encoding::Utf8,
+            Resolved::Single(sb) => sb.encoding(),
+            Resolved::Wide(Wide::Utf16Le) => Encoding::Utf16Le,
+            Resolved::Wide(Wide::Utf16Be) => Encoding::Utf16Be,
+            Resolved::Wide(Wide::Utf32Le) => Encoding::Utf32Le,
+            Resolved::Wide(Wide::Utf32Be) => Encoding::Utf32Be,
         }
     }
 }
@@ -90,59 +154,313 @@ pub fn read_any_file_with_encoding(path: &str) -> Option<(String, Resolved)> {
 /// rather than a parameter bolted onto the other.
 pub fn read_with(path: &str, encoding: Encoding) -> Option<(String, Resolved)> {
     let bytes = std::fs::read(path).ok()?;
-    Some(match encoding {
-        Encoding::Auto => match String::from_utf8(bytes) {
-            Ok(s) => (s, Resolved::Utf8),
-            Err(e) => (
-                e.into_bytes().into_iter().map(cp1252_char).collect(),
-                Resolved::Cp1252,
-            ),
-        },
+    Some(decode_bytes_with(&bytes, encoding))
+}
+
+/// Decode `bytes` under `encoding`. Split out from [`read_with`] because the
+/// GUI needs the same rule without a file, and because it is directly testable
+/// that way — the detection order is the substance of this function and it
+/// should not only be reachable through the filesystem.
+pub fn decode_bytes_with(bytes: &[u8], encoding: Encoding) -> (String, Resolved) {
+    match encoding {
+        Encoding::Auto => detect(bytes),
         // Lossy on purpose, and only reachable when the caller has declared the
         // encoding. `String::from_utf8_lossy` substitutes U+FFFD rather than
         // failing, because a converter that aborts on one bad byte is not
         // useful; the substitution is visible in the output instead of silent.
-        Encoding::Utf8 => (String::from_utf8_lossy(&bytes).into_owned(), Resolved::Utf8),
-        Encoding::Cp1252 => (
-            bytes.into_iter().map(cp1252_char).collect(),
-            Resolved::Cp1252,
-        ),
-    })
+        Encoding::Utf8 => (String::from_utf8_lossy(bytes).into_owned(), Resolved::Utf8),
+        wide @ (Encoding::Utf16Le | Encoding::Utf16Be | Encoding::Utf32Le | Encoding::Utf32Be) => {
+            // An explicitly named encoding still has to cope with a BOM: the
+            // user names the *encoding*, not the absence of a mark, and leaving
+            // the mark in would emit U+FEFF as the first character of the
+            // document.
+            let skip = bom(bytes).map_or(0, |(_, n)| n);
+            decode_utf16_or_32(bytes, wide, skip)
+        }
+        other => {
+            let sb = other.single_byte().unwrap_or(SingleByte::Cp1252);
+            (
+                bytes.iter().map(|&b| single_byte_char(sb, b)).collect(),
+                Resolved::Single(sb),
+            )
+        }
+    }
 }
 
-/// Decode one byte as CP1252. Identical to `b as char` except on `0x80`-`0x9F`.
+/// `Encoding::Auto`, in the order the documentation gives: BOM, then NUL
+/// structure, then UTF-8 validity, then the single-byte guess.
+fn detect(bytes: &[u8]) -> (String, Resolved) {
+    if let Some((encoding, skip)) = bom(bytes) {
+        // A UTF-8 BOM is not an encoding change -- everything after it is UTF-8
+        // either way -- so it is deliberately kept in the text. The UTF-16 and
+        // UTF-32 marks are metadata and go.
+        if encoding != Encoding::Utf8 {
+            return decode_utf16_or_32(bytes, encoding, skip);
+        }
+    }
+    if let Some(encoding) = sniff_utf16_or_32(bytes) {
+        return decode_utf16_or_32(bytes, encoding, 0);
+    }
+    match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => (s, Resolved::Utf8),
+        Err(e) => (
+            e.into_bytes().into_iter().map(cp1252_char).collect(),
+            Resolved::Single(SingleByte::Cp1252),
+        ),
+    }
+}
+
+/// The byte-order mark, if there is one, as the encoding it declares and how
+/// many bytes it occupies.
+///
+/// A BOM is a declaration by the writer and outranks every heuristic, which is
+/// why it is checked first and why the pre-P7.4 code was wrong to treat `FF FE`
+/// as a decode error: those two bytes are a guarantee, not garbage.
+fn bom(bytes: &[u8]) -> Option<(Encoding, usize)> {
+    // UTF-32LE's BOM starts with UTF-16LE's, so the longer mark must be tested
+    // first or every UTF-32LE file with a BOM decodes as UTF-16LE and comes out
+    // as pairs of Latin-1 characters -- which is a wrong answer that still looks
+    // like text, the most expensive kind.
+    for (encoding, mark) in [
+        (Encoding::Utf32Le, &[0xFF, 0xFE, 0x00, 0x00][..]),
+        (Encoding::Utf32Be, &[0x00, 0x00, 0xFE, 0xFF][..]),
+        (Encoding::Utf16Le, &[0xFF, 0xFE][..]),
+        (Encoding::Utf16Be, &[0xFE, 0xFF][..]),
+        (Encoding::Utf8, &[0xEF, 0xBB, 0xBF][..]),
+    ] {
+        if bytes.starts_with(mark) {
+            return Some((encoding, mark.len()));
+        }
+    }
+    None
+}
+
+/// Structural UTF-16 detection for BOM-less files.
+///
+/// This is a heuristic, and the ordering is the substance of it. UTF-16LE text
+/// is *valid UTF-8* whenever every code unit is below `0x80` -- which is ASCII
+/// prose, i.e. most documents -- so a UTF-8 validity check cannot distinguish it
+/// and must not run first. What UTF-16 does have is a NUL every second byte, in
+/// one alignment or the other, and no other encoding this port decodes produces
+/// that by accident.
+///
+/// UTF-32 is deliberately not inferred. Its three NULs per unit are distinctive,
+/// but a document with no NULs at all is ambiguous in a way that does not
+/// resolve, and a confident wrong guess is worse than the mojibake. UTF-32
+/// without a BOM is read as UTF-16, which at least gets the ASCII range right.
+fn sniff_utf16_or_32(bytes: &[u8]) -> Option<Encoding> {
+    const WINDOW: usize = 4096;
+    let sample = &bytes[..bytes.len().min(WINDOW)];
+    if sample.len() < 8 {
+        return None;
+    }
+    // Counted from the bytes rather than derived from `len / 2`: an odd-length
+    // sample (a truncated final code unit is normal in real files) puts one
+    // more byte on the even side, and a budget that silently overcounts one
+    // alignment would loosen exactly the threshold that keeps this from firing
+    // on ordinary text.
+    let nulls_even = sample.iter().step_by(2).filter(|&&b| b == 0).count();
+    let nulls_odd = sample
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .filter(|&&b| b == 0)
+        .count();
+    let even = nulls_even + sample.iter().step_by(2).filter(|&&b| b != 0).count();
+    let odd = nulls_odd
+        + sample
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .filter(|&&b| b != 0)
+            .count();
+    // The threshold is 1/8, which is a measured number rather than a round one.
+    // An earlier draft used 2/3, on the assumption that real prose is mostly
+    // ASCII and therefore mostly NUL; measuring the NUL fraction per alignment
+    // on representative text says otherwise:
+    //
+    //   UTF-16LE, ASCII prose      1.00     UTF-16LE, Russian prose   0.21
+    //   UTF-16LE, Greek prose      0.20     UTF-16LE, dense Cyrillic 0.15
+    //   UTF-16BE, ASCII prose      1.00     UTF-16LE, short Russian   0.25
+    //
+    // Two thirds therefore catches only the English case, which is the case a
+    // validity check already gets *wrong* and the easy one to miss. Against it,
+    // nothing that ought to stay UTF-8 comes close:
+    //
+    //   ASCII document   0.00   UTF-8 Russian  0.00   UTF-8 CJK  0.00
+    //   UTF-8 with NULs  0.04   HTML          0.00   raw bytes  0.01
+    //
+    // So 1/8 sits with a 3x margin above the worst negative and below the
+    // weakest positive. The cross-alignment factor rejects files that merely
+    // contain a few scattered NULs, where the two counts would be similar.
+    //
+    // The residual limit is real and not hidden by the threshold: BOM-less
+    // UTF-16 with very little ASCII in it -- 0.15 is the floor for real prose,
+    // and a document of nothing but Cyrillic letters reaches 0 -- is not
+    // detectable by any rule short of a statistical model. That is what
+    // `--encoding utf-16le` is for.
+    if nulls_even * 8 > even && nulls_even > nulls_odd * 4 {
+        Some(Encoding::Utf16Be)
+    } else if nulls_odd * 8 > odd && nulls_odd > nulls_even * 4 {
+        Some(Encoding::Utf16Le)
+    } else {
+        None
+    }
+}
+
+/// Decode UTF-16 or UTF-32, skipping `skip` leading bytes (a BOM, normally).
+///
+/// A lone surrogate is not a character; `char::from_u32` rejects it and U+FFFD
+/// is what every other decoder substitutes, so a malformed or truncated file
+/// yields visible replacement characters instead of a panic. Trailing bytes
+/// that do not make a whole code unit are dropped rather than padded, since the
+/// alternative would invent a character from half a unit.
+fn decode_utf16_or_32(bytes: &[u8], encoding: Encoding, skip: usize) -> (String, Resolved) {
+    let wide = Wide::from_encoding(encoding)
+        .unwrap_or_else(|| unreachable!("decode_utf16_or_32 is only reached for UTF-16/32"));
+    let body = bytes.get(skip..).unwrap_or_default();
+    // `as_chunks` rather than `chunks_exact` for the lint, but the semantics
+    // wanted here are `chunks_exact`'s: a trailing fragment shorter than one code
+    // unit is *dropped*, not zero-padded, because padding would invent a
+    // character from half a unit.
+    let units: Vec<u32> = match wide {
+        Wide::Utf16Le => body
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u32::from(u16::from_le_bytes([c[0], c[1]])))
+            .collect(),
+        Wide::Utf16Be => body
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u32::from(u16::from_be_bytes([c[0], c[1]])))
+            .collect(),
+        Wide::Utf32Le => body
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect(),
+        Wide::Utf32Be => body
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| u32::from_be_bytes([c[0], c[1], c[2], c[3]]))
+            .collect(),
+    };
+    (
+        units
+            .into_iter()
+            .map(|u| char::from_u32(u).unwrap_or('\u{FFFD}'))
+            .collect(),
+        Resolved::Wide(wide),
+    )
+}
+
+// GENERATED by tests/gen_encoding_tables.py -- do not edit by hand.
+
+static LATIN1_HIGH: [u32; 128] = [
+    0x0080, 0x0081, 0x0082, 0x0083, 0x0084, 0x0085, 0x0086, 0x0087, 0x0088, 0x0089, 0x008a, 0x008b,
+    0x008c, 0x008d, 0x008e, 0x008f, 0x0090, 0x0091, 0x0092, 0x0093, 0x0094, 0x0095, 0x0096, 0x0097,
+    0x0098, 0x0099, 0x009a, 0x009b, 0x009c, 0x009d, 0x009e, 0x009f, 0x00a0, 0x00a1, 0x00a2, 0x00a3,
+    0x00a4, 0x00a5, 0x00a6, 0x00a7, 0x00a8, 0x00a9, 0x00aa, 0x00ab, 0x00ac, 0x00ad, 0x00ae, 0x00af,
+    0x00b0, 0x00b1, 0x00b2, 0x00b3, 0x00b4, 0x00b5, 0x00b6, 0x00b7, 0x00b8, 0x00b9, 0x00ba, 0x00bb,
+    0x00bc, 0x00bd, 0x00be, 0x00bf, 0x00c0, 0x00c1, 0x00c2, 0x00c3, 0x00c4, 0x00c5, 0x00c6, 0x00c7,
+    0x00c8, 0x00c9, 0x00ca, 0x00cb, 0x00cc, 0x00cd, 0x00ce, 0x00cf, 0x00d0, 0x00d1, 0x00d2, 0x00d3,
+    0x00d4, 0x00d5, 0x00d6, 0x00d7, 0x00d8, 0x00d9, 0x00da, 0x00db, 0x00dc, 0x00dd, 0x00de, 0x00df,
+    0x00e0, 0x00e1, 0x00e2, 0x00e3, 0x00e4, 0x00e5, 0x00e6, 0x00e7, 0x00e8, 0x00e9, 0x00ea, 0x00eb,
+    0x00ec, 0x00ed, 0x00ee, 0x00ef, 0x00f0, 0x00f1, 0x00f2, 0x00f3, 0x00f4, 0x00f5, 0x00f6, 0x00f7,
+    0x00f8, 0x00f9, 0x00fa, 0x00fb, 0x00fc, 0x00fd, 0x00fe, 0x00ff,
+];
+
+static CP1252_HIGH: [u32; 128] = [
+    0x20ac, 0, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030, 0x0160, 0x2039,
+    0x0152, 0, 0x017d, 0, 0, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x02dc,
+    0x2122, 0x0161, 0x203a, 0x0153, 0, 0x017e, 0x0178, 0x00a0, 0x00a1, 0x00a2, 0x00a3, 0x00a4,
+    0x00a5, 0x00a6, 0x00a7, 0x00a8, 0x00a9, 0x00aa, 0x00ab, 0x00ac, 0x00ad, 0x00ae, 0x00af, 0x00b0,
+    0x00b1, 0x00b2, 0x00b3, 0x00b4, 0x00b5, 0x00b6, 0x00b7, 0x00b8, 0x00b9, 0x00ba, 0x00bb, 0x00bc,
+    0x00bd, 0x00be, 0x00bf, 0x00c0, 0x00c1, 0x00c2, 0x00c3, 0x00c4, 0x00c5, 0x00c6, 0x00c7, 0x00c8,
+    0x00c9, 0x00ca, 0x00cb, 0x00cc, 0x00cd, 0x00ce, 0x00cf, 0x00d0, 0x00d1, 0x00d2, 0x00d3, 0x00d4,
+    0x00d5, 0x00d6, 0x00d7, 0x00d8, 0x00d9, 0x00da, 0x00db, 0x00dc, 0x00dd, 0x00de, 0x00df, 0x00e0,
+    0x00e1, 0x00e2, 0x00e3, 0x00e4, 0x00e5, 0x00e6, 0x00e7, 0x00e8, 0x00e9, 0x00ea, 0x00eb, 0x00ec,
+    0x00ed, 0x00ee, 0x00ef, 0x00f0, 0x00f1, 0x00f2, 0x00f3, 0x00f4, 0x00f5, 0x00f6, 0x00f7, 0x00f8,
+    0x00f9, 0x00fa, 0x00fb, 0x00fc, 0x00fd, 0x00fe, 0x00ff,
+];
+// CP1252: undefined at 0x81, 0x8d, 0x8f, 0x90, 0x9d
+
+static CP1251_HIGH: [u32; 128] = [
+    0x0402, 0x0403, 0x201a, 0x0453, 0x201e, 0x2026, 0x2020, 0x2021, 0x20ac, 0x2030, 0x0409, 0x2039,
+    0x040a, 0x040c, 0x040b, 0x040f, 0x0452, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
+    0, 0x2122, 0x0459, 0x203a, 0x045a, 0x045c, 0x045b, 0x045f, 0x00a0, 0x040e, 0x045e, 0x0408,
+    0x00a4, 0x0490, 0x00a6, 0x00a7, 0x0401, 0x00a9, 0x0404, 0x00ab, 0x00ac, 0x00ad, 0x00ae, 0x0407,
+    0x00b0, 0x00b1, 0x0406, 0x0456, 0x0491, 0x00b5, 0x00b6, 0x00b7, 0x0451, 0x2116, 0x0454, 0x00bb,
+    0x0458, 0x0405, 0x0455, 0x0457, 0x0410, 0x0411, 0x0412, 0x0413, 0x0414, 0x0415, 0x0416, 0x0417,
+    0x0418, 0x0419, 0x041a, 0x041b, 0x041c, 0x041d, 0x041e, 0x041f, 0x0420, 0x0421, 0x0422, 0x0423,
+    0x0424, 0x0425, 0x0426, 0x0427, 0x0428, 0x0429, 0x042a, 0x042b, 0x042c, 0x042d, 0x042e, 0x042f,
+    0x0430, 0x0431, 0x0432, 0x0433, 0x0434, 0x0435, 0x0436, 0x0437, 0x0438, 0x0439, 0x043a, 0x043b,
+    0x043c, 0x043d, 0x043e, 0x043f, 0x0440, 0x0441, 0x0442, 0x0443, 0x0444, 0x0445, 0x0446, 0x0447,
+    0x0448, 0x0449, 0x044a, 0x044b, 0x044c, 0x044d, 0x044e, 0x044f,
+];
+// CP1251: undefined at 0x98
+
+static CP1253_HIGH: [u32; 128] = [
+    0x20ac, 0, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0, 0x2030, 0, 0x2039, 0, 0, 0, 0, 0,
+    0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0, 0x2122, 0, 0x203a, 0, 0, 0, 0,
+    0x00a0, 0x0385, 0x0386, 0x00a3, 0x00a4, 0x00a5, 0x00a6, 0x00a7, 0x00a8, 0x00a9, 0, 0x00ab,
+    0x00ac, 0x00ad, 0x00ae, 0x2015, 0x00b0, 0x00b1, 0x00b2, 0x00b3, 0x0384, 0x00b5, 0x00b6, 0x00b7,
+    0x0388, 0x0389, 0x038a, 0x00bb, 0x038c, 0x00bd, 0x038e, 0x038f, 0x0390, 0x0391, 0x0392, 0x0393,
+    0x0394, 0x0395, 0x0396, 0x0397, 0x0398, 0x0399, 0x039a, 0x039b, 0x039c, 0x039d, 0x039e, 0x039f,
+    0x03a0, 0x03a1, 0, 0x03a3, 0x03a4, 0x03a5, 0x03a6, 0x03a7, 0x03a8, 0x03a9, 0x03aa, 0x03ab,
+    0x03ac, 0x03ad, 0x03ae, 0x03af, 0x03b0, 0x03b1, 0x03b2, 0x03b3, 0x03b4, 0x03b5, 0x03b6, 0x03b7,
+    0x03b8, 0x03b9, 0x03ba, 0x03bb, 0x03bc, 0x03bd, 0x03be, 0x03bf, 0x03c0, 0x03c1, 0x03c2, 0x03c3,
+    0x03c4, 0x03c5, 0x03c6, 0x03c7, 0x03c8, 0x03c9, 0x03ca, 0x03cb, 0x03cc, 0x03cd, 0x03ce, 0,
+];
+// CP1253: undefined at 0x81, 0x88, 0x8a, 0x8c, 0x8d, 0x8e, 0x8f, 0x90, 0x98, 0x9a, 0x9c, 0x9d, 0x9e, 0x9f, 0xaa, 0xd2, 0xff
+
+static KOI8R_HIGH: [u32; 128] = [
+    0x2500, 0x2502, 0x250c, 0x2510, 0x2514, 0x2518, 0x251c, 0x2524, 0x252c, 0x2534, 0x253c, 0x2580,
+    0x2584, 0x2588, 0x258c, 0x2590, 0x2591, 0x2592, 0x2593, 0x2320, 0x25a0, 0x2219, 0x221a, 0x2248,
+    0x2264, 0x2265, 0x00a0, 0x2321, 0x00b0, 0x00b2, 0x00b7, 0x00f7, 0x2550, 0x2551, 0x2552, 0x0451,
+    0x2553, 0x2554, 0x2555, 0x2556, 0x2557, 0x2558, 0x2559, 0x255a, 0x255b, 0x255c, 0x255d, 0x255e,
+    0x255f, 0x2560, 0x2561, 0x0401, 0x2562, 0x2563, 0x2564, 0x2565, 0x2566, 0x2567, 0x2568, 0x2569,
+    0x256a, 0x256b, 0x256c, 0x00a9, 0x044e, 0x0430, 0x0431, 0x0446, 0x0434, 0x0435, 0x0444, 0x0433,
+    0x0445, 0x0438, 0x0439, 0x043a, 0x043b, 0x043c, 0x043d, 0x043e, 0x043f, 0x044f, 0x0440, 0x0441,
+    0x0442, 0x0443, 0x0436, 0x0432, 0x044c, 0x044b, 0x0437, 0x0448, 0x044d, 0x0449, 0x0447, 0x044a,
+    0x042e, 0x0410, 0x0411, 0x0426, 0x0414, 0x0415, 0x0424, 0x0413, 0x0425, 0x0418, 0x0419, 0x041a,
+    0x041b, 0x041c, 0x041d, 0x041e, 0x041f, 0x042f, 0x0420, 0x0421, 0x0422, 0x0423, 0x0416, 0x0412,
+    0x042c, 0x042b, 0x0417, 0x0428, 0x042d, 0x0429, 0x0427, 0x042a,
+];
+
+/// The high half of each single-byte encoding, indexed by `byte - 0x80`.
+static ENCODING_TABLES: &[(SingleByte, &[u32; 128])] = &[
+    (SingleByte::Latin1, &LATIN1_HIGH),
+    (SingleByte::Cp1252, &CP1252_HIGH),
+    (SingleByte::Cp1251, &CP1251_HIGH),
+    (SingleByte::Cp1253, &CP1253_HIGH),
+    (SingleByte::Koi8R, &KOI8R_HIGH),
+];
+
 fn cp1252_char(b: u8) -> char {
-    match b {
-        0x80 => '\u{20AC}', // EURO SIGN
-        0x82 => '\u{201A}', // SINGLE LOW-9 QUOTATION MARK
-        0x83 => '\u{0192}', // LATIN SMALL LETTER F WITH HOOK
-        0x84 => '\u{201E}', // DOUBLE LOW-9 QUOTATION MARK
-        0x85 => '\u{2026}', // HORIZONTAL ELLIPSIS
-        0x86 => '\u{2020}', // DAGGER
-        0x87 => '\u{2021}', // DOUBLE DAGGER
-        0x88 => '\u{02C6}', // MODIFIER LETTER CIRCUMFLEX ACCENT
-        0x89 => '\u{2030}', // PER MILLE SIGN
-        0x8A => '\u{0160}', // LATIN CAPITAL LETTER S WITH CARON
-        0x8B => '\u{2039}', // SINGLE LEFT-POINTING ANGLE QUOTATION MARK
-        0x8C => '\u{0152}', // LATIN CAPITAL LIGATURE OE
-        0x8E => '\u{017D}', // LATIN CAPITAL LETTER Z WITH CARON
-        0x91 => '\u{2018}', // LEFT SINGLE QUOTATION MARK
-        0x92 => '\u{2019}', // RIGHT SINGLE QUOTATION MARK
-        0x93 => '\u{201C}', // LEFT DOUBLE QUOTATION MARK
-        0x94 => '\u{201D}', // RIGHT DOUBLE QUOTATION MARK
-        0x95 => '\u{2022}', // BULLET
-        0x96 => '\u{2013}', // EN DASH
-        0x97 => '\u{2014}', // EM DASH
-        0x98 => '\u{02DC}', // SMALL TILDE
-        0x99 => '\u{2122}', // TRADE MARK SIGN
-        0x9A => '\u{0161}', // LATIN SMALL LETTER S WITH CARON
-        0x9B => '\u{203A}', // SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
-        0x9C => '\u{0153}', // LATIN SMALL LIGATURE OE
-        0x9E => '\u{017E}', // LATIN SMALL LETTER Z WITH CARON
-        0x9F => '\u{0178}', // LATIN CAPITAL LETTER Y WITH DIAERESIS
-        // 0x81, 0x8D, 0x8F, 0x90 and 0x9D are undefined in CP1252. Kept as the
-        // Latin-1 C1 control, so the decode is total and lossless.
-        _ => b as char,
+    single_byte_char(SingleByte::Cp1252, b)
+}
+
+fn single_byte_char(enc: SingleByte, b: u8) -> char {
+    if b < 0x80 {
+        return b as char;
+    }
+    let table = ENCODING_TABLES
+        .iter()
+        .find(|(e, _)| *e == enc)
+        .map(|(_, t)| t)
+        .unwrap_or_else(|| unreachable!("every SingleByte has a table"));
+    let cp = table[(b - 0x80) as usize];
+    if cp == 0 {
+        // Undefined in this encoding: keep the Latin-1 reading so the result is
+        // still a character rather than a panic or a replacement glyph.
+        b as char
+    } else {
+        char::from_u32(cp).unwrap_or(b as char)
     }
 }
 
@@ -2560,10 +2878,11 @@ impl Converter {
         let mut sources: Vec<String> = Vec::new();
         let source_type;
         let mut unreadable: Vec<String> = Vec::new();
-        // P7.3. The worst encoding seen across the inputs, so `resolved_encoding`
-        // can report the one that actually mattered. UTF-8 is the floor: an
-        // ASCII file is valid UTF-8, so it must not be reported as CP1252
-        // merely because some other input in the same run was.
+        // P7.3. The most notable encoding seen across the inputs, so
+        // `resolved_encoding` can report the one that actually mattered. UTF-8
+        // is the floor: an ASCII file is valid UTF-8, so it must not be reported
+        // as some legacy encoding merely because another input in the same run
+        // was.
         let mut worst = Resolved::Utf8;
         if !self.opts.infile.is_empty() {
             source_type = "file".to_string();
@@ -2577,7 +2896,7 @@ impl Converter {
                 } else {
                     match read_with(f, self.opts.encoding) {
                         Some((c, resolved)) => {
-                            if resolved == Resolved::Cp1252 {
+                            if resolved.notice_rank() > worst.notice_rank() {
                                 worst = resolved;
                             }
                             sources.push(c);

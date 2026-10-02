@@ -275,11 +275,11 @@ So the rule matches the corpus's own: a divergence is a failing gate, and it
 becomes a passing gate by being fixed, in the same change. A defect that needs
 tracking goes in `cases.sh`, as a case that currently fails.
 
-Two cases are *expected* to fail the differential comparison, by design rather
-than by neglect, and both are recorded as `differential must fail:` in
-`cases.sh` so the alignment guard holds them to it. They share a shape: the
-reference's output is wrong and the port's is right, so there is no byte
-sequence the port could emit to match it.
+Seven cases are *expected* to fail the differential comparison, by design rather
+than by neglect, and all are recorded as `differential must fail:` in `cases.sh`
+so the alignment guard holds them to it. They share a shape: the reference's
+output is wrong, or the reference has no way to be right, and the port's is
+right — so there is no byte sequence the port could emit to match it.
 
 * `cp1252_smart` (P7.1) — a CP1252 file with smart quotes and dashes. The
   reference emits the raw bytes and depends on the browser guessing CP1252; the
@@ -289,12 +289,45 @@ sequence the port could emit to match it.
   reference demoronizes each byte of the sequence independently and emits
   `&aelig;`+`&yen;`+`&not;`; the port decodes UTF-8 first and the character
   survives.
+* `cp1251_named`, `koi8r_named`, `cp1253_named` (P7.4) — Cyrillic and Greek in
+  a legacy single-byte encoding, read with `--encoding`. The reference has no
+  encoding option and emits the bytes for a browser to guess, so it cannot
+  produce this output at all.
+* `utf16le_ascii`, `utf16be_ascii`, `utf16le_bom` (P7.4) — UTF-16, with and
+  without a byte-order mark. BOM-less UTF-16 of ASCII prose is *also valid
+  UTF-8*, so both implementations used to accept it and emit a NUL between every
+  letter. The reference has no UTF-16 concept; the port reads the BOM as a
+  declaration and infers the rest from the NUL alignment.
 
-The oracle for both is `tests/encodingtest.rs`, which asserts the decoded code
-points and that no C1 control character reaches the output. A unit test cannot
-rot into a false pass the way a suppressed corpus line can, and it fails the
-moment the decode regresses rather than waiting for a byte comparison nobody
-reads.
+The oracle for all seven is `tests/encodingtest.rs`, which asserts the decoded
+code points, that no C1 control character reaches the output, and — for the
+UTF-16 cases — that no NUL survives. A unit test cannot rot into a false pass
+the way a suppressed corpus line can, and it fails the moment the decode
+regresses rather than waiting for a byte comparison nobody reads.
+
+### What detection does *not* do, and why the fixtures come in pairs
+
+The legacy single-byte cases are deliberately registered **twice**, once under
+the default and once with `--encoding`, and only the flagged half is declared
+`NOGOLDEN`:
+
+* `cp1251_cyrillic` / `koi8r_cyrillic` / `cp1253_greek` — **differential
+  PASSes.** Under the default the port and the reference are *equally wrong*:
+  neither can detect these encodings, both guess CP1252, and both emit the same
+  mojibake. This is pinned deliberately. P7.4 did **not** change the default
+  behaviour for non-Western text, and if a later change starts guessing, these
+  cases stop matching the reference and say so.
+
+  This is also the case that most looks like a defect and is not. CP1251 and
+  KOI8-R disagree about nearly every byte above `0x80` and both are valid
+  CP1252, so a wrong guess between them is not a small error — which is the
+  argument for the user naming the encoding rather than for the tool guessing
+  harder. See `REMEDIATION-PLAN.md` for why the guessing is a separate project.
+
+  Declaring these `NOGOLDEN` was the first attempt and the corpus runner
+  rejected it: it asserts that a declared divergence actually diverges, and
+  reported `matches the reference; the declared divergence is gone`. The runner
+  was right and the declaration was the lie.
 
 ### Fixed, and pinned
 

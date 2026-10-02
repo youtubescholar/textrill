@@ -154,7 +154,7 @@ correct implementation instead of two.
 | A3 | **done** | five numeric options bounded, four deliberately not, from one table the GUI also reads; the difference is measured |
 | A4 | **done** | `PanicException` re-export; GUI worker reports Rust panics and always completes |
 | A5 | **done** | a file's encoding is remembered and written back, so a non-UTF-8 save no longer corrupts it. Extended by P7, which found the remembered encoding was Latin-1 — the write-back was faithful and still wrong, because the editor and the converter were reading different documents |
-| P7 | **done** | the encoding fallback decoded as Latin-1 while `demoronize_char`'s table is keyed on CP1252, so the substitutions never fired on any real Windows file and C1 controls leaked into the output. Fallback is CP1252; `--encoding` and `--meta_charset` added; GUI and engine now agree; 17 new tests, 2 new corpus cases |
+| P7 | **done** | the encoding fallback decoded as Latin-1 while `demoronize_char`'s table is keyed on CP1252, so the substitutions never fired on any real Windows file and C1 controls leaked into the output. Fallback is CP1252; `--encoding` and `--meta_charset` added; GUI and engine now agree. **P7.4 then found the detection *order* was the real defect**: UTF-8 validity was checked first, which discards a BOM as an error and lets BOM-less UTF-16 pass as UTF-8 — ASCII prose in UTF-16LE *is* valid UTF-8, and both implementations emitted a NUL between every letter. Detection is now BOM → NUL alignment → UTF-8 → CP1252, with `--encoding` covering what detection cannot reach; 34 encoding tests, 9 new corpus cases |
 | A6 | **done** | superseded conversions are cancelled; 85% of the CPU and 21 MB saved, not the wall-clock win first predicted |
 | A7 | **done** | no directories created on save; the `mkdir` was load-bearing for an unrelated test, found by a 30-minute hang |
 | non-ASCII delimiter predicate | **done** | `(?<!é)` was vacuous; predicates extracted so the tests exercise production code |
@@ -1337,6 +1337,140 @@ CP1252. It was rewritten to assert the agreement instead. Recording that
 because the comment was the kind that survives review: it was confident,
 specific, and wrong, and only measuring the converter settled it.
 
+### P7.4. The detection *order* was wrong, not just the fallback — **done**
+
+**P7.1-3 fixed the fallback and called the encoding question settled. It was
+settled in the wrong place.** Checking UTF-8 validity first means the fallback is
+only reached by files that fail it — so the fallback is reached by *files that
+could not be anything else*, and every file that could be either is decided
+without ever looking at the evidence. Two consequences, both found by measuring
+rather than by reasoning:
+
+**A BOM was being discarded as a decode error.** `FF FE` is a specification-level
+guarantee of UTF-16LE. It fails the UTF-8 probe, falls to the CP1252 fallback,
+and those two bytes have no CP1252 meaning at all, so a BOM'd UTF-16 file opened
+as `&yuml;&thorn;Hello`. Treating a *declaration* as an error is the opposite of
+what a declaration is for.
+
+**BOM-less UTF-16 was passing as UTF-8.** This is the one that mattered. ASCII
+prose in UTF-16LE is `H\0e\0l\0l\0o\0` — every byte below `0x80`, so the file is
+*valid UTF-8* and the probe accepts it. The output carried a NUL between every
+character, in the engine and in the editor alike. There is no fix for this at
+this layer: a UTF-8 validity check cannot distinguish "UTF-8" from "UTF-16LE of
+ASCII", because they are the same byte sequence. The only discriminator is the
+NUL *pattern*, so it has to be consulted before validity, not after.
+
+Measured across the fixture matrix before any code changed:
+
+| input | Perl | port (P7.3) | verdict |
+|---|---|---|---|
+| Cyrillic/Greek UTF-8 | `&ETH;&Ntilde;&ETH;…` | `Привет, мир!` | port better; Perl mangles each byte |
+| CP1251 / KOI8-R / CP1253 | mojibake | mojibake, **byte-identical to Perl** | equally wrong; not detectable |
+| UTF-16LE ASCII, no BOM | — | `H<NUL>e<NUL>l<NUL>…` | visibly broken |
+| UTF-16LE with BOM | — | `&yuml;&thorn;H<NUL>e<NUL>…` | visibly broken |
+
+The second row is the one worth internalising: **P7.3 did not make Cyrillic
+better, and no amount of work on the fallback could have.** CP1251, KOI8-R and
+CP1253 are mutually indistinguishable in the bytes — a CP1251 file is a valid
+CP1252 file with different meanings for ~60 of its 128 high bytes. Any "fix"
+that claims otherwise is guessing, and CP1251 vs KOI8-R in particular disagree
+about nearly *every* high byte, so a wrong guess between them is not a small
+error.
+
+**What landed.** `Encoding::Auto` is now ordered by *kind of evidence*, and the
+order is the whole design:
+
+1. **BOM** — a declaration. UTF-32LE is checked before UTF-16LE because its mark
+   starts with UTF-16LE's, and reading it the short way round yields pairs of
+   Latin-1 characters: a wrong answer that still looks like text.
+2. **UTF-16 NUL alignment** — a structural fact. Threshold **1/8**, measured
+   rather than guessed: positives run 0.15 (dense Cyrillic) to 1.00 (ASCII
+   prose), while everything that must stay UTF-8 tops out at 0.04. An earlier 2/3
+   threshold passed the English rows and failed Russian and Greek — it would have
+   left the interesting input broken while the easy cases looked fine.
+3. **UTF-8 validity.**
+4. **CP1252** — the only *guess* in the list, and the only thing the earlier
+   version was really about.
+
+`--encoding` grew the encodings detection cannot supply: `iso-8859-1`, `cp1251`,
+`cp1253`, `koi8-r`, `utf-16le/be`, `utf-32le/be`. Two consequences worth naming.
+**`latin-1` no longer means CP1252** — before P7.4 it was an accepted alias, which
+was not a harmless spelling: a Latin-1 file's `0x93` *is* a C1 control, and a
+user asking for Latin-1 was asking for the C1 control. And **`Encoding` is the
+user's choice, deliberately**, for the cases the probe cannot reach.
+
+Output remains UTF-8 in every case; `--meta_charset` only declares that, and it
+still does not touch input decoding.
+
+**`files.py` no longer hand-writes its tables.** P7.1 wrote out a CP1252 table
+so the two implementations could be diffed; with five encodings × 128 high bytes
+that stops being reviewable, and a transcribed table is a mojibake bug showing up
+for one character in one encoding — the hardest kind to notice. The GUI derives
+them from Python's own codecs at import, the Rust tables are generated from the
+same codecs by `tests/gen_encoding_tables.py`, and both are checked against that
+reference, so the two implementations agree *by construction* rather than by
+proofreading. The one thing the shared reference cannot express — an *undefined*
+byte — each side falls back to the Latin-1 C1 reading for, which is what keeps a
+CP1251 file's `0x98` and CP1253's 17 holes lossless and round-trippable.
+
+**Deliberate limits, pinned by tests rather than left to be rediscovered:**
+
+- BOM-less UTF-16 with very little ASCII in it is **not** detectable. Pure
+  Cyrillic in UTF-16LE is `04 xx` per unit: no NULs, no evidence. `--encoding
+  utf-16le` recovers it. What decides detection is ASCII *density*, not script —
+  `"Привет, мир!"` is detected, `"Привет"` is not.
+- BOM-less **UTF-32** is not inferred at all, though its three NULs per unit are
+  distinctive: a document with no NULs is ambiguous in a way that does not
+  resolve. UTF-32 needs its BOM, or the flag.
+- A UTF-8 BOM is **kept** in the text (the reference keeps it, so stripping it
+  would make the preview differ from the saved file); wide-encoding BOMs are
+  consumed, because they are metadata.
+- A wide encoding is written back **with** a BOM even if it was read without one.
+  Two bytes of declaration against carrying "this file had no BOM" as state that
+  the GUI's `self.encoding` string has nowhere to put.
+
+Six corpus cases and one unit-test oracle: `utf16le_ascii`, `utf16be_ascii` and
+`utf16le_bom` are declared divergences; `cp1251_cyrillic`, `koi8r_cyrillic` and
+`cp1253_greek` are registered **twice** — once under the default, where port and
+reference mangle identically and the case is a differential **PASS**, and once
+with `--encoding`, which is the declared divergence. Declaring the default half
+as `NOGOLDEN` was the first attempt and the runner rejected it ("matches the
+reference; the declared divergence is gone"). The runner was right; a declared
+divergence that does not diverge is a lie that outlives its fix.
+
+34 encoding tests (17 new), each verified by sabotage: reverting the NUL sniff to
+P7.3's order fails 7, swapping the UTF-32LE BOM check fails 3, removing BOM
+handling fails 3.
+
+#### Deferred: single-byte charset *detection* (Part B)
+
+Option A above is what shipped. Option B — scoring candidate decodes for
+CP1251/KOI8-R/CP1253/Turkish and picking statistically — is **not** in this
+change, and the reason is the second row of the table above rather than a
+scheduling preference.
+
+Charset detection is a research-grade problem with a long tail of false
+positives, and the failure mode is asymmetric in the wrong direction: a *wrong
+confident guess* is worse than the current mojibake, because the mojibake is
+obviously broken and therefore trivially correctable with `--encoding`, while a
+detector that silently renders CP1251 bytes as KOI8-R gives the user a
+well-formed document full of plausible wrong letters, which is a document people
+do not check. The bar for shipping a guess is therefore not "better on average" —
+it is "never confidently wrong", which single-byte detection does not meet for
+short files.
+
+Cost, for whoever picks this up: it is a separate project, not a cleanup. It needs
+a per-language byte-frequency model, a confidence threshold with an explicit
+"unknown" outcome that must be reachable, an evaluation corpus with known
+encodings, and a decision about whether a guess may ever override the user's flag.
+None of that belongs inside a fix for "UTF-16 files emit NULs", and none of it
+should be added by someone who is trying to close that bug.
+
+Phase 6 note: this is one of the few places where a GUI is *better* than a CLI —
+a dialog can ask, and can show the candidate encodings with a preview of what each
+would produce. That is an argument for doing it after the rewrite, not for
+skipping it.
+
 The original analysis is preserved below because its *measurements* were right;
 only its attribution of the cause was wrong.
 
@@ -1514,7 +1648,7 @@ considering once the above is solid, informed by the survey in
    opt-in `html5` option with a `<meta charset>` and `<!DOCTYPE html>` would cost
    little. Ship it the way docutils is doing it: an opt-in mode now, the default
    changed at a named future version, and a changelog entry saying so.
-2. **Explicit encoding parameter** on the API and CLI (see P7.3).
+2. ~~**Explicit encoding parameter** on the API and CLI~~ — **done**, twice: P7.3 added `--encoding auto|utf-8|cp1252` and P7.4 widened it to `iso-8859-1`, `cp1251`, `cp1253`, `koi8-r`, `utf-16le/be` and `utf-32le/be`. Single-byte charset *detection* remains open and is deferred to a separate project — see **Deferred: single-byte charset detection (Part B)** under P7.4, including why a wrong confident guess is worse than the mojibake it would replace.
 3. **Table of contents.** Strongly recommended by the survey
    (`TOOL-SURVEY.md` §4.1) — this is the one clearly high-value gap. Every
    comparable tool has it except the reference, which *explicitly disclaims* it:

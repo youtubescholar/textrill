@@ -460,8 +460,20 @@ class OptionsPanel(QScrollArea):
         self.filter_box.clear()
 
     def values(self) -> Dict[str, Any]:
-        """The current options, ready to hand to :func:`txt2html.convert`."""
-        return {name: row.value() for name, row in self.rows.items()}
+        """The current options, ready to hand to :func:`txt2html.convert`.
+
+        `meta_charset` is forced on. The engine defaults it **off** so that no
+        golden file moves, which is the right default for a byte-compatible CLI
+        but the wrong one here: this panel's consumer is a browser reading a file
+        the GUI wrote, and the GUI always writes UTF-8, so without a declaration
+        the browser guesses the encoding and can guess wrong. The plan said the
+        GUI should turn this on and it did not, which is the same category of
+        plan/code disagreement the encoding rule itself had twice.
+        """
+        values = {name: row.value() for name, row in self.rows.items()}
+        if "meta_charset" in values:
+            values["meta_charset"] = True
+        return values
 
     def set_value(self, name: str, value) -> None:
         if name not in self.rows:

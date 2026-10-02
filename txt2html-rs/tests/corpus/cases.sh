@@ -323,3 +323,83 @@ EXTRA[cjk_table]='make_tables=>1,xhtml=>1'
 CLI[cjk_table]='--make_tables --xhtml'
 INPUT[cjk_table]="$HERE/inputs/cjk_table.txt"
 NOGOLDEN[cjk_table]='differential must fail: P7.1. Perl demoronizes each byte of a multi-byte UTF-8 sequence independently and mangles the CJK cell into Latin-1 entities; the port decodes UTF-8 first and the text survives. Deliberate Tier 2 divergence where the port is better, so a byte comparison against the reference must fail and cannot be the oracle; the oracle is the port preserving the cell text, asserted in tests/encodingtest.rs'
+
+# --- P7.4: input encodings the reference has no notion of --------------------
+#
+# Six fixtures, two shapes, and the reason they exist is that the *reference
+# cannot be the oracle for any of them*.  Perl reads raw bytes and leaves the
+# encoding question to the browser, so for a CP1251 or a UTF-16 file it emits
+# the bytes unchanged.  Every case below therefore *must* differ from the
+# reference, and all six are declared NOGOLDEN for the same reason: a byte
+# comparison would fail for a difference that is not a defect.
+#
+# What is asserted instead is in tests/encodingtest.rs, where the decoded code
+# points are pinned and, for the UTF-16 cases, the absence of the NUL characters
+# that used to appear between every letter.  That oracle is a unit test and is
+# run by cargo test, so it cannot rot the way a checked-in golden can.
+
+# Cyrillic in CP1251, KOI8-R and Greek in CP1253, read with the default.
+#
+# These are ordinary differential PASSes and are deliberately not declared
+# NOGOLDEN. Under the default the port and the reference are *equally wrong*:
+# neither can detect these encodings, both guess CP1252, and both emit the same
+# mojibake. Declaring them NOGOLDEN would be claiming a divergence that does not
+# exist -- the runner rejects that, correctly, and it is worth being explicit
+# that P7.4 did not change the default behaviour for non-Western text.
+#
+# The real divergence is in the `_named` cases below, where the user supplies the
+# encoding the file actually is.
+EXTRA[cp1251_cyrillic]='make_tables=>0,xhtml=>1'
+CLI[cp1251_cyrillic]='--no-make_tables --xhtml'
+INPUT[cp1251_cyrillic]="$HERE/inputs/cp1251_cyrillic.txt"
+
+EXTRA[koi8r_cyrillic]='make_tables=>0,xhtml=>1'
+CLI[koi8r_cyrillic]='--no-make_tables --xhtml'
+INPUT[koi8r_cyrillic]="$HERE/inputs/koi8r_cyrillic.txt"
+
+EXTRA[cp1253_greek]='make_tables=>0,xhtml=>1'
+CLI[cp1253_greek]='--no-make_tables --xhtml'
+INPUT[cp1253_greek]="$HERE/inputs/cp1253_greek.txt"
+
+# The same three files, read with the encoding named. These *are* declared
+# NOGOLDEN, because now the port decodes correctly and the reference still emits
+# raw bytes: the delta is the feature, and the oracle is tests/encodingtest.rs
+# asserting the recovered text rather than any comparison against Perl.
+EXTRA[cp1251_named]='make_tables=>0,xhtml=>1'
+CLI[cp1251_named]='--no-make_tables --xhtml --encoding cp1251'
+INPUT[cp1251_named]="$HERE/inputs/cp1251_cyrillic.txt"
+NOGOLDEN[cp1251_named]='differential must fail: P7.4. The same CP1251 file as cp1251_cyrillic, read with --encoding cp1251. The reference has no encoding option and emits the bytes for a browser to guess, so it cannot produce this output at all. Deliberate Tier 2 divergence where the port is unambiguously better: the Russian text survives. The oracle is tests/encodingtest.rs asserting the recovered text, not a byte comparison against a reference that cannot read the file'
+
+EXTRA[koi8r_named]='make_tables=>0,xhtml=>1'
+CLI[koi8r_named]='--no-make_tables --xhtml --encoding koi8-r'
+INPUT[koi8r_named]="$HERE/inputs/koi8r_cyrillic.txt"
+NOGOLDEN[koi8r_named]='differential must fail: P7.4. KOI8-R named explicitly. Note CP1251 and KOI8-R disagree about nearly every byte above 0x80, so naming the wrong one is not a small error -- which is why the default is unchanged rather than changed to a guess. Oracle is tests/encodingtest.rs'
+
+EXTRA[cp1253_named]='make_tables=>0,xhtml=>1'
+CLI[cp1253_named]='--no-make_tables --xhtml --encoding cp1253'
+INPUT[cp1253_named]="$HERE/inputs/cp1253_greek.txt"
+NOGOLDEN[cp1253_named]='differential must fail: P7.4. Greek in CP1253 named explicitly. CP1253 leaves 17 of its 128 high bytes undefined and each is read as the Latin-1 C1 control, the same total-and-lossless rule the CP1252 fallback uses. Oracle is tests/encodingtest.rs'
+
+# UTF-16 with no BOM, in both endiannesses.  This is the case the whole P7.4
+# exists for: every byte is below 0x80, so the file is *valid UTF-8*, and both
+# implementations accepted it and emitted a NUL between every character.  The
+# oracle is tests/encodingtest.rs asserting the decoded text and that no NUL
+# survives.
+EXTRA[utf16le_ascii]='make_tables=>0,xhtml=>1'
+CLI[utf16le_ascii]='--no-make_tables --xhtml'
+INPUT[utf16le_ascii]="$HERE/inputs/utf16le_ascii.txt"
+NOGOLDEN[utf16le_ascii]='differential must fail: P7.4. BOM-less UTF-16LE of ASCII prose, which is also valid UTF-8. The reference reads raw bytes and the port used to do the same, so both emitted NUL characters between every letter; the port now detects the NUL alignment. A byte comparison cannot be the oracle because the reference has no UTF-16 concept at all -- the oracle is tests/encodingtest.rs'
+
+EXTRA[utf16be_ascii]='make_tables=>0,xhtml=>1'
+CLI[utf16be_ascii]='--no-make_tables --xhtml'
+INPUT[utf16be_ascii]="$HERE/inputs/utf16be_ascii.txt"
+NOGOLDEN[utf16be_ascii]='differential must fail: P7.4. BOM-less UTF-16BE, same class as utf16le_ascii with the NULs on the other alignment. Oracle is tests/encodingtest.rs'
+
+# UTF-16 *with* a BOM.  Here the reference's behaviour is not a defect but a
+# non-feature: FF FE is a guarantee, and the port honours it instead of treating
+# it as an undecodable byte and falling back to CP1252, where those two bytes
+# have no meaning at all.
+EXTRA[utf16le_bom]='make_tables=>0,xhtml=>1'
+CLI[utf16le_bom]='--no-make_tables --xhtml'
+INPUT[utf16le_bom]="$HERE/inputs/utf16le_bom.txt"
+NOGOLDEN[utf16le_bom]='differential must fail: P7.4. UTF-16LE with a byte-order mark and Cyrillic text. The port reads the mark as a declaration and consumes it; the reference passes FF FE through as bytes. Oracle is tests/encodingtest.rs asserting the text and that U+FEFF does not lead the output'
