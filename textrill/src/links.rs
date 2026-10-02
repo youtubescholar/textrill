@@ -25,6 +25,33 @@ pub struct LinkRule {
     pub pattern: String,
     pub regex: Regex,
     pub replacement: String,
+    /// A literal that every match of `regex` must contain, when one could be
+    /// proven. `None` means "no filter": the regex is always run.
+    ///
+    /// Built from `regex.as_str()` rather than from `pattern`, so it describes
+    /// the regex that actually runs -- the translation in `translate_pattern`
+    /// rewrites classes and `\b`, and analysing the pre-translation text would
+    /// be analysing a different language.
+    ///
+    /// Sound in one direction only: see [`crate::prefilter`]. A wrong literal
+    /// here would silently drop links, which is why the extractor returns
+    /// `None` whenever it cannot prove the literal is required.
+    pub prefilter: Option<crate::prefilter::Alternatives>,
+}
+
+impl LinkRule {
+    /// Could this rule match `haystack` at all?
+    ///
+    /// Always true when no literal could be proven, and otherwise true if any
+    /// alternative literal is present. A `false` is a guarantee that
+    /// `regex.captures(haystack)` would have returned `None`, so the caller may
+    /// skip it.
+    pub fn may_match(&self, haystack_folded: &[u8]) -> bool {
+        match &self.prefilter {
+            None => true,
+            Some(alts) => crate::prefilter::may_match_prefolded(haystack_folded, alts),
+        }
+    }
 }
 
 /// Expand `\s \S \w \W \d \D \b \B` to explicit ASCII classes (so the result
@@ -406,12 +433,14 @@ impl LinkParser {
             }
         }
         let regex = compile_pattern(pattern, switches & LINK_NOCASE != 0);
+        let prefilter = crate::prefilter::required_literal(regex.as_str());
         self.rules.push(LinkRule {
             label: label.to_string(),
             switches,
             pattern: pattern.to_string(),
             regex,
             replacement: repl,
+            prefilter,
         });
         self.once_done.push(false);
         self.sect_once_done.push(false);
@@ -600,7 +629,35 @@ impl LinkParser {
     /// Port of `check_dictionary_links`.
     pub fn check_dictionary_links(&mut self, para_ref: &mut String) {
         let i_len = self.rules.len();
+        // P6 prefilter: one ASCII-lowercased copy of the paragraph, shared by
+        // every rule. Folding once rather than per rule is what makes the
+        // filter cheaper than the regex calls it removes.
+        //
+        // Rules without a proven literal still see this; they simply ignore it.
+        let mut folded = para_ref.as_bytes().to_vec();
+        folded.make_ascii_lowercase();
+        // Every rule that substitutes rewrites `para_ref`, so the fold has to
+        // follow it. Refreshing unconditionally at each rule would be correct
+        // but wasteful -- most rules substitute nothing -- so this tracks
+        // whether the text has actually changed since the last refresh.
+        //
+        // Getting this wrong is silent link loss, not a crash: a stale fold can
+        // report a still-present literal as absent. The corpus caught exactly
+        // that, since an earlier rule rewrites part of a mail address and the
+        // later `...\@...` rule then sees no `@`.
+        let mut fold_is_stale = false;
         for i in 0..i_len {
+            if fold_is_stale {
+                folded.clear();
+                folded.extend_from_slice(para_ref.as_bytes());
+                folded.make_ascii_lowercase();
+                fold_is_stale = false;
+            }
+            // Soundness: a `false` here proves `captures` would return None, so
+            // skipping cannot lose a link.
+            if !self.rules[i].may_match(&folded) {
+                continue;
+            }
             let rule_switches = self.rules[i].switches;
             let mut line_with_links = String::new();
             if rule_switches & LINK_ONCE != 0 {
@@ -621,10 +678,12 @@ impl LinkParser {
                         }
                         line_with_links.push_str(&linkme);
                         *para_ref = post;
+                        fold_is_stale = true;
                     }
                 }
                 if !line_with_links.is_empty() {
                     *para_ref = format!("{line_with_links}{para_ref}");
+                    fold_is_stale = true;
                 }
             } else if rule_switches & LINK_SECT_ONCE != 0 {
                 if !self.sect_once_done[i] {
@@ -641,13 +700,21 @@ impl LinkParser {
                         }
                         line_with_links.push_str(&linkme);
                         *para_ref = post;
+                        fold_is_stale = true;
                     }
                 }
                 if !line_with_links.is_empty() {
                     *para_ref = format!("{line_with_links}{para_ref}");
+                    fold_is_stale = true;
                 }
             } else {
                 loop {
+                    // The literal may have been consumed by a previous
+                    // substitution in this same loop, so the filter is consulted
+                    // per iteration, not once per rule.
+                    if !self.rules[i].may_match(&folded) {
+                        break;
+                    }
                     // P6: this used to be `let cur = para_ref.clone();`, copying
                     // the whole remaining paragraph once per match per rule.
                     // Not needed: `split_front` returns owned Strings, so the
@@ -666,11 +733,16 @@ impl LinkParser {
                             }
                             line_with_links.push_str(&linkme);
                             *para_ref = post;
+                            // Refreshed at the top of the next rule instead of
+                            // here, since several rules may run before the text
+                            // is read again.
+                            fold_is_stale = true;
                         }
                     }
                 }
                 if !line_with_links.is_empty() {
                     *para_ref = format!("{line_with_links}{para_ref}");
+                    fold_is_stale = true;
                 }
             }
         }

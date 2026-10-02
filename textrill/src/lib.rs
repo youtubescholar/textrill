@@ -103,6 +103,7 @@ pub mod cli;
 pub mod convert;
 pub mod links;
 pub mod options;
+pub mod prefilter;
 
 pub use convert::Converter;
 pub use options::Options;

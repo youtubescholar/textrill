@@ -223,7 +223,9 @@ name = "textrill"
 version = "0.1.0"
 dependencies = [
  "fancy-regex",
+ "memchr",
  "pyo3",
+ "regex-syntax",
 ]
 
 [[package]]

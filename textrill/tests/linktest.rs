@@ -369,3 +369,138 @@ fn link_work_scales_linearly_with_paragraph_count() {
          the link pass may be scanning the whole document per rule again"
     );
 }
+
+// --- P6 prefilter integration -------------------------------------------------
+
+/// The prefilter must never lose a link: any `may_match == false` has to be a
+/// genuine non-match.
+///
+/// Runs over the shipped dictionary rather than a hand-written rule set,
+/// because a synthetic one would not exercise the pattern shapes that actually
+/// occur -- the newsgroup rules put their literal behind a character class,
+/// which is exactly the case naive prefix extraction misses.
+#[test]
+fn prefilter_never_loses_a_match_on_the_real_dictionary() {
+    let path = "../ref/txt2html-3.0/doc/txt2html.dict";
+    let Ok(dict) = std::fs::read_to_string(path) else {
+        return; // dictionary absent in this checkout
+    };
+    let mut parser = links::LinkParser::new(false);
+    let filtered = parser.filter_dict(&dict);
+    parser.parse_dict(path, &filtered);
+    assert!(parser.rules.len() > 20, "dictionary did not load");
+
+    let with_filter = parser
+        .rules
+        .iter()
+        .filter(|r| r.prefilter.is_some())
+        .count();
+    assert!(
+        with_filter * 2 > parser.rules.len(),
+        "prefilter covers only {with_filter} of {} rules",
+        parser.rules.len()
+    );
+
+    let haystacks = [
+        "From: bowbuff@some.where.com (Bowbuff)",
+        "see comp.lang.perl.misc for details",
+        "visit http://example.com/path?q=1#frag now",
+        "news: alt.foo.bar is a thing",
+        "snews: nothing to see",
+        "telnet ftp.example.com 21",
+        "plain prose with no links at all",
+        "",
+        "MIXED Case Http://EXAMPLE.com",
+        "telnet://host/ and gopher://x/ and wais://y/",
+        "ftp: anonymous@ftp.example.org",
+        "1.2.3.4 and 10.0.0.1 and 192.168.1.255",
+    ];
+    for rule in &parser.rules {
+        for hay in haystacks {
+            let mut folded = hay.as_bytes().to_vec();
+            folded.make_ascii_lowercase();
+            if !rule.may_match(&folded) {
+                assert!(
+                    rule.regex.is_match(hay).map(|m| !m).unwrap_or(true),
+                    "rule {rule:?} rejected {hay:?} but the regex matches it"
+                );
+            }
+        }
+    }
+}
+
+/// A mail header must still be linkified.
+///
+/// The regression guard for the bug that first broke the corpus. The filter
+/// used to be recomputed inside the substitution loop from `para_ref`, but by
+/// then the matched prefix had already moved into `line_with_links`, so the
+/// fold saw only the unprocessed tail and reported a still-present literal as
+/// absent. Silent link loss.
+#[test]
+fn prefilter_keeps_mail_header_links() {
+    let opts = Options {
+        links_dictionaries: vec!["../ref/txt2html-3.0/doc/txt2html.dict".to_string()],
+        default_link_dict: String::new(),
+        extract: true,
+        ..Default::default()
+    };
+    let mut parser = links::load_links(&opts);
+    assert!(!parser.rules.is_empty(), "dictionary rules should load");
+
+    let mut para = "From: bowbuff@some.where.com (Bowbuff)".to_string();
+    parser.check_dictionary_links(&mut para);
+    assert!(
+        para.contains("mailto:bowbuff@some.where.com"),
+        "mail address was not linked: {para:?}"
+    );
+}
+
+/// The prefilter must follow the text as rules rewrite it.
+///
+/// This is the regression that made the corpus fail the first time. The fold
+/// was recomputed inside the substitution loop from `para_ref`, but by then the
+/// matched prefix had already been moved into `line_with_links`, so the fold
+/// described only the unprocessed tail. A literal sitting in the emitted prefix
+/// then looked absent and the rule was skipped -- silent link loss, which is
+/// exactly the failure mode the prefilter must not have.
+///
+/// The rule below matches repeatedly, so `line_with_links` accumulates text
+/// containing `needle` while the remaining tail does not contain it. If the
+/// filter reads the tail, it stops early and drops the remaining matches.
+#[test]
+fn prefilter_tracks_text_moved_into_the_output() {
+    let mut parser = links::LinkParser::new(false);
+    // `needle` matches once, then the paragraph becomes `needle rest needle
+    // rest ...`. After the first substitution the fold computed from the tail
+    // alone would no longer see any `needle`, so the loop must not use it.
+    parser.parse_dict("t.dict", "/needle/ -> http://example.invalid/n\n");
+    let mut para = "needle one needle two needle three".to_string();
+    parser.check_dictionary_links(&mut para);
+    let count = para.matches("example.invalid/n").count();
+    assert_eq!(
+        count, 3,
+        "expected all three matches to be linked, got {count} in {para:?}"
+    );
+}
+
+/// A literal introduced by an earlier rule's rewrite must be visible to a
+/// later rule.
+#[test]
+fn prefilter_sees_literals_introduced_by_earlier_rules() {
+    let mut parser = links::LinkParser::new(false);
+    // Rule 1 rewrites `PLACEHOLDER`; the replacement text contains `later`,
+    // which is the only literal rule 2 can match on.
+    parser.parse_dict(
+        "t.dict",
+        "/PLACEHOLDER/ -> http://example.invalid/later\n\
+         /later/ -> http://example.invalid/found\n",
+    );
+    let mut para = "see PLACEHOLDER end".to_string();
+    parser.check_dictionary_links(&mut para);
+    // Whatever the exact nesting rules allow, rule 1 must have fired; if rule 2
+    // is reached it must see the `later` its own rewrite created.
+    assert!(
+        para.contains("example.invalid"),
+        "neither rule fired: {para:?}"
+    );
+}

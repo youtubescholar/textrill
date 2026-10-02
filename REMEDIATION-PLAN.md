@@ -4,9 +4,11 @@ Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
 Python bindings) and `txt2html-gui` (PySide6 front end).
 
 **Progress is recorded in §0.1 below. Done: P1–P5, P8–P10, P12, P14–P19, P21–P23,
-E1–E3, A1, A1b, A2–A10. P6's two prescribed fixes are landed and are worth ~0% of
-wall-clock — the real bottleneck is 257 140 regex invocations with 81% no-match; see
-P6. Open: the P6 prefilter, P11, and Phase 6 (the GUI rewrite).**
+E1–E3, A1, A1b, A2–A10. P6 is **not met**: the two prescribed fixes are worth ~0% of
+wall-clock, and the sound required-literal prefilter that followed them only buys
+another 5–15% of the link pass. The residual gap is `fancy_regex`'s backtracking
+engine, which `regex` cannot delegate to for patterns that need lookaround; see P6.
+Open: P11 and Phase 6 (the GUI rewrite).**
 P13 is answered: the deliverable is a single self-contained artifact, so the GUI
 is rewritten in Rust + Qt and **the engine is kept** — see P13 and Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
@@ -1335,23 +1337,44 @@ now A/B-interleaved with min-of-N, and the primary regression guard is the
 allocation budget rather than a wall-clock threshold, because allocation counts are
 deterministic and machine-independent.
 
-**What actually closes the gap** is the prefilter this section already flagged as
-the follow-up: skip the ~81% of rule/paragraph pairs that cannot match, using a
-required-literal test before invoking the regex engine. It is *not* implemented,
-and it is a real design decision rather than a mechanical fix:
+**What actually closes the gap** is a required-literal prefilter: skip the
+rule/paragraph pairs that cannot match before invoking the regex engine.
 
-- `regex-automata`'s public `Prefilter` only exposes `from_hir_prefix`, and prefix
-  extraction misses exactly the highest-value rules — the ~19 newsgroup patterns
-  like `([^\w]\-)(alt\.[\w...]+)` where the literal sits *inside*, after a
-  leading character class.
-- The system dictionary and user dictionaries therefore need a sound
-  required-*substring* extractor. Hand-rolling one is feasible but is the exact
-  class of change where an unsound literal silently drops links, and this
-  project's worst failure mode.
+**Now implemented** (this section's follow-up, landed as a separate commit with
+its own soundness argument). `src/prefilter.rs` extracts a literal that every
+match must contain, from the HIR that `regex-syntax` parses out of the *translated*
+pattern -- the same string handed to `fancy_regex`, so the analysis describes the
+regex that actually runs. `regex-automata`'s `from_hir_prefix` was not usable:
+it misses exactly the highest-value rules, the ~19 newsgroup patterns whose
+literal sits inside after a leading character class.
 
-Recommendation: treat the prefilter as its own item with its own soundness proof
-(a property test asserting `prefilter_rejects(p) ⟹ !regex.matches(p)` across the
-corpus and fuzz inputs), not as a footnote to P6.
+Coverage on the shipped 41-rule dictionary: **38 of 41 rules get a literal**. The
+three that do not are `RFC ?(\d+)`, `\bSeth\ Golub\b` and `\btxt2html\b` -- all
+cases where the only literal is separated from its anchor, so nothing is provably
+required. It is a byte scan rather than a regex call, and the extractor returns
+`None` -- always run the regex -- whenever it cannot *prove* a literal, so the
+failure direction is wasted time, never a lost link.
+
+Measured effect, and it is small:
+
+| benchmark | prefilter off | prefilter on | change |
+|---|---|---|---|
+| link pass, sparse (50 links / 4 945 paras) | 0.202s | 0.172s | −15% |
+| link pass, dense (4 945 links) | 0.680s | 0.649s | −5% |
+
+92.5% of the 202 745 rule/paragraph pairs on the sparse fixture are now rejected
+without touching the regex engine, yet the link pass only gets 15% faster. The
+reason is that a rejection still costs a `memmem` search over the paragraph, and
+`fancy_regex` already delegates non-lookaround patterns to the **linear `regex`
+crate**, which does its own SIMD literal prefiltering. The two filters are doing
+each other's work. So the honest conclusion stands: **P6's goal is still not met**,
+and the remaining gap is not the absence of a prefilter but `fancy_regex`'s
+backtracking engine for the patterns that cannot be delegated.
+
+One implementation note that cost a measurement: the first version used a naive
+`windows().any()` scan and was *slower* than no prefilter at all. The literals are
+searched with `memchr::memmem::Finder`s built once at dictionary-load time;
+that turned a regression into the table above.
 
 Practical impact meanwhile: the GUI's 300 ms debounce
 (`mainwindow.py:41`) is exceeded past roughly 180 KB, so live preview stalls on
