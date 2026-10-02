@@ -10,8 +10,13 @@ another 5–15% of the link pass. The residual gap is `fancy_regex`'s backtracki
 engine, which `regex` cannot delegate to for patterns that need lookaround; see P6.
 P11 is done: `@file`, `~/.txt2htmlrc` and `./.txt2htmlrc` are read, with
 `file:line:` diagnostics. Phase 6 is **in progress**: the GUI/engine surface is
-frozen in `textrill-gui/SURFACE.md`. Open: the toolkit decision, which is now
-blocked on the fact that only Qt 5.15 is installed here while Flathub ships Qt 6.
+frozen in `textrill-gui/SURFACE.md`. The GUI toolkit is **decided: `egui`/`eframe`**
+(pure Rust). The earlier Qt 6 decision was abandoned after the spike: `cxx-qt`
+0.10 fails to compile any Rust QObject on this toolchain, and Qt's official
+`qtbridge` requires Qt 6.10 while this host has 6.4.2. The evidence and the
+packaging analysis are in `RUST-GUI-FINDINGS.md`. `SURFACE.md`'s widget mapping
+still needs to be revised from QtWidgets to egui; the behavioural contract is
+unchanged.
 P13 is answered: the deliverable is a single self-contained artifact, so the GUI
 is rewritten in Rust + Qt and **the engine is kept** — see P13 and Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
@@ -177,7 +182,7 @@ correct implementation instead of two.
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
 | P5 | **done** | the inherited `/|.../` hang: an empty-matching dictionary pattern spun the substitution loop forever, in the Perl original too. Rejected at load with a diagnostic, reusing the P4 channel. The criterion is `re.is_match("")` because `translate_pattern` turns `\b` into a zero-width lookaround alternation and a `*` glob is not empty-matching. `-o`/`-s` deliberately unguarded: they substitute once, Perl accepts them, and guarding them would be a Tier 1 divergence |
 | P13 | **decided** | single artifact. The GUI is rewritten off Python + PySide6; **the 5,644-line engine is kept**. P5, P6 and P11 are sequenced *ahead* of it. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6**. Delivery since refined: Flatpak, not a bundled binary, and the Qt assumption is open — see "Licensing and distribution" |
-| Phase 6 | **in progress** | the GUI rewrite: 1,365 lines of Python shell out, 32 tests ported as acceptance criteria. §6.3 step 1 done: surface frozen in `textrill-gui/SURFACE.md`. Step 2 done: `FileTests` moved to Rust, which required adding the engine's missing encoder (`src/encode.rs`) and fixed a UTF-16 decoder defect. Steps 3-5 (the shell itself) are **blocked on a toolkit that can be built and tested here**. CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Toolkit **decided: Qt 6**, matching the Flathub runtime; `qt6-base-dev` is in the Ubuntu 24.04 repos and the install list is in `textrill-gui/SURFACE.md` §5. Open: installing it, then §6.3 steps 3-5 |
+| Phase 6 | **in progress** | the GUI rewrite: 1,365 lines of Python shell out, 32 tests ported as acceptance criteria. §6.3 step 1 done: surface frozen in `textrill-gui/SURFACE.md`. Step 2 done: `FileTests` moved to Rust, which required adding the engine's missing encoder (`src/encode.rs`) and fixed a UTF-16 decoder defect. Steps 3-5 (the shell itself) are in progress. CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Toolkit **decided: `egui`/`eframe`** (pure Rust), after the Qt path was rejected — `cxx-qt` 0.10 does not compile Rust QObjects on this toolchain and `qtbridge` needs Qt 6.10 while the host has 6.4.2. Evidence and packaging analysis in `RUST-GUI-FINDINGS.md`. Open: revise `SURFACE.md`'s widget mapping from QtWidgets to egui, add the native GUI crate, then §6.3 steps 3-5 |
 | licensing | **decided** | engine and CLI stay **GPL-3.0-or-later**; GUI is **GPLv3**. BSD for the CLI was raised and declined as unnecessary — see "Licensing and distribution" |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
@@ -1988,19 +1993,28 @@ deliberately:
   `process_chunk` call is how the live preview works. Do not change that
   signature until the rewrite is done, or the port inherits a moving target.
 
-### 6.6 Open before Phase 6 starts
+### 6.6 Toolkit decision (closed 2026-10-02)
 
-The architecture is decided; the toolkit is not. Three questions remain, and none
-of them blocks P5–P11:
+All three questions below are now decided. The full evidence is in
+`RUST-GUI-FINDINGS.md`.
 
-1. **Qt6 or GTK4.** The only one still open. The plan above assumes **Qt6
-   Widgets**, being the closest match to PySide6 semantics and so the minimum
-   behavioural drift across the GUI tests. GTK4 changes the widget mapping and
-   nothing else. Flatpak removed the packaging cost that used to favour Qt.
+1. **Which toolkit.** Decided: **`egui`/`eframe`** (pure Rust, immediate mode,
+   0.36). Qt was tried and rejected on the spike, not on preference: `cxx-qt`
+   0.10 fails to compile any `extern "RustQt"` QObject on this toolchain
+   (it emits `include!(<QtCore/QObject>)`, which `syn` cannot parse), and
+   Qt's official `qtbridge` requires Qt 6.10 while this host ships 6.4.2.
+   Slint was the runner-up. `egui_kittest` provides AccessKit-based headless
+   widget queries, which is what the 32 acceptance tests need. Consequence:
+   `SURFACE.md`'s QtWidgets widget mapping is revised to egui; the behavioural
+   contract does not change.
 2. **Does the CLI stay?** Decided: yes, independently distributable. Nearly
    free once the engine is a library.
 3. **Replace or coexist during the port?** Decided: coexist until the ported
    suite passes, then replace. Coexisting is what makes §6.3 step 5 possible.
+
+A fifth sequencing constraint follows from the toolkit: the GUI must be its own
+crate, because `eframe`/`winit` dlopen GL and cannot be part of the CLI's static
+musl build.
 
 ## Licensing and distribution
 

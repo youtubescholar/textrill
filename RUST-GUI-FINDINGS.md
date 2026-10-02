@@ -1,0 +1,278 @@
+# Rust GUI toolkit findings and development sequencing
+
+Status: findings recorded 2026-10-02. Companion to
+`/home/vicpu/build/REMEDIATION-PLAN.md` and `/home/vicpu/build/TOOL-SURVEY.md`.
+
+This document exists because the Phase 6 native GUI rewrite stalled on a
+toolkit choice that looked settled. The cost was not the code — it was the
+assumption. The findings below are the ones we paid for, recorded so the next
+project does not pay for them again.
+
+## 1. TL;DR
+
+- **Decision: the Phase 6 GUI is written in Rust with `egui`/`eframe`.** The
+  toolkit is pure Rust, has first-class headless widget testing, and removes the
+  C++/MOC/`build.rs` surface entirely.
+- The earlier Qt 6 decision was correct *as a target* but the specific binding we
+  picked was not viable here. See §3.
+- **Sequencing rule: validate the GUI toolkit with a throwaway spike before
+  freezing any interface, and make the spike fail on the *integration* path (a
+  window that opens and a widget test that runs), not on a `cargo add`.**
+- **Keep the GUI a separate crate.** This protects the CLI's static/musl build
+  and keeps the engine dependency-clean.
+
+## 2. Environment this was tested on
+
+| Item | Value |
+|---|---|
+| OS | Ubuntu 24.04 |
+| Rust | 1.98.1 |
+| Qt (system) | 6.4.2 (`qt6-base-dev`, `qt6-declarative-dev`) |
+| Graphics | Mesa 25.2.8, software GL (llvmpipe), Vulkan loader + lavapipe (`libvulkan_lvp.so`) |
+| Display for smoke runs | `xvfb-run`, `QT_QPA_PLATFORM=offscreen` for Qt |
+
+## 3. What actually happened with Qt
+
+Qt 6 itself is installed and healthy. The problem is the Rust bindings.
+
+### 3.1 cxx-qt 0.10.0 is not usable in this configuration
+
+`cxx-qt` is the KDAB binding and the one the plan originally named. On the
+current toolchain (syn 2.0.119 / 3.0.6, cxx 1.0.202) a bridge module containing
+**any** `extern "RustQt"` QObject fails to compile. For example:
+
+```text
+error: expected one of `!`, `(`, `+`, `::`, `<`, `>`, or `as`, found `/`
+error: non-foreign item macro in foreign item position: include
+```
+
+Root cause: `cxx-qt-gen` emits `include !(< QtCore / QObject >);` into the
+generated Rust. `include!(<...>)` is accepted by **cxx's own parser**, but
+`#[cxx_qt::bridge]` first runs the input through `syn::ItemMod`, and `syn` cannot
+parse an angle-bracket path in macro position. The crate's own `test_inputs`
+exercise the generator `Parser` directly and bypass the macro, so the breakage
+is invisible to its test suite.
+
+Independent findings from the same spike:
+
+- `include!(<QtWidgets/QPushButton>)` **does not work** in
+  `#[cxx_qt::bridge]`; the string form `include!("QtWidgets/QPushButton")` is
+  required. (The angle form works only in a plain `#[cxx::bridge]`.)
+- Only **one `include!` per extern block** is accepted.
+- A `#[qobject]` type must be declared in exactly **one** block; declaring it in
+  both `C++` and `C++Qt` blocks errors with `defined multiple times`.
+- `impl cxx_qt::Constructor<()> for T` only applies to **Rust-defined** QObjects
+  (`extern "RustQt"`). Existing Qt classes such as `QPushButton` get **no
+  constructor** from Rust, so every widget class needs a hand-written C++
+  factory shim.
+- Static methods such as `QApplication::exec` cannot be expressed as free
+  functions in the block form tested.
+
+Upstream documentation also describes cxx-qt as "designed for teams already
+living in C++", and its README notes the API is pre-1.0 and changes frequently.
+It is a reasonable choice for embedding Rust in an existing C++ codebase; it is
+a poor fit for a Rust-first GUI.
+
+### 3.2 Qt Bridge for Rust (`qtbridge`) looks like the right Qt tool — but needs Qt 6.10+
+
+`qtbridge` 0.3.0 is Qt's official Rust bridge. Its API is the cleanest of any
+option examined:
+
+```rust
+QApp::new()
+    .register::<Backend>()
+    .load_qml(include_bytes!("qml/Main.qml"))
+    .run();
+```
+
+No `build.rs`, no hand-written C++. It is CXX-Qt-compatible and reuses
+cxx-qt-lib's basic types.
+
+**Blocker:** the upstream README states QtBridge currently requires **Qt 6.10 or
+higher**; Ubuntu 24.04 ships Qt 6.4.2. Qt 6.10 would have to be installed out of
+band (`aqtinstall`, ~2 GB) and Flathub runtimes do not ship it, which pushes the
+problem into packaging. This should be re-evaluated if the project ever moves to
+a distro or runtime with Qt ≥ 6.10.
+
+### 3.3 The other Qt-adjacent options
+
+- **`qmetaobject-rs`** — QML-only, and passively maintained; its author moved to
+  Slint and recommends it. Not suitable for a new project.
+- **`rust-qt` / generated bindings** — direct, unsafe, non-idiomatic, and not
+  maintained. Not considered.
+
+## 4. The pure-Rust options
+
+| Toolkit | Version | Model | Headless testing | Notes |
+|---|---|---|---|---|
+| `egui`/`eframe` | 0.36.2 | immediate mode | `egui_kittest` + `kittest` (AccessKit) | Chosen |
+| Slint | 1.18.1 | retained, declarative | `i-slint-backend-testing` | Runner-up |
+| `iced` | 0.14.0 | retained, Elm-style | weaker testing story | Not chosen |
+| `gtk4` | 0.11.5 | retained | manual / lower-level | Adds GTK system dep |
+
+### 4.1 Why egui/eframe was chosen
+
+1. **The GUI is a 54-option settings panel with a live preview and 32 acceptance
+   tests.** Testability dominates. `egui_kittest` exposes the widget tree through
+   AccessKit, so tests find controls by their visible label with no display:
+
+   ```rust
+   use egui_kittest::kittest::Queryable;
+   let harness = egui_kittest::Harness::new_ui(panel);
+   harness.get_by_label("Fancy headers");
+   harness.get_by_label("Encoding:");
+   ```
+
+   This was verified working headlessly on this machine.
+2. **It removes the entire C++/MOC/`build.rs` failure class**, which is exactly
+   where the previous weeks went.
+3. It is a consistent fit for a Rust-first rewrite and needs no Qt at all.
+4. Immediate mode is a good match for a form that re-renders on every option
+   change.
+
+### 4.2 Why Slint was the runner-up
+
+Slint is retained-mode and declarative, closer in spirit to QML, and is actively
+developed by the author of `qmetaobject-rs`. It is the better choice if the UI
+later needs complex custom widgets or animation. It was not chosen because the
+AccessKit-based `egui_kittest` harness is a more direct fit for the acceptance
+suite and because the immediate-mode model maps cleanly onto the existing
+"options panel emits settings, preview re-renders" contract.
+
+## 5. Dependency and packaging analysis
+
+### 5.1 Counts
+
+Measured with `cargo generate-lockfile` / `cargo tree` on 2026-10-02:
+
+| Configuration | Lock packages |
+|---|---|
+| `eframe` default (includes `wgpu` + `accesskit`) | 417 |
+| `eframe` with `glow` (OpenGL) + `accesskit` | 365 |
+| `eframe` with `glow`, **no** OS `accesskit` bridge | 298 |
+
+Observations:
+
+- The default `eframe` pulls **both** `wgpu` and `glow`; choosing one removes a
+  large subtree.
+- `egui` depends on `accesskit` for its own accessibility tree regardless of
+  features. The `accesskit` *feature* adds the OS bridge
+  (`accesskit_unix` → `atspi`/D-Bus, ~67 crates). Our acceptance tests do not
+  need the OS bridge, so it can be omitted and re-added if screen-reader support
+  becomes a requirement.
+- No OpenSSL, no Rustls, no GTK/GDK/WebKit, no async runtime (Tokio/async-std).
+  `atspi`/D-Bus appears only via the optional accessibility bridge.
+
+Recommended feature set:
+
+```toml
+[dependencies]
+egui = "0.36"
+eframe = { version = "0.36", default-features = false, features = [
+    "default_fonts", "glow", "wayland", "x11",
+] }
+
+[dev-dependencies]
+egui_kittest = "0.36"
+kittest = "0.3"
+```
+
+### 5.2 System libraries
+
+`ldd` on a built `eframe` binary shows **no non-trivial system libraries linked
+at build time** — only libc/libgcc/libm. `winit`, `glutin`, and `wgpu` load
+libGL/libEGL/libX11/libwayland-client/libxkbcommon/libvulkan dynamically at
+runtime.
+
+By design we use `glow` (OpenGL/EGL). It therefore needs a working GL stack:
+Mesa plus a software rasterizer (llvmpipe) where no GPU is present. Both were
+verified present here, and a windowed run under `xvfb-run` with
+`LIBGL_ALWAYS_SOFTWARE=1` stayed alive with no errors for the full test window.
+
+### 5.3 Flatpak / distro
+
+- `org.freedesktop.Platform` and the KDE/GNOME runtimes already carry Mesa and
+  the usual GL/EGL/Wayland/X11/xkbcommon libraries, so an `eframe` app needs no
+  unusual runtime extension. This is **simpler** than shipping Qt, because there
+  is no Qt version to match against the runtime.
+- `default_fonts` bundles fonts, so there is no runtime font dependency.
+- If the OS accessibility bridge is enabled later, Flatpak needs
+  `--talk-name=org.a11y.Bus`.
+- Distro packaging is equally straightforward: the binary's only hard runtime
+  requirement is a GL stack, which every desktop provides.
+
+### 5.4 musl and static builds
+
+`winit`/`glutin` depend on runtime `dlopen` of GL/Wayland/X11 libraries and are
+not a good candidate for a fully static musl binary. This is **not** a problem
+as long as the split is respected:
+
+- **CLI** → may continue to target `x86_64-unknown-linux-musl` (Phase 5 work).
+- **GUI** → a separate crate, built against glibc, shipped as a Flatpak or a
+  normal desktop package.
+
+Do **not** put `eframe` in the same crate/feature graph as the static CLI build.
+
+## 6. Verified facts (reproducible)
+
+The following were confirmed by running them, not by reading docs:
+
+1. `pkg-config --modversion Qt6Widgets Qt6Core Qt6Qml Qt6Quick Qt6QuickControls2`
+   all report `6.4.2`.
+2. `egui_kittest::Harness::new_ui` finds widgets by label headlessly
+   (AccessKit), with no display. Test passed.
+3. A minimal `eframe` app builds and runs under `xvfb-run` +
+   `LIBGL_ALWAYS_SOFTWARE=1`, surviving a 20-second window with an empty log.
+4. `eframe 0.36` changed the `App` trait: `fn update(...)` is gone; the required
+   method is `fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame)`,
+   with an optional `fn logic(...)`. Code samples from earlier versions will not
+   compile.
+5. `kittest` must match the version expected by `egui_kittest` (0.3 for
+   `egui_kittest` 0.36); a mismatched `kittest` fails with `method not found in
+   Node`.
+6. `cxx-qt` 0.10 exhibits the failures listed in §3.1.
+7. `qtbridge` 0.3.0 resolves on crates.io; its upstream README states a Qt 6.10+
+   requirement.
+
+## 7. How to sequence this better next time
+
+These are general, not egui-specific.
+
+1. **Spike the integration path, not the dependency.**
+   A successful `cargo add` proves nothing. The spike is only done when a window
+   opens and a widget test runs. Budget half a day for this *before* freezing an
+   interface such as `SURFACE.md`.
+2. **Verify the published crate version, not the documentation.**
+   cxx-qt's docs and generator tests described a syntax the released macro could
+   not compile. The README for `qtbridge` and the published `0.3.0` may also
+   differ; check the artifact.
+3. **Check the version of the system dependency against the binding's
+   requirement early.** `qtbridge` needed Qt 6.10; the OS has 6.4.2. Discover
+   that in hour one, not after committing to QML.
+4. **Prefer the tool whose test surface matches the deliverable.** For a form
+   with an acceptance suite, headless widget querying is worth more than a nicer
+   declarative language.
+5. **Keep the UI crate separate from the engine and CLI.** It isolates system
+   dependencies, protects static/musl builds, and keeps the engine testable
+   without a display.
+6. **Decide the boundary before porting, but expect to revise it once.**
+   `SURFACE.md` froze QtWidgets widget mappings before the toolkit was proven.
+   Freeze the *behaviour* (options, signals, threading contract) early; defer
+   the *widget mapping* until the toolkit spike passes.
+7. **Record the decision and its evidence in-repo** (this file, plus a line in
+   the plan) so the next contributor does not relitigate it from the docs.
+8. **Keep throwaway spikes out of the tree.** All work behind these findings
+   lived in `/tmp/opencode/`; the repository gained only documentation.
+
+## 8. Consequences for textrill Phase 6
+
+- Replace the QtWidgets widget mapping in `textrill-gui/SURFACE.md` with an
+  egui mapping. The frozen behavioural contract (option inventory, generation
+  counter, queue drop, max-two-workers, panic capture) is unchanged.
+- Add a native GUI crate that depends on `egui`/`eframe` and the engine crate
+  only. Keep the Python/PySide6 GUI and the `pyo3` layer until the native
+  acceptance suite passes.
+- Port the 32 acceptance tests onto `egui_kittest`/`kittest`, querying by label.
+- Keep the CLI's musl/static build path free of GUI dependencies.
+- The `qt6-base-dev` / `qt6-declarative-dev` packages are no longer required by
+  the project and can be removed from the build prerequisites.

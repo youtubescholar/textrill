@@ -57,15 +57,20 @@ Rust options panel cannot offer a value the engine rejects.** The range comes
 from the same table the engine validates against. The Python version had to be
 *trusted* to preserve that; the Rust version cannot break it.
 
-Kinds map to widgets:
+Kinds map to widgets. The toolkit is `egui`/`eframe` (see §5), so the mapping is
+egui, not QtWidgets:
 
-| kind | widget | count |
+| kind | egui widget | count |
 |---|---|---|
-| `bool` | checkbox, plus a `no_` negation path | 20 |
-| `int` | spin box, range from `numeric_range` | 11 |
-| `str` | line edit | 18 |
-| `str_array` | multi-line text, one entry per line | 4 |
-| `table_type` | four checkboxes, `align`/`pgsql`/`border`/`delim` | 1 |
+| `bool` | `egui::Checkbox`, plus a `no_` negation path | 20 |
+| `int` | `egui::DragValue` clamped to `numeric_range` | 11 |
+| `str` | `egui::TextEdit::singleline` | 18 |
+| `str_array` | `egui::TextEdit::multiline`, one entry per line | 4 |
+| `table_type` | four `egui::Checkbox`, `align`/`pgsql`/`border`/`delim` | 1 |
+
+The earlier revision of this file froze this table as QtWidgets before the
+toolkit spike. The behavioural content is unchanged; only the widget names moved.
+See `../RUST-GUI-FINDINGS.md`.
 
 ## 3. The concurrency contract — carried verbatim in intent
 
@@ -121,41 +126,26 @@ instead of silently transcoding it to UTF-8.
   without losing the round-trip guarantee, and §6.2's "duplicated rule" count
   should be read as including it. Two defects were found and fixed in the
   process — see the plan's §6.3 step 2.
-- **Toolkit: Qt 6, chosen, pending installation.** Only Qt **5.15** is installed on
-  this machine; Qt6 and GTK4 are both absent. The deliverable is a Flatpak, and
-  Flathub ships the **Qt 6** runtime (`org.kde.Platform` and
-  `org.freedesktop.Platform` both track Qt6), so building on Qt5 now would mean
-  porting the whole shell afterwards. Qt 6 is the target and `qt6-base-dev` 6.4.2
-  is in this machine's Ubuntu 24.04 repos.
+- **Toolkit: `egui`/`eframe` (pure Rust), decided 2026-10-02.** The earlier Qt 6
+  choice was abandoned on the spike, not on preference. `cxx-qt` 0.10 fails to
+  compile any `extern "RustQt"` QObject on this toolchain (it emits
+  `include!(<QtCore/QObject>)`, which `syn` cannot parse), and Qt's official
+  `qtbridge` requires Qt 6.10 while this host has 6.4.2. `egui_kittest` gives
+  AccessKit-based headless widget queries, which is what the 32 acceptance tests
+  need. Full evidence and the packaging analysis are in `../RUST-GUI-FINDINGS.md`.
 
-  The install, verified with `apt-get install --dry-run -s` — 48 packages, no
-  daemons restarted:
+  No extra apt packages are required for the GUI. The recommended Cargo feature
+  set is `egui` 0.36 + `eframe` 0.36 with `default-features = false, features =
+  ["default_fonts", "glow", "wayland", "x11"]`, and `egui_kittest` 0.36 +
+  `kittest` 0.3 as dev-dependencies. `glow` uses the system OpenGL/EGL stack
+  (Mesa, with llvmpipe for headless/CI); no non-trivial system library is linked
+  at build time.
 
-  ```
-  sudo apt-get install -y \
-      qt6-base-dev \
-      xvfb \
-      appstream-util \
-      flatpak \
-      flatpak-builder
-  ```
-
-  | package | why |
-  |---|---|
-  | `qt6-base-dev` | Qt6Core/Gui/Widgets **and** `libqt6test6t64`, so it covers both the app and the test harness. Also brings `qt6-qpa-plugins`, which carries the `offscreen` platform plugin the headless tests need. |
-  | `xvfb` | probably unnecessary — the suite selects `QT_QPA_PLATFORM=offscreen` before Qt starts, which is how the PySide tests run today. Kept as a fallback, since some drag-and-drop behaviour differs under `offscreen`. |
-  | `appstream-util` | validates the AppStream metadata a Flatpak needs, catching a malformed `.metainfo.xml` locally rather than at Flathub review. |
-  | `flatpak`, `flatpak-builder` | the packaging target, so a bundle can be built and run locally. |
-
-  Deliberately **not** included: `cargo-fuzz` and `heaptrack`. `make fuzz` is the
-  Python differential harness (`tests/corpus/fuzz.py`), not cargo-fuzz, so
-  cargo-fuzz is not on the path this project verifies with. `heaptrack` would have
-  helped P6, but the deterministic allocation budget in `tests/alloctest.rs`
-  already guards that and heap tracking is not machine-independent enough to be a
-  gate.
-
-  Rust-side bindings come from cargo, not apt: `cxx-qt` 0.10.0 resolves on
-  crates.io and the registry is reachable from here.
+  The `qt6-base-dev` / `qt6-declarative-dev` packages installed during the Qt
+  attempt are no longer required by the project. `xvfb`, `appstream-util`,
+  `flatpak` and `flatpak-builder` remain useful for the packaging target and for
+  a windowed smoke run under software GL (`xvfb-run env
+  LIBGL_ALWAYS_SOFTWARE=1 …`).
 
 ## 6. Test disposition (`test_gui.py`, 1123 lines)
 
