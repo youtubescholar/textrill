@@ -28,10 +28,16 @@ pub struct LinkRule {
     /// A literal that every match of `regex` must contain, when one could be
     /// proven. `None` means "no filter": the regex is always run.
     ///
-    /// Built from `regex.as_str()` rather than from `pattern`, so it describes
-    /// the regex that actually runs -- the translation in `translate_pattern`
-    /// rewrites classes and `\b`, and analysing the pre-translation text would
-    /// be analysing a different language.
+    /// Normally built from `regex.as_str()` -- the regex that actually runs --
+    /// because the translation in `translate_pattern` rewrites classes. But
+    /// that same translation rewrites `\b` and `$` into look-around, which
+    /// `regex-syntax` refuses to parse, so every pattern the dictionary wraps
+    /// in `\b` (`add_literal`, `add_glob`) would otherwise lose its filter and
+    /// run the backtracking VM on every paragraph. When the translated pattern
+    /// will not parse, the prefilter falls back to the original `pattern`
+    /// (see `add_rule`): translation only rewrites zero-width anchors and
+    /// escape classes, never a literal run, so a required literal proven there
+    /// is still required by the translated regex.
     ///
     /// Sound in one direction only: see [`crate::prefilter`]. A wrong literal
     /// here would silently drop links, which is why the extractor returns
@@ -433,7 +439,16 @@ impl LinkParser {
             }
         }
         let regex = compile_pattern(pattern, switches & LINK_NOCASE != 0);
-        let prefilter = crate::prefilter::required_literal(regex.as_str());
+        // Prefer the translated pattern (it is the regex that actually runs),
+        // but fall back to the original when translation made it unparsable.
+        // The translation turns `\b`/`\B`/`$` into look-around, which
+        // `regex-syntax` rejects, so without this fallback every `add_literal`
+        // and `add_glob` rule -- the whole `\b...\b` family -- silently gets
+        // no prefilter and pays for a backtracking `captures()` per paragraph.
+        // `prefilter`'s module docs argue why a literal required by the
+        // original is still required by the translated regex.
+        let prefilter = crate::prefilter::required_literal(regex.as_str())
+            .or_else(|| crate::prefilter::required_literal(pattern));
         self.rules.push(LinkRule {
             label: label.to_string(),
             switches,

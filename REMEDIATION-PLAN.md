@@ -4,14 +4,17 @@ Status: **in progress**, 2026-10-01; Phase 6 updated 2026-10-03. Covers
 `textrill` (Rust engine + CLI) and `textrill-gui-rs` (native `egui` front end).
 The Python bindings and the PySide6 front end are retired to `legacy-archive/`.
 
-**Progress is recorded in §0.1 below. Done: P1–P5, P8–P10, P12, P14–P19, P21–P23,
-E1–E3, A1, A1b, A2–A10. P6 is **not met**: the two prescribed fixes are worth ~0% of
-wall-clock, and the sound required-literal prefilter that followed them only buys
-another 5–15% of the link pass. The residual gap is `fancy_regex`'s backtracking
-engine, which `regex` cannot delegate to for patterns that need lookaround; see P6.
+**Progress is recorded in §0.1 below. Done: P1–P6, P8–P10, P12, P14–P19, P21–P23,
+E1–E3, A1, A1b, A2–A10. P6's gap was not the two prescribed fixes (worth ~0%): it
+was a prefilter that silently did nothing for every `\b`-wrapped dictionary
+rule, because the translated pattern carries look-around that `regex-syntax`
+refuses to parse, so no literal was proven and `fancy_regex`'s backtracking VM
+ran on every paragraph. Deriving those literals from the original pattern
+recovers all 9 missing rules and makes the link pass ~3× faster, putting Rust
+ahead of Perl on the link-dense benchmark; see P6.
 P11 is done: `@file`, `~/.txt2htmlrc` and `./.txt2htmlrc` are read, with
 `file:line:` diagnostics. Phase 6's GUI is **done**: the native `egui`/`eframe` crate `textrill-gui-rs`
-passes its ported 60-test suite and ran side by side with the Python front end on
+passes its ported 74-test suite and ran side by side with the Python front end on
 2026-10-03; the Python/PySide6 front end and the pyo3 bindings it needed are
 retired to `legacy-archive/`. The toolkit evidence and packaging analysis are in
 `RUST-GUI-FINDINGS.md`; the earlier Qt 6 decision was abandoned after the spike
@@ -25,7 +28,7 @@ Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
 finished: all four defects it found are fixed, the panic divergence it surfaced
 (P22) is closed, and P20's alignment guard is in. What remains is the ordinary
-backlog, P6's performance gap, and packaging.
+backlog and packaging; P6's performance gap is closed (see P6).
 
 > **Read Phase 0b before trusting any result in this document.** Checks in
 > `make verify` were found on 2026-10-01 to be structurally incapable of reporting
@@ -109,7 +112,7 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 | Check | Result |
 |---|---|
 | `cargo test --release` ✓ | **52/52** pass (14 lib, 4 optionstest, 13 cliexit, 5 linktest, 9 paratest, 4 alloctest, 3 doc) — was 33/33 |
-| GUI (Python/PySide6, offscreen) | **58** tests, 1 skipped — was recorded as 46/46; the suite had grown. Retired 2026-10-03, superseded by the 60-test native suite (`textrill-gui-rs`) |
+| GUI (Python/PySide6, offscreen) | **58** tests, 1 skipped — was recorded as 46/46; the suite had grown. Retired 2026-10-03, superseded by the 74-test native suite (`textrill-gui-rs`) |
 | corpus, clean `RUNDIR` ✓ | **48/48**, 33/33 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15. The 48th is `pre_explicit`, which existed in the tree but never ran: `pre_explicit_blank` was declared twice, so A1's case was shadowed and its own assertions were dead (P21) |
 | `proptest.py` ✓ | OK — **0 known-open checks**. It used to report 30, all owned by A8, printed rather than silenced; A8 is fixed and the list is empty. Verified to return 1 on failure |
 | `alloctest` ✓ | 4/4, at any `--test-threads` (see P12) |
@@ -184,6 +187,7 @@ correct implementation instead of two.
 | fuzzer cleanup | **done** | removed `KNOWN_DIVERGENCES` and ~90 lines of matching machinery, plus a dead `PERL_DRIVER`. The "reference refused" skip turned out to be a real false green and is gone |
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
 | P5 | **done** | the inherited `/|.../` hang: an empty-matching dictionary pattern spun the substitution loop forever, in the Perl original too. Rejected at load with a diagnostic, reusing the P4 channel. The criterion is `re.is_match("")` because `translate_pattern` turns `\b` into a zero-width lookaround alternation and a `*` glob is not empty-matching. `-o`/`-s` deliberately unguarded: they substitute once, Perl accepts them, and guarding them would be a Tier 1 divergence |
+| P6 | **done** | the link pass was ~2× slower than Perl; the two prescribed fixes were worth ~0% and the prefilter only reached rules already delegating to the linear `regex` engine. The nine rules with no literal were the `\b`-wrapped family: `translate_pattern` turns `\b` into look-around, `regex-syntax` will not parse that, so `required_literal` returned `None` and their literal/`captures()` ran on every paragraph. `add_rule` now falls back to the original pattern (sound: translation rewrites only zero-width anchors and escape classes), recovering all 9. Link-dense 2 MB × 9 901 paras: 3.75 s → 1.27 s (2.95×), byte-identical; Perl 1.96 s, so Rust is ~1.5× faster, from ~1.9× slower |
 | P13 | **decided** | single artifact. The GUI is rewritten off Python + PySide6; **the 5,644-line engine is kept**. P5, P6 and P11 are sequenced *ahead* of it. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6**. Delivery since refined: Flatpak, not a bundled binary, and the Qt assumption is open — see "Licensing and distribution" |
 | Phase 6 | **in progress** | the GUI rewrite: 1,365 lines of Python shell out, 32 tests ported as acceptance criteria. §6.3 step 1 done: surface frozen in `textrill-gui/SURFACE.md`. Step 2 done: `FileTests` moved to Rust, which required adding the engine's missing encoder (`src/encode.rs`) and fixed a UTF-16 decoder defect. Steps 3-5 (the shell itself) are done: the native crate `textrill-gui-rs` is in, with the `cli::SPECS`-generated options panel, `worker.py`'s concurrency contract, the document/file/settings model, the full chrome, the unsaved-changes prompt, native file choosers and `app.py`'s command line all ported, plus window geometry/state persistence. The 32 acceptance criteria are covered by the native suite (74 tests). CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Toolkit **decided: `egui`/`eframe`** (pure Rust), after the Qt path was rejected — `cxx-qt` 0.10 does not compile Rust QObjects on this toolchain and `qtbridge` needs Qt 6.10 while the host has 6.4.2. Evidence and packaging analysis in `RUST-GUI-FINDINGS.md`. Step 5 done 2026-10-03: a side-by-side differential run — Python suite 58 tests (1 skipped) against native 60/60, both GUIs launched under Xvfb on the same fixtures, and a 10-encoding file-layer differential that decoded, detected and round-tripped byte-identically. The Python GUI and the pyo3 bindings are retired to `legacy-archive/`; `make gui` and the CI `gui` job are removed |
 | licensing | **decided** | engine and CLI stay **GPL-3.0-or-later**; GUI is **GPLv3**. BSD for the CLI was raised and declined as unnecessary — see "Licensing and distribution" |
@@ -1297,7 +1301,7 @@ could have covered it.
 
 ## Phase 2 — Performance
 
-### P6. The port is ~2x slower than the Perl it replaces — **fixes landed, goal NOT met**
+### P6. The port is ~2x slower than the Perl it replaces — **done: the prefilter was silently off for `\b` rules**
 
 2 MB link-dense document, release build: Rust 2.87 s, Perl 1.47 s. The original
 figure could not be reproduced from the tree — the 2 MB fixture was not kept, and
@@ -1417,10 +1421,58 @@ One implementation note that cost a measurement: the first version used a naive
 searched with `memchr::memmem::Finder`s built once at dictionary-load time;
 that turned a regression into the table above.
 
-Practical impact meanwhile: the GUI's 300 ms debounce
-(`mainwindow.py:41`) is exceeded past roughly 180 KB, so live preview stalls on
-moderate documents. Consider raising `AUTO_CONVERT_DELAY` for large inputs, or
-converting only the visible region, until Phase 2 lands.
+**Follow-up, 2026-10-03: the prefilter was not running at all for the `\b`
+family, and that was the real gap.** The conclusion above blamed `fancy_regex`'s
+backtracking engine for the nine rules with no literal. That blamed the wrong
+thing: the reason those nine had no literal was mechanical. `translate_pattern`
+rewrites `\b`/`\B` into look-around, and `\b`-wrapped patterns are exactly what
+`add_literal` and `glob2regexp` emit, so `regex-syntax::parse` failed on the
+translated pattern and `required_literal` returned `None` for the *whole* family
+-- all six `\b<literal>\b` entries plus the two `[[:alpha:]]` host rules. The
+`(?i)` rules failed for a second reason: under a case-insensitive flag
+`regex-syntax` folds a literal like `RFC` into a class, which proves nothing.
+Either way the extractor gave up, and every paragraph paid for a backtracking
+`captures()` on rules whose literal is almost never present. That is why the
+earlier prefilter only bought 5–15%: it was filtering the rules that were
+*already* delegating to the linear `regex` engine, and doing nothing for the
+rules that were not.
+
+`add_rule` now falls back to the **original** pattern when the translated one
+will not parse. That is sound for the same one-directional reason the whole
+module is: translation only rewrites zero-width anchors and escape classes,
+never a literal run, so a literal proven from the original is still required by
+the translated regex, and both sides are lowercased, so the fallback can only
+accept more often. `prefilter_rejection_implies_no_match_for_shipped_rules`
+runs the exact production `may_match` path against a battery of haystacks for
+every shipped rule; `the_shipped_dictionary_is_fully_prefiltered` pins coverage
+at 52/52 (it was 43/52).
+
+Measured on a reproducible 2 MB link-dense document -- the 200-byte unit
+`See http://example.com/path?q=1 and mail foo@bar.example and news
+comp.lang.rust plus www.example.org/foo and ftp.host.example/pub for more. Also
+visit <http://site.example/x> or alt.test.example today.` repeated with a blank
+line after each repetition (9 901 paragraphs) -- release build, min of runs:
+
+| build | link-dense 2 MB, 9 901 paras | Perl |
+|---|---|---|
+| prefilter fallback off | 3.75 s | 1.96 s |
+| prefilter fallback on | **1.27 s** | 1.96 s |
+
+That is **2.95×** from this change alone, byte-identical to Perl, and it moves
+Rust from ~1.9× slower than Perl to ~1.5× *faster*. On a single huge paragraph
+(Rust 11.1 s, Perl 23.4 s) both implementations are dominated by the O(n²)
+paragraph rewrite and the fallback is worth ~1%, so no measured input class is
+still slower than the reference. **P6's goal is met.** The residual cost is
+still `fancy_regex`'s backtracking VM whenever a `\b` rule's literal *is*
+present, but that is now the rare case the prefilter cannot avoid, not every
+paragraph.
+
+Practical impact: the ~3× link-pass improvement pushes the point at which the
+GUI's 300 ms debounce (`AUTO_CONVERT_DELAY`) is exceeded well past the ~180 KB
+first measured (not re-measured here). The single giant-paragraph case is still
+O(n²) in the paragraph rewrite, so live preview on one huge paragraph remains
+the thing to fix next if it matters; on ordinary multi-paragraph documents the
+fallback removes the stall.
 
 ## Phase 3 — Encoding policy
 

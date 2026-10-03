@@ -506,10 +506,16 @@ fn prefilter_sees_literals_introduced_by_earlier_rules() {
 }
 
 /// Prefilter coverage is a real number in the plan, so it is asserted rather
-/// than asserted-in-prose. If the extractor regresses and stops finding
-/// literals, the plan's performance table stops describing this build.
+/// than asserted-in-prose. Every shipped rule now yields a required literal.
+///
+/// The nine that used to be unfiltered are the `\b...\b` family and RFC:
+/// translation rewrites `\b` into look-around (which `regex-syntax` refuses to
+/// parse) and `(?i)` folds a literal into a class, so the translated pattern
+/// proves nothing. `add_rule` falls back to the original pattern for those,
+/// and this pins the pathological case: a `\b`-wrapped literal that regains no
+/// filter would send `fancy_regex`'s backtracking VM over every paragraph.
 #[test]
-fn the_shipped_dictionary_is_mostly_prefiltered() {
+fn the_shipped_dictionary_is_fully_prefiltered() {
     let opts = Options::default();
     let parser = links::load_links(&opts);
     let filtered = parser
@@ -523,12 +529,64 @@ fn the_shipped_dictionary_is_mostly_prefiltered() {
     );
     assert_eq!(
         filtered,
-        parser.rules.len() - 9,
-        "prefilter coverage changed; update the REMEDIATION plan figure"
+        parser.rules.len(),
+        "prefilter coverage dropped; the `\\b` fallback in add_rule is not working"
     );
     assert!(
         parser.rejected_patterns.is_empty(),
         "dictionary patterns were rejected at load: {:?}",
         parser.rejected_patterns
     );
+}
+
+/// The exact production path, exercised directly: whenever `may_match` rejects
+/// a haystack, the compiled rule really cannot match it. This is the property
+/// that makes skipping sound (see `prefilter`), and the fallback in `add_rule`
+/// is only safe because it holds for the original-derived literals too.
+#[test]
+fn prefilter_rejection_implies_no_match_for_shipped_rules() {
+    let opts = Options::default();
+    let parser = links::load_links(&opts);
+    // Haystacks chosen to hit the fallback rules (`txt2html`, `Seth Golub`,
+    // `RFC`), the case-insensitive rules, and near-misses for both.
+    let haystacks = [
+        "",
+        "a b c",
+        "plain words only",
+        "txt2html",
+        "TXT2HTML",
+        "the txt2html manual",
+        "Seth Golub",
+        "seth golub",
+        "Seth  Golub",
+        "RFC 1234",
+        "rfc1234",
+        "xRFC 12",
+        "http://example.com/a?b=c",
+        "HTTPS://EXAMPLE.ORG",
+        "foo@bar.example",
+        "ftp.example.com/pub",
+        "www.example.org/foo",
+        "comp.lang.perl.misc",
+        "alt.test",
+        "192.168.0.1 counter",
+        "<URL:http://x:label>",
+        "<http://site.example/x>",
+        "&lt;URL:http://x:label&gt;",
+        "HTML::TextToHTML",
+        "hypertoc",
+    ];
+    for (i, rule) in parser.rules.iter().enumerate() {
+        for hay in haystacks {
+            let mut folded = hay.as_bytes().to_vec();
+            folded.make_ascii_lowercase();
+            if !rule.may_match(&folded) {
+                assert!(
+                    rule.regex.captures(hay).ok().flatten().is_none(),
+                    "rule #{i} ({}) prefilter rejected {hay:?} but the regex matches",
+                    rule.pattern
+                );
+            }
+        }
+    }
 }
