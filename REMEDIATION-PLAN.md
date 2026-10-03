@@ -127,7 +127,7 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 | upstream Perl `t/*.t` ✓ | **102/102** assertions pass, 7 functional files (5 release-only files skipped) — the canary for P1 |
 | differential fuzz ✓ | **16 000 cases** (8 seeds × 2 000), **16 000 compared**, 0 mismatches, 0 skipped, 0 timeouts — 5m30s wall / 39m18s CPU, concurrent (P19). Replaces the void figure of P18 |
 | `make verify` end-to-end ✓ | **OK** — first complete green in the project, on a harness whose failure modes are demonstrated (P19, P21, P23) |
-| GitHub Actions CI ✓ | **`.github/workflows/ci.yml`**, 3 jobs on every push (P8). Every failure class observed red locally before the workflow was trusted: clippy, corpus, goldens, fuzz, and a stale `MINE` |
+| GitHub Actions CI ✓ | **`.github/workflows/ci.yml`**, 3 jobs on every push (P8): `rust` (fmt, clippy, engine + native GUI tests), `differential` (corpus, goldens, fuzz, upstream canary), and `musl` (static CLI, run through the corpus). Every failure class observed red locally before the workflow was trusted: clippy, corpus, goldens, fuzz, and a stale `MINE` |
 | invalid user regexp ✓ | **clean error, exit 1, no output written** (P22) — was a Rust panic and exit 101. Tier 2 divergence, deliberate |
 | speed, `big_para` 1.1 MB ✓ | Rust **0.37 s** vs Perl **0.18 s** (~2.1x slower) |
 | speed, `big_para_crlf` 0.8 MB ✓ | Rust **0.37 s** vs Perl **0.41 s** — the port is *faster* here |
@@ -274,8 +274,10 @@ Recommended order from here — **every item below is now done**:
    unreachable for its entire existence.
 
 What actually remains is not a defect: **packaging** (the Flatpak manifest is
-decided but not yet written) and the **musl CI build**, plus the deferred
-**Phase 5** opt-in features. See "What remains" near the top and Phase 5.
+decided but not yet written) and the deferred **Phase 5** opt-in features. The
+**musl CI build** landed 2026-10-03 — a static `x86_64-unknown-linux-musl`
+binary, run through the differential corpus in CI (`make musl`, `make
+corpus-musl`). See "What remains" near the top and Phase 5.
 
 Two lessons worth carrying to the next item, because both cost time here: a
 micro-benchmark of a helper API is not evidence about the tool's exposure to
@@ -2165,9 +2167,11 @@ not a detour around it. GPL-3.0-or-later is what gets a distro to own the packag
 
 **Cross-distro status.** No code here assumes systemd, D-Bus or XDG paths, so
 non-systemd systems are unaffected; Flatpak itself does not require systemd at
-run time. The CLI is a plain Rust binary with no init-system dependency. CI is
-`ubuntu-latest` only, which is the one real gap — see the musl note in the
-sequencing notes.
+run time. The CLI is a plain Rust binary with no init-system dependency, and as
+of 2026-10-03 CI builds it statically for `x86_64-unknown-linux-musl` and runs
+the differential corpus against that binary, so the Alpine claim is exercised
+rather than asserted. The CI *runner* is still `ubuntu-latest` only; only the
+compiled binary targets musl.
 
 - P1 and P2 gate everything. Nothing else can be trusted until they land.
 - P4 is done (as part of P22), so this ordering note is spent: it was
@@ -2177,11 +2181,14 @@ sequencing notes.
   so it is clear what actually helped.
 - P7.1 and P7.2 (tests and docs) are cheap and should land with Phase 0; P7.3-5
   are the real design work.
-- Add a **musl** build to CI (`cargo build --target x86_64-unknown-linux-musl`)
-  when P6 lands. Alpine is the one platform with real technical risk, since
-  glibc-linked binaries do not run there, and the engine needs nothing from
-  glibc. While the output is claimed byte-identical on every platform, building
-  on musl is the cheapest way to keep that claim honest.
+- **musl build** — done 2026-10-03. CI's `musl` job builds
+  `x86_64-unknown-linux-musl` (`make musl`), asserts the result is static, and
+  runs the differential corpus against it (`make corpus-musl`): 59/59 and 33/33
+  byte-identical, so the static binary is verified, not merely built. Alpine is
+  the one platform with real technical risk — glibc-linked binaries do not run
+  there and the engine needs nothing from glibc — and this is the cheapest way
+  to keep the byte-identical claim honest. The target is self-contained, so no
+  `musl-gcc` is needed for this crate's no-C-dependency tree.
 - P11 is independent of all of the above and can land any time; it is the only
   item in the plan that restores lost compatibility rather than fixing a defect,
   so it is the safest thing to hand to a new contributor.

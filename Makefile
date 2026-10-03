@@ -44,7 +44,7 @@ FUZZ_JOBS ?= 8
 # other's evidence -- see fuzz.py --fail-dir.
 FUZZ_FAILDIR ?= $(RS)/tests/corpus/fuzz-fail
 
-.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale clean
+.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale musl corpus-musl clean
 
 all: verify
 
@@ -56,6 +56,35 @@ verify: fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz
 
 build:
 	cd $(RS) && $(CARGO) build --release
+
+# --- static musl build -------------------------------------------------------
+
+# The CLI's distribution claim is a single static binary that runs on any Linux,
+# including Alpine and other musl distros where a glibc build does not. That
+# claim is only as good as a target that actually builds it -- and a target that
+# builds but silently produces different bytes would look green. So `musl`
+# builds and asserts the result really is static; `corpus-musl` then runs the
+# differential gate against the static binary. `rustup target add
+# $(MUSL_TARGET)` is the only prerequisite: this crate has no C dependencies, so
+# the target's self-contained musl links it without musl-gcc.
+#
+# Deliberately not part of `verify`: most dev machines have no musl target
+# installed, and a gate that fails for a missing toolchain rather than a defect
+# is the kind people learn to skip. CI runs it (`.github/workflows/ci.yml`).
+MUSL_TARGET ?= x86_64-unknown-linux-musl
+MUSL_BIN    := $(RS)/target/$(MUSL_TARGET)/release/textrill
+
+musl:
+	cd $(RS) && $(CARGO) build --release --target $(MUSL_TARGET)
+	@file "$(MUSL_BIN)" | grep -q 'static' \
+	  || { echo "ERROR: $(MUSL_BIN) is not a static binary" >&2; exit 1; }
+
+# MINE is passed on the command line, not exported, so it overrides the glibc
+# path this Makefile exports above. The warning in run.sh about MINE being older
+# than the sources cannot fire here: `musl` depends on nothing stale because it
+# is a phony rebuild, and the static target's sources are the same files.
+corpus-musl: musl
+	cd $(RS) && MINE=$(MUSL_BIN) ./tests/corpus/run.sh
 
 # --- rust --------------------------------------------------------------------
 

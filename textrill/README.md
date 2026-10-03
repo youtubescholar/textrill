@@ -23,13 +23,15 @@ What is **done**:
 - The conversion engine is byte-verified against the Perl original across a
   differential corpus of 59 cases and 33 upstream golden files.
 - 164 Rust tests, a fuzzer, and a 74-test native GUI suite.
+- The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
+  runs the differential corpus against that binary, so it runs on Alpine and
+  other glibc-less distros with the same output as the reference.
 - Encoding detection was reworked: BOM → UTF-16 evidence → UTF-8 → CP1252, with
   explicit overrides for the encodings that cannot be detected.
 
 What is **not** done yet:
 
 - No Flatpak, no distro packaging yet.
-- The `x86_64-unknown-linux-musl` build is not exercised in CI.
 
 The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`; the
 earlier Python/PySide6 front end is retired and archived under `legacy-archive/`.

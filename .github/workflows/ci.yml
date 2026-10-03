@@ -148,3 +148,47 @@ jobs:
           PERL5LIB: ${{ github.workspace }}/ref/stubs:${{ github.workspace }}/ref/txt2html-3.0/lib
         run: prove t/
 
+  # The distribution binary. The CLI ships as one static musl executable so it
+  # runs on Alpine and other distros without glibc. Building it is the only
+  # thing that keeps that claim true, and running the differential corpus
+  # against the result is the part that matters: a build-only check would pass
+  # on a musl target whose output differed from the glibc one, which is exactly
+  # the class of silent divergence the rest of this file exists to catch. The
+  # target is self-contained, so no musl-gcc is needed for this crate.
+  musl:
+    name: musl (static CLI, differential)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain and the musl target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update && sudo apt-get install -y perl
+          rustc --version
+          cargo --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            textrill/target
+          key: ${{ runner.os }}-cargo-musl-${{ hashFiles('textrill/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-musl-
+
+      # Builds and asserts the binary is static; see the target's comment.
+      - name: Build the static binary
+        run: make musl
+
+      - name: Materialise the reference
+        run: make ref
+
+      - name: Differential corpus against the static binary
+        env:
+          RUNDIR: ${{ runner.temp }}/textrill-corpus-musl
+        run: make corpus-musl
+
