@@ -18,7 +18,7 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use textrill::options::Options;
 use textrill_gui::options_panel::OptionsPanel;
-use textrill_gui::{Chooser, SaveAnswer, TextrillApp};
+use textrill_gui::{Chooser, SaveAnswer, Settings, TextrillApp};
 
 /// A chooser that answers `None`, as if the user closed the dialog.
 struct CancellingChooser;
@@ -265,6 +265,90 @@ fn the_display_controls_are_exposed() {
         harness.ctx.zoom_factor() > 1.0,
         "the Zoom in button did not scale the UI"
     );
+}
+
+/// At a narrow width the toolbar folds instead of running off the edge, so no
+/// control becomes clipped and unreachable. This is the reflow half of the
+/// promise that the UI stays usable at 200% zoom (WCAG 1.4.10).
+#[test]
+fn the_toolbar_reflows_at_a_narrow_width() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.set_size(egui::vec2(360.0, 640.0));
+    harness.run();
+
+    for label in [
+        "New",
+        "Save",
+        "Example",
+        "Convert",
+        "Show options",
+        "Zoom out",
+        "Zoom in",
+        "Reset zoom",
+    ] {
+        harness.get_by_label(label);
+    }
+}
+
+/// The escape hatch is always in the menu, so a window size or zoom the user
+/// does not want is one action away from the default.
+#[test]
+fn the_reset_geometry_command_is_in_the_view_menu() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.run();
+
+    harness.get_by_label("View").click();
+    harness.run();
+    harness.get_by_label("Reset window size and zoom");
+}
+
+/// The same escape hatch has a keyboard route, so it still works when the menu
+/// bar itself has been folded off the edge by a high zoom.
+#[test]
+fn the_reset_geometry_shortcut_works() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!(
+        "textrill-reset-{}-{nanos}.conf",
+        std::process::id()
+    ));
+
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.window_size = [1200.0, 900.0];
+    app.window_maximized = true;
+    app.zoom = 2.0;
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    harness.key_press_modifiers(
+        egui::Modifiers {
+            command: true,
+            alt: true,
+            ..egui::Modifiers::NONE
+        },
+        egui::Key::Num0,
+    );
+    harness.run();
+
+    assert_eq!(harness.ctx.zoom_factor(), 1.0, "zoom was not reset");
+    assert!(
+        !harness.state().window_maximized,
+        "maximized was not cleared"
+    );
+    assert_eq!(
+        Settings::with_path(&path).zoom(),
+        None,
+        "the stored geometry was not cleared"
+    );
+    let _ = std::fs::remove_file(&path);
 }
 
 // --------------------------------------------------------- unsaved changes

@@ -14,11 +14,13 @@
 //! the Python one -- and a hand-edited `auto=true` keeps working, which is what
 //! `test_auto_convert_setting_survives_a_hand_edited_config` pins.
 //!
-//! Two keys are modelled: the `auto` flag and the `options` JSON blob the
-//! Python window stored with `json.dumps`. Values are escaped the way
-//! `QSettings` escaped them, so the same file round-trips between the two front
-//! ends. The write path rewrites the whole `[General]` section, which is what
-//! `QSettings` did too.
+//! The `auto` flag and the `options` JSON blob the Python window stored with
+//! `json.dumps` are modelled, as is the native window's geometry under the keys
+//! `window-size`, `maximized` and `zoom` (see [`crate::window_state`] for why
+//! no position is stored). Values are escaped the way `QSettings` escaped them,
+//! so the same file round-trips between the two front ends. The write path
+//! rewrites the whole `[General]` section, which is what `QSettings` did too,
+//! and does so atomically so a crash mid-write cannot corrupt it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -97,6 +99,57 @@ impl Settings {
         self.set("options", json)
     }
 
+    /// The saved normal window size, clamped; `None` when unset or unreadable.
+    ///
+    /// Size is stored in points before zoom, which is the value
+    /// `ViewportBuilder::with_inner_size` takes on the next launch.
+    pub fn window_size(&self) -> Option<[f32; 2]> {
+        self.get("window-size")
+            .and_then(crate::window_state::parse_size)
+    }
+
+    /// Whether the window was maximized when it was last closed.
+    pub fn maximized(&self) -> Option<bool> {
+        self.get("maximized").map(parse_bool)
+    }
+
+    /// The saved zoom factor, clamped; `None` when unset or unreadable.
+    pub fn zoom(&self) -> Option<f32> {
+        self.get("zoom").and_then(crate::window_state::parse_zoom)
+    }
+
+    /// Persist the whole geometry in a single atomic write: the normal size,
+    /// whether the window was maximized, and the zoom. Position is deliberately
+    /// absent; see [`crate::window_state`].
+    pub fn set_window_state(
+        &mut self,
+        size: [f32; 2],
+        maximized: bool,
+        zoom: f32,
+    ) -> Result<(), String> {
+        self.values.insert(
+            "window-size".to_string(),
+            crate::window_state::format_size(size),
+        );
+        self.values.insert(
+            "maximized".to_string(),
+            if maximized { "true" } else { "false" }.to_string(),
+        );
+        self.values.insert(
+            "zoom".to_string(),
+            format!("{:.3}", crate::window_state::clamp_zoom(zoom)),
+        );
+        self.write()
+    }
+
+    /// Forget the stored geometry, leaving every other key alone.
+    pub fn clear_window_state(&mut self) -> Result<(), String> {
+        self.values.remove("window-size");
+        self.values.remove("maximized");
+        self.values.remove("zoom");
+        self.write()
+    }
+
     /// Remove `key` and write the file immediately.
     pub fn remove(&mut self, key: &str) -> Result<(), String> {
         self.values.remove(key);
@@ -136,6 +189,10 @@ impl Settings {
     /// Values are escaped the way `QSettings` escapes them, so the option blob
     /// (`{...}` with `"`, `,` and `=`) comes out quoted and a hand-written file
     /// keeps working.
+    ///
+    /// The bytes go to a sibling temporary file that is then renamed over the
+    /// real one. A rename is atomic, so a crash (or a second instance) can never
+    /// leave a truncated file that fails to parse on the next launch.
     fn write(&self) -> Result<(), String> {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -147,7 +204,14 @@ impl Settings {
             out.push_str(&escape_ini(value));
             out.push('\n');
         }
-        std::fs::write(&self.path, out).map_err(|e| format!("{}: {e}", self.path.display()))
+        let mut temporary = self.path.clone().into_os_string();
+        temporary.push(".tmp");
+        let temporary = PathBuf::from(temporary);
+        std::fs::write(&temporary, out).map_err(|e| format!("{}: {e}", temporary.display()))?;
+        std::fs::rename(&temporary, &self.path).map_err(|e| {
+            let _ = std::fs::remove_file(&temporary);
+            format!("{}: {e}", self.path.display())
+        })
     }
 }
 

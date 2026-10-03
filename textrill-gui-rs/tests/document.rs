@@ -340,6 +340,132 @@ options="{\"hrule_min\": 5, \"title\": \"caf\u00e9\", \"demoronize\": false, \"i
     assert!(!app.opts.table_type.align);
 }
 
+// ----------------------------------------------------------- window geometry
+
+#[test]
+fn window_geometry_round_trips_through_the_file() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+
+    let mut settings = Settings::with_path(&path);
+    assert_eq!(settings.window_size(), None, "no file means no size yet");
+    settings
+        .set_window_state([800.0, 600.0], true, 1.5)
+        .expect("store");
+
+    let reopened = Settings::with_path(&path);
+    assert_eq!(reopened.window_size(), Some([800.0, 600.0]));
+    assert_eq!(reopened.maximized(), Some(true));
+    assert_eq!(reopened.zoom(), Some(1.5));
+}
+
+#[test]
+fn a_corrupt_geometry_is_ignored_not_trusted() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    std::fs::write(
+        &path,
+        "[General]\nwindow-size=wide\nmaximized=maybe\nzoom=lots\n",
+    )
+    .expect("write config");
+
+    let settings = Settings::with_path(&path);
+    assert_eq!(
+        settings.window_size(),
+        None,
+        "an unreadable size falls back"
+    );
+    assert_eq!(settings.zoom(), None, "an unreadable zoom falls back");
+    // `maximized` is a bool, so an unrecognised spelling simply reads as false.
+    assert_eq!(settings.maximized(), Some(false));
+    assert_eq!(
+        settings
+            .window_size()
+            .unwrap_or(textrill_gui::window_state::DEFAULT_SIZE),
+        textrill_gui::window_state::DEFAULT_SIZE,
+        "the caller's fallback is the default size"
+    );
+}
+
+#[test]
+fn a_stored_size_is_clamped_so_a_bad_file_cannot_strand_the_window() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    std::fs::write(&path, "[General]\nwindow-size=10x10\n").expect("write config");
+    assert_eq!(
+        Settings::with_path(&path).window_size(),
+        Some(textrill_gui::window_state::MIN_SIZE)
+    );
+}
+
+#[test]
+fn the_window_state_is_written_atomically() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    let mut settings = Settings::with_path(&path);
+    settings
+        .set_window_state([800.0, 600.0], false, 2.0)
+        .expect("store");
+
+    let leftovers: Vec<String> = std::fs::read_dir(dir.path())
+        .expect("read dir")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name.contains("tmp"))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "a temporary file was left behind: {leftovers:?}"
+    );
+}
+
+#[test]
+fn the_app_remembers_and_restores_its_geometry() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.window_size = [1024.0, 768.0];
+    app.window_maximized = true;
+    app.zoom = 1.25;
+    app.store_window_state();
+
+    let reopened = TextrillApp::with_settings(Settings::with_path(&path));
+    assert_eq!(
+        reopened.window_size,
+        [1024.0, 768.0],
+        "the last normal size is kept even while maximized"
+    );
+    assert!(reopened.window_maximized);
+    assert_eq!(reopened.zoom, 1.25);
+}
+
+#[test]
+fn resetting_the_window_geometry_forgets_it() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.window_size = [1024.0, 768.0];
+    app.window_maximized = true;
+    app.zoom = 1.25;
+    app.store_window_state();
+
+    app.reset_window_state(&egui::Context::default());
+
+    assert_eq!(
+        Settings::with_path(&path).window_size(),
+        None,
+        "the stored geometry was not cleared"
+    );
+    assert_eq!(app.window_size, textrill_gui::window_state::DEFAULT_SIZE);
+    assert!(!app.window_maximized);
+    assert_eq!(app.zoom, 1.0);
+}
+
 // ------------------------------------------------------------------- app
 
 #[test]

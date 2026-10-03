@@ -48,6 +48,18 @@ const COPY_HTML_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
 );
 const QUIT_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
+/// The reset command needs a route that does not depend on any widget being
+/// on screen, because the whole point of it is recovering a layout that is
+/// off-screen or folded away. `Ctrl/Cmd+Alt+0` is outside the set egui's own
+/// zoom shortcuts (`Ctrl/Cmd` with `+`, `-`, `0`) consume.
+const RESET_WINDOW_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers {
+        command: true,
+        alt: true,
+        ..egui::Modifiers::NONE
+    },
+    egui::Key::Num0,
+);
 
 /// What a save command wants next.
 ///
@@ -118,6 +130,15 @@ pub struct TextrillApp {
     /// never lets the UI go to sleep.
     title_sent: Option<String>,
     settings: Settings,
+    /// The last normal (non-maximized) window size, in points *before* zoom, so
+    /// it is unaffected by a change of zoom and can be handed straight back to
+    /// `ViewportBuilder::with_inner_size`. Never the maximized size; see
+    /// [`crate::window_state`].
+    pub window_size: [f32; 2],
+    /// Whether the window was maximized the last time it was observed.
+    pub window_maximized: bool,
+    /// The UI zoom the user last chose.
+    pub zoom: f32,
     /// The file choosers. Tests swap in a stub so the command logic can run
     /// without a desktop portal.
     chooser: Box<dyn Chooser>,
@@ -153,6 +174,9 @@ impl TextrillApp {
             deadline: None,
             title_sent: None,
             settings,
+            window_size: crate::window_state::DEFAULT_SIZE,
+            window_maximized: false,
+            zoom: 1.0,
             chooser: Box::new(NativeChooser),
         };
         app.restore_settings();
@@ -177,7 +201,9 @@ impl TextrillApp {
         opts
     }
 
-    /// Apply the persisted `auto` choice and option set, if there are any.
+    /// Apply the persisted `auto` choice, option set and window geometry, if
+    /// there are any. Everything read back is clamped or defaulted, so a
+    /// hand-edited file can never stop the window from opening.
     pub fn restore_settings(&mut self) {
         if let Some(auto) = self.settings.auto() {
             self.auto = auto;
@@ -185,6 +211,12 @@ impl TextrillApp {
         if let Some(json) = self.settings.options() {
             crate::options_store::decode(&json, &mut self.opts);
         }
+        self.window_size = self
+            .settings
+            .window_size()
+            .unwrap_or(crate::window_state::DEFAULT_SIZE);
+        self.window_maximized = self.settings.maximized().unwrap_or(false);
+        self.zoom = self.settings.zoom().unwrap_or(1.0);
     }
 
     /// Persist the current `auto` choice and option set.
@@ -195,6 +227,45 @@ impl TextrillApp {
             .set_auto(self.auto)
             .and_then(|()| self.settings.set_options(&json));
         if let Err(error) = stored {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Persist the window size, maximized flag and zoom in one atomic write.
+    ///
+    /// The stored size is always the last *normal* size, never the size a
+    /// maximized window happens to have, so un-maximizing on the next launch
+    /// gives back a window the user can still grab.
+    pub fn store_window_state(&mut self) {
+        let stored =
+            self.settings
+                .set_window_state(self.window_size, self.window_maximized, self.zoom);
+        if let Err(error) = stored {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Persist everything the window owns: the option set and the geometry.
+    fn persist(&mut self) {
+        self.store_settings();
+        self.store_window_state();
+    }
+
+    /// `View → Reset window size and zoom`: return to the size a first run
+    /// opens at, at 100%, and forget the stored geometry so the reset survives
+    /// a restart too. This is the one action that always undoes a geometry the
+    /// user does not want.
+    pub fn reset_window_state(&mut self, ctx: &egui::Context) {
+        self.window_size = crate::window_state::DEFAULT_SIZE;
+        self.window_maximized = false;
+        self.zoom = 1.0;
+        ctx.set_zoom_factor(1.0);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            crate::window_state::DEFAULT_SIZE[0],
+            crate::window_state::DEFAULT_SIZE[1],
+        )));
+        if let Err(error) = self.settings.clear_window_state() {
             self.status = format!("could not save settings: {error}");
         }
     }
@@ -455,7 +526,7 @@ impl TextrillApp {
             self.pending = Some(PendingAction::Quit);
         } else {
             self.closing = true;
-            self.store_settings();
+            self.persist();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -498,13 +569,34 @@ impl TextrillApp {
             PendingAction::Open => self.do_open(),
             PendingAction::LoadSample => self.do_load_sample(),
             PendingAction::Quit => {
-                self.store_settings();
+                self.persist();
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
     }
 
     // ------------------------------------------------------------------ ui
+
+    /// Remember the current window geometry so it can be saved on exit.
+    ///
+    /// The size is recorded in points *before* zoom (`viewport * zoom`), which
+    /// is the value `ViewportBuilder::with_inner_size` takes on the next
+    /// launch. While maximized the last normal size is deliberately kept:
+    /// storing the screen-sized rectangle would restore a window with no
+    /// resize grips. `viewport_rect` is used rather than the viewport's
+    /// `inner_rect` because the latter is `None` on Wayland.
+    fn note_window_state(&mut self, ctx: &egui::Context) {
+        let zoom = ctx.zoom_factor();
+        self.zoom = zoom;
+        let maximized = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
+        self.window_maximized = maximized;
+        if !maximized {
+            let size = ctx.viewport_rect().size() * zoom;
+            if size.x >= 1.0 && size.y >= 1.0 {
+                self.window_size = [size.x, size.y];
+            }
+        }
+    }
 
     /// Send the window title, but only when it changes.
     fn set_title(&mut self, ctx: &egui::Context) {
@@ -517,8 +609,8 @@ impl TextrillApp {
 
     /// Act on the keyboard shortcuts the menu advertises.
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        let (mut new, mut save, mut save_text, mut convert, mut copy, mut quit) =
-            (false, false, false, false, false, false);
+        let (mut new, mut save, mut save_text, mut convert, mut copy, mut quit, mut reset_window) =
+            (false, false, false, false, false, false, false);
         ctx.input_mut(|input| {
             new = input.consume_shortcut(&NEW_SHORTCUT);
             save = input.consume_shortcut(&SAVE_SHORTCUT);
@@ -526,7 +618,11 @@ impl TextrillApp {
             convert = input.consume_shortcut(&CONVERT_SHORTCUT);
             copy = input.consume_shortcut(&COPY_HTML_SHORTCUT);
             quit = input.consume_shortcut(&QUIT_SHORTCUT);
+            reset_window = input.consume_shortcut(&RESET_WINDOW_SHORTCUT);
         });
+        if reset_window {
+            self.reset_window_state(ctx);
+        }
         if new {
             self.new_document();
         }
@@ -621,6 +717,19 @@ impl TextrillApp {
                 ui.checkbox(&mut self.show_options, "Show options");
                 ui.separator();
                 egui::gui_zoom::zoom_menu_buttons(ui);
+                ui.separator();
+                // The single way back from a size or zoom the user does not
+                // want. It is in the menu bar on purpose: the menu bar is the
+                // first, shortest row, so it stays reachable even when the
+                // toolbar has folded onto several lines at a high zoom.
+                if ui
+                    .button("Reset window size and zoom")
+                    .on_hover_text("Ctrl+Alt+0")
+                    .clicked()
+                {
+                    self.reset_window_state(ui.ctx());
+                    ui.close();
+                }
             });
             ui.menu_button("Help", |ui| {
                 if ui.button("About").clicked() {
@@ -632,7 +741,11 @@ impl TextrillApp {
     }
 
     fn toolbar(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
+        // `horizontal_wrapped`, not `horizontal`: at a narrow width or a high
+        // zoom the row must fold onto the next line rather than run off the
+        // edge, where the trailing controls would be clipped and unreachable.
+        // This is the Reflow half of staying usable at 200% (WCAG 1.4.10).
+        ui.horizontal_wrapped(|ui| {
             if ui.button("New").clicked() {
                 self.new_document();
             }
@@ -686,8 +799,10 @@ impl TextrillApp {
             {
                 ui.ctx().set_zoom_factor(1.0);
             }
-
-            ui.separator();
+        });
+        // The status is its own wrapped row: a long message can then never push
+        // a control off the edge, and it stays readable when the buttons fold.
+        ui.horizontal_wrapped(|ui| {
             ui.label(&self.status);
         });
     }
@@ -755,13 +870,14 @@ impl TextrillApp {
             ui.ctx().request_repaint_after(AUTO_CONVERT_DELAY);
         }
         self.set_title(ui.ctx());
+        self.note_window_state(ui.ctx());
 
         // The window's own close button goes through the unsaved-changes prompt
         // too, unless we are already closing.
         if !self.closing && ui.ctx().input(|i| i.viewport().close_requested()) {
             // Persist before the window goes away, then hold the close only if
             // there is unsaved text to ask about.
-            self.store_settings();
+            self.persist();
             if self.doc.dirty {
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::CancelClose);

@@ -308,9 +308,10 @@ The following were confirmed by running them, not by reading docs:
    reconciled before the user touches anything, and user zoom multiplies on top.
 10. `eframe` persists window geometry and egui memory (which includes
     `zoom_factor`) only with the non-default `persistence` feature, which pulls
-    in `egui/persistence`, `egui-winit/serde`, `serde` and `ron`. The current
-    feature set omits it, so zoom is per-session. The default window is winit's
-    800×600; the app now asks for 900×720 with a 360×300 minimum.
+    in `egui/persistence`, `egui-winit/serde`, `serde` and `ron`. That feature is
+    deliberately left off; the app persists the geometry itself (item 15). The
+    default window is winit's 800×600; a first run asks for 900×720 with a
+    360×300 minimum.
 11. `Context::send_viewport_cmd` requests a repaint. Sending the same `Title`
     every frame therefore keeps the UI permanently awake and makes
     `egui_kittest::Harness::run` fail with "exceeded max_steps". The title is now
@@ -346,6 +347,34 @@ The following were confirmed by running them, not by reading docs:
       download / 27.4 MB installed) and far below Electron editors
       (150–230 MB). Dropping the CJK font is the one big size lever.
     The engine converts CJK correctly regardless; this is display-only.
+15. Window geometry is persisted by the app, not by `eframe` (item 10), and only
+    as **normal size + maximized flag + zoom** — never a position. A stored
+    position is the one value that can strand a window off-screen (and Wayland
+    forbids clients setting one at all), so it is not written. The facts behind
+    that choice:
+    - `ViewportInfo::inner_rect` is `None` on Wayland, so the size is read from
+      `Context::viewport_rect()` instead, which is available on every backend.
+    - `ViewportBuilder::with_inner_size` is in egui points *before* zoom; on
+      creation `egui-winit` multiplies it by `zoom_factor`, and
+      `with_clamp_size_to_monitor_size` defaults to `true`, so an oversized
+      stored value is clamped to the monitor. The stored size is therefore
+      `viewport_rect().size() * zoom_factor`, which is invariant under a change
+      of zoom.
+    - Applying `Context::set_zoom_factor` *after* creation changes
+      `pixels_per_point` but not the OS window size, which is why zoom is applied
+      in the `run_native` creation closure, before the first frame.
+    - A window created flush with the work area cannot be resized, so the stored
+      size is the last *normal* size even while maximized.
+    - Every value is clamped on read (`360×300` … monitor, zoom `0.5` … `4.0`),
+      and an unreadable `window-size`/`zoom` falls back to the default, so a
+      hand-edited or corrupt file can never stop the window from opening.
+    - A single `View → Reset window size and zoom` command is the escape hatch;
+      it clears the stored keys and has a keyboard route (`Ctrl/Cmd+Alt+0`) that
+      does not depend on any widget being on-screen. The toolbar uses
+      `horizontal_wrapped`, so at a high zoom it folds instead of clipping
+      controls — the Reflow half of WCAG 1.4.10.
+    - The `[General]` section is written to a sibling temporary file and renamed,
+      so a crash or a second instance cannot leave a truncated config.
 
 ## 7. How to sequence this better next time
 
@@ -385,7 +414,10 @@ These are general, not egui-specific.
 - A native GUI crate (`textrill-gui-rs`) depending only on `egui`/`eframe` and
   the engine crate was added, and the Python/PySide6 GUI and the `pyo3` layer
   were retired to `legacy-archive/` once its acceptance suite passed.
-- ~~Port the 32 acceptance tests onto `egui_kittest`/`kittest`, querying by label.~~ Done: 60 native GUI tests.
+- ~~Port the 32 acceptance tests onto `egui_kittest`/`kittest`, querying by label.~~ Done: 74 native GUI tests.
+- ~~Remember the window geometry.~~ Done: normal size, maximized flag and zoom
+  are persisted (never position); see §6 item 15 for the policy and the escape
+  hatch.
 - Keep the CLI's musl/static build path free of GUI dependencies.
 - The `qt6-base-dev` / `qt6-declarative-dev` packages are no longer required by
   the project and can be removed from the build prerequisites.
