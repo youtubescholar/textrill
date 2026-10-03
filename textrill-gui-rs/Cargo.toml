@@ -15,6 +15,10 @@ egui = "0.36"
 # off: the OS accessibility bridge pulls in an async/D-Bus stack, and
 # `egui_kittest` builds its own access tree for tests without it.
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+# Native file dialogs. `xdg-portal` talks to the desktop portal over D-Bus,
+# which is what a Flatpak build needs, and avoids linking GTK. The default
+# `wayland` feature is off because we do not parent the dialog yet.
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 
 [dev-dependencies]
 # Headless widget queries over AccessKit. `kittest` must match the version

@@ -215,14 +215,16 @@ Do **not** put `eframe` in the same crate/feature graph as the static CLI build.
 
 ### 5.5 Licence, privacy and fingerprinting audit
 
-Run 2026-10-02 against the GUI crate's resolved graph
-(`cargo metadata --all-features`, which includes dev-dependencies; 316 packages).
+Run 2026-10-03 against the GUI crate's resolved graph
+(`cargo metadata --all-features`, which includes dev-dependencies; 318 packages).
 
 **Licences are all permissive or GPL-3.0-compatible.** No package is
 copyleft-only, AGPL, SSPL or non-free. The classes present:
 
 - MIT and/or Apache-2.0 (the large majority), plus `Zlib`,
   `BSD-2/3-Clause`, `ISC`, `0BSD`, `BSL-1.0`, `Unlicense`, `Unicode-3.0`.
+- `rfd` (the file chooser) is `MIT`; `pollster` (its blocking adapter) is
+  `Apache-2.0 OR MIT`.
 - `r-efi` (`MIT OR Apache-2.0 OR LGPL-2.1-or-later`) and `self_cell`
   (`Apache-2.0 OR GPL-2.0-only`) are dual-licensed; the permissive branch is
   taken (default Cargo selection), which is compatible with our GPL-3.0-or-later.
@@ -239,6 +241,13 @@ source has no `std::net`, no `Command`, no `std::fs`/`std::env` reads (the
 engine's `Options::default()` reads `HOME` for the default link dictionary — the
 same local configuration the CLI already does — and `convert_text` is
 in-memory). The GUI crate now carries `#![forbid(unsafe_code)]`.
+
+The file chooser is local-only. With the `xdg-portal` feature, `rfd` asks the
+session's desktop portal over D-Bus for a path and returns just that path; it
+does not copy or move files, and we set `can_create_directories(false)` so a
+mistyped save name cannot grow a directory tree. If the portal is unavailable
+`rfd` falls back to running `zenity` as a dialog-only process — the one place a
+dependency can spawn a program, and it only ever receives filter/name strings.
 
 Two dependencies pull data that looks sensitive but is not:
 
@@ -296,6 +305,13 @@ The following were confirmed by running them, not by reading docs:
     every frame therefore keeps the UI permanently awake and makes
     `egui_kittest::Harness::run` fail with "exceeded max_steps". The title is now
     sent only when it changes.
+12. `rfd` 0.17's synchronous `FileDialog::pick_file`/`save_file` return
+    `Option<PathBuf>` and block the caller until the portal answers. Because that
+    would hang headless tests, the app asks a `Chooser` trait object (default
+    `NativeChooser`) so a test stub can answer `None`/a path. Only two packages
+    were added (`rfd`, `pollster`); `percent-encoding`, `libc` and `log` were
+    already in the graph. The `wayland` feature is left off because the dialog
+    is not parented.
 
 ## 7. How to sequence this better next time
 

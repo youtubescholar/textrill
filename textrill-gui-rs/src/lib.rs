@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+mod dialogs;
 pub mod document;
 mod json;
 pub mod options_panel;
@@ -27,5 +28,6 @@ pub mod settings;
 pub mod worker;
 
 pub use app::{SaveAnswer, TextrillApp};
+pub use dialogs::{Chooser, NativeChooser};
 pub use document::Document;
 pub use settings::Settings;

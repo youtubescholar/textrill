@@ -11,13 +11,44 @@
 //! `draw` code the window uses, so a widget is queried by the label a user
 //! sees. No display, no windowing system.
 
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use textrill::options::Options;
 use textrill_gui::options_panel::OptionsPanel;
-use textrill_gui::{SaveAnswer, TextrillApp};
+use textrill_gui::{Chooser, SaveAnswer, TextrillApp};
+
+/// A chooser that answers `None`, as if the user closed the dialog.
+struct CancellingChooser;
+
+impl Chooser for CancellingChooser {
+    fn open_text(&self, _from: Option<&Path>) -> Option<PathBuf> {
+        None
+    }
+    fn save_text(&self, _suggested: &Path) -> Option<PathBuf> {
+        None
+    }
+    fn save_html(&self, _suggested: &Path) -> Option<PathBuf> {
+        None
+    }
+}
+
+/// A chooser that always picks `path`, so a save can be tested with no portal.
+struct PathChooser(PathBuf);
+
+impl Chooser for PathChooser {
+    fn open_text(&self, _from: Option<&Path>) -> Option<PathBuf> {
+        Some(self.0.clone())
+    }
+    fn save_text(&self, _suggested: &Path) -> Option<PathBuf> {
+        Some(self.0.clone())
+    }
+    fn save_html(&self, _suggested: &Path) -> Option<PathBuf> {
+        Some(self.0.clone())
+    }
+}
 
 /// `Options.demoronize` is on by default, so a click must turn it off.
 const DEMORONIZE: &str = "Convert Microsoft character codes into sensible HTML.";
@@ -316,11 +347,12 @@ fn saving_the_prompt_writes_the_text_then_runs_the_command() {
     let _ = std::fs::remove_file(&src);
 }
 
-/// With nowhere to write, `Save` cannot save, so the command is dropped and the
-/// edits stay -- the same result as cancelling Qt's file dialog.
+/// With nowhere to write, `Save` asks the chooser; a cancelled chooser drops
+/// the command and keeps the edits -- the same result as cancelling Qt's dialog.
 #[test]
 fn saving_with_nowhere_to_write_drops_the_command() {
     let mut app = TextrillApp::default();
+    app.set_chooser(Box::new(CancellingChooser));
     app.doc.text = "edited".to_string();
     app.doc.dirty = true;
     app.new_document();
@@ -328,10 +360,41 @@ fn saving_with_nowhere_to_write_drops_the_command() {
     assert!(!app.is_prompting());
     assert_eq!(app.doc.text, "edited", "the edits were lost without a save");
     assert!(
-        app.status.contains("file dialogs pending"),
-        "status was {}",
+        !app.status.contains("saved"),
+        "a cancelled save must not report success: {}",
         app.status
     );
+}
+
+/// When the chooser does name a file, `Save` writes the text and runs the
+/// waiting command.
+#[test]
+fn saving_through_the_chooser_writes_then_runs_the_command() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let target = std::env::temp_dir().join(format!(
+        "textrill-chooser-{}-{nanos}.txt",
+        std::process::id()
+    ));
+
+    let mut app = TextrillApp::default();
+    app.set_chooser(Box::new(PathChooser(target.clone())));
+    app.doc.text = "edited".to_string();
+    app.doc.dirty = true;
+    app.new_document();
+    assert!(app.is_prompting());
+
+    app.resolve_save_prompt(SaveAnswer::Save, &egui::Context::default());
+
+    assert!(!app.is_prompting());
+    assert!(
+        app.doc.text.is_empty(),
+        "the command did not run after saving"
+    );
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "edited");
+    let _ = std::fs::remove_file(&target);
 }
 
 /// The prompt is a real widget: it draws, and its buttons answer it.

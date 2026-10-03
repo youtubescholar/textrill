@@ -1958,8 +1958,12 @@ Three things exist only because two languages are in the path:
    whole option blob, in the JSON and INI escaping `QSettings` used), the 300 ms
    debounce, runtime UI zoom, the menu/toolbar/filter/drag-and-drop chrome, and
    the unsaved-changes prompt (Save/Discard/Cancel, including the window's own
-   close button) are ported. `Open` and `Save As` still reach the explicit-path
-   API because the native file chooser is deliberately deferred. The ported
+   close button) are ported. Native file choosers are now wired through `rfd`
+   (XDG desktop portal over D-Bus, `can_create_directories` off, no temp or
+   scratch writes) behind a `Chooser` seam so the explicit-path API stays
+   testable; `Open`, `Save As` and a `Save` with no output path open a real
+   dialog, and a cancelled chooser drops the waiting command without losing
+   edits. The ported
    worker was then hardened past the Python original: mutex locks recover from
    poisoning instead of panicking, the worker thread is spawned with
    `thread::Builder` and a spawn failure becomes a reported error (rather than a

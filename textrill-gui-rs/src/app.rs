@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use egui::Ui;
 use textrill::options::Options;
 
+use crate::dialogs::{Chooser, NativeChooser};
 use crate::document::Document;
 use crate::options_panel::OptionsPanel;
 use crate::settings::Settings;
@@ -115,6 +116,9 @@ pub struct TextrillApp {
     /// never lets the UI go to sleep.
     title_sent: Option<String>,
     settings: Settings,
+    /// The file choosers. Tests swap in a stub so the command logic can run
+    /// without a desktop portal.
+    chooser: Box<dyn Chooser>,
 }
 
 impl Default for TextrillApp {
@@ -147,9 +151,16 @@ impl TextrillApp {
             deadline: None,
             title_sent: None,
             settings,
+            chooser: Box::new(NativeChooser),
         };
         app.restore_settings();
         app
+    }
+
+    /// Replace the file choosers. Tests use this to answer prompts without a
+    /// desktop portal.
+    pub fn set_chooser(&mut self, chooser: Box<dyn Chooser>) {
+        self.chooser = chooser;
     }
 
     /// The options a conversion actually uses.
@@ -350,29 +361,58 @@ impl TextrillApp {
         self.status = "HTML copied to the clipboard".to_string();
     }
 
-    /// `File → Save`: write the HTML, or report the name we would propose.
-    ///
-    /// Without a file chooser the second case is the honest answer: the path is
-    /// shown so a drag-and-drop or the explicit-path API still has somewhere to
-    /// go, and the user is not left thinking nothing happened.
-    pub fn save_document_or_report(&mut self) {
-        match self.save_document() {
-            Ok(SaveRequest::Saved(path)) => self.status = format!("saved {}", path.display()),
-            Ok(SaveRequest::NeedsName(path)) => {
-                self.status = format!("would save to {} (file dialogs pending)", path.display());
+    /// `File → Open…`: ask for a text file, then load it.
+    pub fn open_command(&mut self) {
+        let from = self.doc.path.clone();
+        if let Some(path) = self.chooser.open_text(from.as_deref()) {
+            if let Err(error) = self.load_file(&path) {
+                self.status = error;
             }
-            Err(error) => self.status = error,
         }
     }
 
-    /// `File → Save text…`, or report the name we would propose.
-    pub fn save_text_or_report(&mut self) {
-        match self.save_text() {
-            Ok(SaveRequest::Saved(path)) => {
-                self.status = format!("saved text to {}", path.display());
+    /// `File → Save`: write the HTML where it is already going, or ask.
+    pub fn save_document_command(&mut self) {
+        if self.doc.output_path.is_some() {
+            self.report_document();
+        } else {
+            self.save_document_as_command();
+        }
+    }
+
+    /// `File → Save As…`: always ask where the HTML should go.
+    pub fn save_document_as_command(&mut self) {
+        if let Some(path) = self.chooser.save_html(&self.suggested_output_name()) {
+            match self.save_html_to(&path) {
+                Ok(()) => self.status = format!("saved {}", path.display()),
+                Err(error) => self.status = error,
             }
+        }
+    }
+
+    /// `File → Save text…`: write the text to the opened path, or ask.
+    pub fn save_text_command(&mut self) {
+        match self.doc.path.clone() {
+            Some(path) => match self.save_text_to(&path) {
+                Ok(()) => self.status = format!("saved text to {}", path.display()),
+                Err(error) => self.status = error,
+            },
+            None => {
+                if let Some(path) = self.chooser.save_text(&self.doc.suggested_text_name()) {
+                    match self.save_text_to(&path) {
+                        Ok(()) => self.status = format!("saved text to {}", path.display()),
+                        Err(error) => self.status = error,
+                    }
+                }
+            }
+        }
+    }
+
+    fn report_document(&mut self) {
+        match self.save_document() {
+            Ok(SaveRequest::Saved(path)) => self.status = format!("saved {}", path.display()),
             Ok(SaveRequest::NeedsName(path)) => {
-                self.status = format!("would save to {} (file dialogs pending)", path.display());
+                self.status = format!("no output path for {}", path.display());
             }
             Err(error) => self.status = error,
         }
@@ -407,21 +447,15 @@ impl TextrillApp {
         match answer {
             SaveAnswer::Cancel => self.pending = None,
             SaveAnswer::Discard => self.perform(action, ctx),
-            SaveAnswer::Save => match self.save_text() {
-                Ok(SaveRequest::Saved(path)) => {
-                    self.status = format!("saved text to {}", path.display());
+            SaveAnswer::Save => {
+                self.save_text_command();
+                if self.doc.dirty {
+                    // Cancelled or failed: drop the waiting command, keep edits.
+                    self.pending = None;
+                } else {
                     self.perform(action, ctx);
                 }
-                Ok(SaveRequest::NeedsName(path)) => {
-                    self.pending = None;
-                    self.status =
-                        format!("would save to {} (file dialogs pending)", path.display());
-                }
-                Err(error) => {
-                    self.pending = None;
-                    self.status = error;
-                }
-            },
+            }
         }
     }
 
@@ -465,10 +499,10 @@ impl TextrillApp {
             self.new_document();
         }
         if save {
-            self.save_document_or_report();
+            self.save_document_command();
         }
         if save_text {
-            self.save_text_or_report();
+            self.save_text_command();
         }
         if convert {
             self.convert_now();
@@ -511,19 +545,19 @@ impl TextrillApp {
                     ui.close();
                 }
                 if ui.button("Open…").clicked() {
-                    self.status = "Open needs a file dialog, which is not wired up yet".to_string();
+                    self.open_command();
                     ui.close();
                 }
                 if ui.button("Save").clicked() {
-                    self.save_document_or_report();
+                    self.save_document_command();
                     ui.close();
                 }
                 if ui.button("Save As…").clicked() {
-                    self.save_document_or_report();
+                    self.save_document_as_command();
                     ui.close();
                 }
                 if ui.button("Save text…").clicked() {
-                    self.save_text_or_report();
+                    self.save_text_command();
                     ui.close();
                 }
                 ui.separator();
@@ -571,7 +605,7 @@ impl TextrillApp {
                 self.new_document();
             }
             if ui.button("Save").clicked() {
-                self.save_document_or_report();
+                self.save_document_command();
             }
             if ui.button("Example").clicked() {
                 self.load_sample();
