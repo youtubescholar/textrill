@@ -64,7 +64,7 @@ reports success wrongly" below.
   * `pre2` — the golden file has a trailing newline the reference output does
     not. Upstream's own comparison strips CR and LF before diffing.
 
-Current status: **48/48 cases byte-identical**, and all 33 upstream golden
+Current status: **59/59 cases byte-identical**, and all 33 upstream golden
 checks reproduce byte for byte across 29 distinct files (the `empty1`–`empty4`
 cases all compare against the one `good_empty.html`, which is why the count of
 checks exceeds the count of files; the other skipped cases are the `NOGOLDEN`
@@ -146,7 +146,7 @@ never found them.
 > **The rule these five produced: a gate that has never been observed failing is
 > not a gate.** Before trusting any check here, break it on purpose and confirm it
 > exits non-zero. `MINE=/path/to/stub-that-writes-garbage tests/corpus/run.sh`
-> is the test, and it should print `PASS=0 FAIL=46` *and* exit non-zero. The
+> is the test, and it should print `PASS=0 FAIL=59` *and* exit non-zero. The
 > equivalent for `make fuzz` is a fuzzer stub that exits 3. See
 > `REMEDIATION-PLAN.md` Phase 0b.
 
@@ -275,12 +275,18 @@ So the rule matches the corpus's own: a divergence is a failing gate, and it
 becomes a passing gate by being fixed, in the same change. A defect that needs
 tracking goes in `cases.sh`, as a case that currently fails.
 
-Seven cases are *expected* to fail the differential comparison, by design rather
+Nine cases are *expected* to fail the differential comparison, by design rather
 than by neglect, and all are recorded as `differential must fail:` in `cases.sh`
-so the alignment guard holds them to it. They share a shape: the reference's
+so the alignment guard holds them to it. Eight share a shape: the reference's
 output is wrong, or the reference has no way to be right, and the port's is
-right — so there is no byte sequence the port could emit to match it.
+right — so there is no byte sequence the port could emit to match it. The ninth,
+`opt_injection`, is a deliberate Tier 2 security divergence (A8).
 
+* `opt_injection` (A8) — `--title` / `--style_url` containing `</title>`,
+  `<script>` and a quote-breaking attribute. The reference interpolates them
+  into the document unescaped, which is a live XSS; the port escapes them, so a
+  byte comparison cannot match by design. Its oracle is the XML well-formedness
+  check in `proptest.py`, not `encodingtest.rs`.
 * `cp1252_smart` (P7.1) — a CP1252 file with smart quotes and dashes. The
   reference emits the raw bytes and depends on the browser guessing CP1252; the
   port decodes CP1252 and demoronize rewrites the punctuation to ASCII. Same
@@ -299,9 +305,10 @@ right — so there is no byte sequence the port could emit to match it.
   letter. The reference has no UTF-16 concept; the port reads the BOM as a
   declaration and infers the rest from the NUL alignment.
 
-The oracle for all seven is `tests/encodingtest.rs`, which asserts the decoded
-code points, that no C1 control character reaches the output, and — for the
-UTF-16 cases — that no NUL survives. A unit test cannot rot into a false pass
+The oracle for the eight encoding cases is `tests/encodingtest.rs`, which asserts
+the decoded code points, that no C1 control character reaches the output, and —
+for the UTF-16 cases — that no NUL survives. A unit test cannot rot into a false
+pass
 the way a suppressed corpus line can, and it fails the moment the decode
 regresses rather than waiting for a byte comparison nobody reads.
 
@@ -388,5 +395,7 @@ knowing before trusting a green run:
   character `>= 0x80` to `?`, so all fuzz cases are ASCII by construction.
 
 The tiers and the reasoning are in `REMEDIATION-PLAN.md`, "Compatibility policy".
-The non-Tier-1 oracles — the author's goldens, and a property suite that does not
-reference Perl at all — are P12 and are not implemented yet.
+The non-Tier-1 oracles — the author's goldens, the property suite
+(`tests/proptest.py`) and the allocation-budget suite (`tests/alloctest.rs`) that
+do not reference Perl at all — are P12 and are implemented (`make proptest`,
+`make alloctest`).

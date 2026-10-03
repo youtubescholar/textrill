@@ -21,19 +21,20 @@ of correctness fixes on top of the existing port — see
 What is **done**:
 
 - The conversion engine is byte-verified against the Perl original across a
-  differential corpus of 48 cases and 33 upstream golden files.
-- 95 Rust tests, a fuzzer, and a 60-test native GUI suite.
+  differential corpus of 59 cases and 33 upstream golden files.
+- 164 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - Encoding detection was reworked: BOM → UTF-16 evidence → UTF-8 → CP1252, with
   explicit overrides for the encodings that cannot be detected.
 
 What is **not** done yet:
 
-- The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`. The
-  earlier Python/PySide6 front end is retired and archived under
-  `legacy-archive/`.
 - No Flatpak, no distro packaging yet.
-- Performance is roughly 2x slower than the Perl original. Not a correctness
-  problem, but not good.
+- The `x86_64-unknown-linux-musl` build is not exercised in CI.
+
+The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`; the
+earlier Python/PySide6 front end is retired and archived under `legacy-archive/`.
+Performance is no longer a gap: the P6 link-pass fix puts the port ahead of the
+Perl original on the link-dense benchmark (see `../REMEDIATION-PLAN.md`, P6).
 
 
 ## Option files
@@ -202,7 +203,7 @@ useful if it agrees with the tool people already have, so behaviour was pinned
 by differential testing against the actual Perl implementation rather than
 guessed from documentation:
 
-- `tests/corpus/` runs 48 documents through both implementations and requires
+- `tests/corpus/` runs 59 documents through both implementations and requires
   byte-identical output.
 - The 33 upstream golden files are compared byte for byte.
 - The fuzzer hunts for divergences in Unicode handling, delimiter recovery and

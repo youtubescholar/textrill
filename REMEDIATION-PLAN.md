@@ -1,8 +1,14 @@
 # txt2html — remediation plan
 
-Status: **in progress**, 2026-10-01; Phase 6 updated 2026-10-03. Covers
+Status: **in progress**, 2026-10-03. Covers
 `textrill` (Rust engine + CLI) and `textrill-gui-rs` (native `egui` front end).
 The Python bindings and the PySide6 front end are retired to `legacy-archive/`.
+
+Current gates (2026-10-03): corpus **59/59**, goldens **33/33**, 16 000 fuzz
+cases 0 mismatches, **164** engine tests, **74** native GUI tests. The dated
+figures elsewhere in this document (many sections still say `48/48`, `61 cargo
+tests`, `60/60`, `46/46`) are the state at the date they were written and are
+kept as that record, not corrected in place.
 
 **Progress is recorded in §0.1 below. Done: P1–P6, P8–P10, P12, P14–P19, P21–P23,
 E1–E3, A1, A1b, A2–A10. P6's gap was not the two prescribed fixes (worth ~0%): it
@@ -153,8 +159,8 @@ E3 landed on 2026-10-01. P13, the last item on the agreed sequence, was answered
 the same day: one self-contained artifact, so the GUI is rewritten in Rust + Qt
 and the engine is kept. _Refined 2026-10-02: the artifact ships as **Flatpak**,
 and Qt is an assumption rather than a decision — both noted in "Licensing and
-distribution"._ The rewrite itself is **Phase 6**, and P5, P6 and P11 are
-sequenced ahead of it. P7 was sequenced there first of all — because the encoding
+distribution"._ The rewrite itself is **Phase 6**, and P5, P6 and P11 were
+sequenced ahead of it — all three are now **done**. P7 was sequenced there first of all — because the encoding
 rule is implemented in both Rust and Python and the two copies disagreed — and
 it is now **done**: both copies decode CP1252, the fallback is the one the
 converter's own `demoronize` table was written for, and the rewrite inherits one
@@ -188,7 +194,7 @@ correct implementation instead of two.
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
 | P5 | **done** | the inherited `/|.../` hang: an empty-matching dictionary pattern spun the substitution loop forever, in the Perl original too. Rejected at load with a diagnostic, reusing the P4 channel. The criterion is `re.is_match("")` because `translate_pattern` turns `\b` into a zero-width lookaround alternation and a `*` glob is not empty-matching. `-o`/`-s` deliberately unguarded: they substitute once, Perl accepts them, and guarding them would be a Tier 1 divergence |
 | P6 | **done** | the link pass was ~2× slower than Perl; the two prescribed fixes were worth ~0% and the prefilter only reached rules already delegating to the linear `regex` engine. The nine rules with no literal were the `\b`-wrapped family: `translate_pattern` turns `\b` into look-around, `regex-syntax` will not parse that, so `required_literal` returned `None` and their literal/`captures()` ran on every paragraph. `add_rule` now falls back to the original pattern (sound: translation rewrites only zero-width anchors and escape classes), recovering all 9. Link-dense 2 MB × 9 901 paras: 3.75 s → 1.27 s (2.95×), byte-identical; Perl 1.96 s, so Rust is ~1.5× faster, from ~1.9× slower |
-| P13 | **decided** | single artifact. The GUI is rewritten off Python + PySide6; **the 5,644-line engine is kept**. P5, P6 and P11 are sequenced *ahead* of it. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6**. Delivery since refined: Flatpak, not a bundled binary, and the Qt assumption is open — see "Licensing and distribution" |
+| P13 | **decided** | single artifact. The GUI is rewritten off Python + PySide6; **the 5,644-line engine is kept**. P5, P6 and P11 were sequenced *ahead* of it and are all now **done**. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6**. Delivery since refined: Flatpak, not a bundled binary, and the toolkit is now decided (`egui`/`eframe`, not Qt) — see "Licensing and distribution" and Phase 6 |
 | Phase 6 | **in progress** | the GUI rewrite: 1,365 lines of Python shell out, 32 tests ported as acceptance criteria. §6.3 step 1 done: surface frozen in `textrill-gui/SURFACE.md`. Step 2 done: `FileTests` moved to Rust, which required adding the engine's missing encoder (`src/encode.rs`) and fixed a UTF-16 decoder defect. Steps 3-5 (the shell itself) are done: the native crate `textrill-gui-rs` is in, with the `cli::SPECS`-generated options panel, `worker.py`'s concurrency contract, the document/file/settings model, the full chrome, the unsaved-changes prompt, native file choosers and `app.py`'s command line all ported, plus window geometry/state persistence. The 32 acceptance criteria are covered by the native suite (74 tests). CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Toolkit **decided: `egui`/`eframe`** (pure Rust), after the Qt path was rejected — `cxx-qt` 0.10 does not compile Rust QObjects on this toolchain and `qtbridge` needs Qt 6.10 while the host has 6.4.2. Evidence and packaging analysis in `RUST-GUI-FINDINGS.md`. Step 5 done 2026-10-03: a side-by-side differential run — Python suite 58 tests (1 skipped) against native 60/60, both GUIs launched under Xvfb on the same fixtures, and a 10-encoding file-layer differential that decoded, detected and round-tripped byte-identically. The Python GUI and the pyo3 bindings are retired to `legacy-archive/`; `make gui` and the CI `gui` job are removed |
 | licensing | **decided** | engine and CLI stay **GPL-3.0-or-later**; GUI is **GPLv3**. BSD for the CLI was raised and declined as unnecessary — see "Licensing and distribution" |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
@@ -226,7 +232,8 @@ the next person does not have to re-derive the ordering:
    is now empty rather than merely accurate.
 9. ~~**P13 — the packaging decision.**~~ **Decided 2026-10-01:** one
    self-contained artifact, so the GUI moves to Rust + Qt and the engine is
-   kept. Plan in **Phase 6**; P5, P6 and P11 are sequenced ahead of it. Its
+   kept. Plan in **Phase 6**; P5, P6 and P11 were sequenced ahead of it and are
+   now all done. Its
    stated prerequisite P7 is **done**: the encoding rule was implemented in two
    languages, the copies disagreed, and the disagreement was a real defect rather
    than a byte difference.
@@ -242,33 +249,33 @@ end to end in under 8. The gate is affordable, so it can be run after every chan
 instead of once a month — which is the only reason the rest of this list gets
 shorter rather than longer.
 
-Recommended order from here:
+Recommended order from here — **every item below is now done**:
 
-1. **P22** — decide what an invalid user regexp should do, then fix it. It is the
-   only *newly found* correctness divergence, and it is user-reachable today.
-2. **P20** — the `CLI[]`/`EXTRA[]` guard. Three lines, and it closes the last
+1. ~~**P22**~~ — **Done.** A user regexp that does not compile is rejected with a
+   diagnostic naming the option, the pattern and the parser's complaint, instead
+   of panicking. A `/pattern/` link-dictionary entry took the same route and now
+   does too.
+2. ~~**P20**~~ — **Done.** The `CLI[]`/`EXTRA[]` alignment guard closes the last
    known way to add a corpus case that silently never runs.
-3. ~~**P13** — the packaging decision.~~ **Decided:** single artifact, GUI to
-   Rust + Qt, engine kept. See Phase 6. P5, P6 and P11 go **before** the rewrite
-   rather than after; the prerequisite P7 is **done**.
+3. ~~**P13** — the packaging decision.~~ **Decided:** single artifact, GUI
+   rewritten in Rust (**egui**/`eframe`, not Qt — see Phase 6), engine kept.
+   P5, P6 and P11 landed before the rewrite, and P7, the prerequisite, was done
+   first.
 4. ~~**A8** — escape `--title` / `--style_url`.~~ **Done.** It was the sole
    owner of the 30 known-open `proptest` checks; there are none left.
-5. **The remaining Phase 2–4 items: P5, P6 and P11**, in the order §0.1 gives
-   them. A10 is done: the pattern cache is bounded at a measured 6× the worst
-   realistic working set. Nothing in Phases A or B is open now.
-   Note that P4/P22 was what kept the GUI's panic handler honest, and it is the same
-   panic seen from the CLI, where nothing catches it.
-6. **Phase 6, the GUI rewrite** — and only after the above. P13 answered the
-   packaging question; Phase 6 is the work that follows from the answer, and its
-   prerequisite was **P7**, because the encoding rule was written twice in two
-   languages and the two copies did not agree. **That prerequisite is now met.**
-   P7 turned out to be worth doing before the rewrite on its own terms: the
-   disagreement was a live defect, not a byte difference — the engine's
-   `demoronize` table had been unreachable for its entire existence, and the GUI
-   was showing a different document from the one it was previewing.
-   Phase 5 (opt-in features) is deferred past Phase 6 — it is engine-side and
-   unaffected, but every new option currently has to be added to two front ends,
-   and after the rewrite there is only one.
+5. ~~**P5, P6, P11**~~ — **Done**, in that order. A10 is done too: the pattern
+   cache is bounded at a measured 6× the worst realistic working set. Nothing in
+   Phases A or B is open.
+6. ~~**Phase 6, the GUI rewrite**~~ — **Done 2026-10-03.** The Python/PySide6
+   front end is retired to `legacy-archive/`; the native suite is 74 tests.
+   P7 was worth doing first on its own terms: the encoding rule was written
+   twice, the copies disagreed, and the disagreement was a live defect rather
+   than a byte difference — the engine's `demoronize` table had been
+   unreachable for its entire existence.
+
+What actually remains is not a defect: **packaging** (the Flatpak manifest is
+decided but not yet written) and the **musl CI build**, plus the deferred
+**Phase 5** opt-in features. See "What remains" near the top and Phase 5.
 
 Two lessons worth carrying to the next item, because both cost time here: a
 micro-benchmark of a helper API is not evidence about the tool's exposure to
@@ -572,7 +579,7 @@ reading the entire project as up for replacement. It is not.
 | `python.rs` (pyo3 bindings) | 212 | **deleted** — exists only to cross a language boundary |
 | `main.rs` (CLI entry point) | 111 | **kept** — the CLI is a second binary on the same crate |
 | `lib.rs` (crate root) | 65 | kept, minus the pyo3 module declaration |
-| `txt2html-gui` shell (`mainwindow.py`, `optionspanel.py`, `worker.py`, `app.py`, `files.py`) | 1,365 | **rewritten** in Rust + Qt |
+| `txt2html-gui` shell (`mainwindow.py`, `optionspanel.py`, `worker.py`, `app.py`, `files.py`) | 1,365 | **rewritten** in Rust (`egui`/`eframe`; Qt was the original assumption — see Phase 6) |
 | `txt2html-gui/tests/test_gui.py` | 887 | **the spec**, not the code — roughly half survives as Rust tests |
 
 So the rewrite is 1,365 lines out against 5,644 kept, and the 212-line binding
@@ -799,7 +806,7 @@ $ echo $?          ->  0
 
 **Every case failed and `make corpus` reported success.**
 
-This is the Tier 1 invariant — "48/48 and 33/33", restated in this plan after
+This is the Tier 1 invariant — "59/59 and 33/33", restated in this plan after
 almost every item since Phase 0 — and it was not being enforced by anything. It
 was being *reported*. Those are different things, and the difference is the whole
 of P15.
@@ -1916,6 +1923,9 @@ _Updated 2026-10-02: "single self-contained artifact" is delivered as **Flatpak*
 rather than a bundled binary — see "Licensing and distribution". Qt is an
 assumption of this plan, not a decision; GTK4 is a live option._
 
+_Resolved 2026-10-03: the toolkit is **`egui`/`eframe`** (pure Rust). Qt was
+rejected on the spike, not on preference — see §6.6. GTK4 was not needed._
+
 This is Phase 6 and not Phase 5 because Phase 5 is opt-in *feature* work that
 touches the engine, and doing it before the rewrite means doing it against a
 shell that is about to be deleted. Nothing in Phase 5 is lost by waiting; §6.5
@@ -2053,11 +2063,12 @@ Three things exist only because two languages are in the path:
 
 The existing gate mostly survives, because the engine is untouched:
 `make fmt-check`, `make clippy` (`-D warnings`), `cargo test`, `make corpus`
-(48/48, 33/33 goldens), `make fuzz`, and upstream's `t/*.t` as a canary all
-apply unchanged. The GUI suite is the part that is rewritten.
+(59/59, 33/33 goldens), `make fuzz`, and upstream's `t/*.t` as a canary all
+apply unchanged. The GUI suite was the part rewritten; it is now the native
+`textrill-gui-rs` suite.
 
-The native crate is now in the gate before the swap, so it cannot rot while the
-Python GUI still ships: `make fmt-check` and `make clippy` cover both crates,
+The native crate was put in the gate before the swap, so it could not rot while
+the Python GUI still shipped: `make fmt-check` and `make clippy` cover both crates,
 `make test-gui-rs` runs its headless `egui_kittest`/`kittest` suite (no display
 needed), and CI's `rust` job builds, lints and tests it. `verify` includes
 `test-gui-rs`. The crate's licence and privacy posture — all dependencies
@@ -2077,11 +2088,11 @@ directly, and the `rust` job runs `make test-gui-rs` as ordinary cargo tests. Th
 ### 6.5 Where Phase 5 goes
 
 Phase 5 (HTML5 mode, TOC, heading numbering, streaming, footnotes) is
-**independent of the rewrite** — it is all engine-side. It should simply not be
-started until the rewrite is done, for one reason: each new engine option has to
-be added to `cli::SPECS`, and while the Python GUI exists that means updating two
-front ends. After the rewrite there is one, and the options panel picks it up for
-free.
+**independent of the rewrite** — it is all engine-side. It was deferred until
+the rewrite was done, for one reason: each new engine option has to be added to
+`cli::SPECS`, and while the Python GUI existed that meant updating two front
+ends. The rewrite is done (2026-10-03), so there is now one front end and the
+options panel picks up a new option for free — Phase 5 is unblocked.
 
 Two Phase 5 items have a real interaction with Phase 6 and should be sequenced
 deliberately:
@@ -2177,7 +2188,7 @@ sequencing notes.
 - Phase 5 items 3 and 4 (TOC, heading numbering) should be implemented together
   or not at all — a numbered TOC is the only reason to have heading numbering,
   and both depend on the same heading pass.
-- Every phase must keep the corpus at **48/48** and the goldens at **33/33**
+- Every phase must keep the corpus at **59/59** and the goldens at **33/33**
   byte-identical, except where a change is explicitly declared a deviation.
   (47/33 as of 2026-10-01, after A8 and A9; 46/29 as of 2026-09-30; 40 when
   this was written.) One of the 47 is a declared divergence, so 46 of them are
@@ -2976,7 +2987,7 @@ P3 seed corpus should be extended with the new fixtures as seeds.
   up anything above them. All three are done: A8 escapes two option values, A9
   exits non-zero on an unreadable input, A10 bounds the pattern cache. What
   remains is P5–P11, none of which is a decision.
-- **Every item in Phases A and B must leave the corpus at 48/48 and the goldens
+- **Every item in Phases A and B must leave the corpus at 59/59 and the goldens
   at 33/33 byte-identical.** None of them should change output for any input that
   does not currently fail. A8 and A9 are the exceptions and must be recorded as
   declared deviations in `lib.rs:16-31` and in the README — both now are.
