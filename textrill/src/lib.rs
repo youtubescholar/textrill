@@ -95,8 +95,6 @@
 //!   in-process callers that want a `String` regardless.
 
 #![forbid(unsafe_code)]
-#[cfg(feature = "extension-module")]
-mod python;
 
 pub mod chars;
 pub mod cli;

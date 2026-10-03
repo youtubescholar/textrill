@@ -15,17 +15,17 @@ textrill-gui-rs/target/
 # unreproducible in the first place.
 ref/
 
-# Virtualenv used to build the extension and run the GUI tests
-# (maturin develop --release, python -m unittest).
+# The retired Python virtualenv (maturin/PySide6). Nothing in the build uses it
+# now, but it is still on disk, so it stays ignored rather than dirtying the
+# tree.
 .venv/
 
-# Packaging droppings and the extension module maturin builds in place.
+# Packaging droppings from the retired Python packages. The Python GUI is
+# archived under legacy-archive/; a stray build there should not dirty the tree
+# if someone ever runs it again.
 *.egg-info/
-textrill/python/textrill/_native*.so
-# setuptools' staging dirs, left behind by `python -m build` on the GUI
-# package. Untracked build output, not part of the sdist or wheel.
-textrill-gui/build/
-textrill-gui/dist/
+legacy-archive/textrill-gui/build/
+legacy-archive/textrill-gui/dist/
 
 # Python bytecode from the corpus runner and the fuzzer.
 __pycache__/

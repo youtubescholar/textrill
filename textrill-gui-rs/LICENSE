@@ -17,18 +17,16 @@ has made, not a requirement imposed by any dependency:
   * Qt is not involved in this crate at all.  textrill is pure Rust and
     links no Qt code, so nothing here is forced into a particular copyleft
     license by Qt.
-  * The GUI in ../textrill-gui uses PySide6, which is licensed
-    "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only" and is used here as a set
-    of dynamically linked shared libraries.  LGPLv3 would be available on those
-    terms.  GPLv3 is used anyway so that this port and its GUI are covered by a
-    single, consistent licence, which is easier for a user to reason about and
-    easier for a distributor to ship.
+  * The GUI is pure Rust as well — `textrill-gui-rs`, built with `egui`/`eframe`
+    — and links no Qt and no Python.  It carries GPLv3 so that the port and its
+    front end are covered by a single, consistent licence, which is easier for
+    a user to reason about and easier for a distributor to ship.  (The retired
+    Python/PySide6 front end is archived under `legacy-archive/`.)
 
 If you are redistributing this and would rather work under the LGPL, the
-Artistic/GPL dual grant from upstream permits that, and Qt imposes no obstacle
-to it in the dynamically linked configuration used here.  That is a decision
-for you, not a permission this project can grant on upstream's behalf beyond
-what upstream already allows.
+Artistic/GPL dual grant from upstream permits that, and no dependency imposes
+an obstacle to it.  That is a decision for you, not a permission this project
+can grant on upstream's behalf beyond what upstream already allows.
 
 Upstream copyright
 ------------------

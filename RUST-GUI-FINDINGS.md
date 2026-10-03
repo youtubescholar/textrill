@@ -379,13 +379,13 @@ These are general, not egui-specific.
 
 ## 8. Consequences for textrill Phase 6
 
-- Replace the QtWidgets widget mapping in `textrill-gui/SURFACE.md` with an
-  egui mapping. The frozen behavioural contract (option inventory, generation
-  counter, queue drop, max-two-workers, panic capture) is unchanged.
-- Add a native GUI crate that depends on `egui`/`eframe` and the engine crate
-  only. Keep the Python/PySide6 GUI and the `pyo3` layer until the native
-  acceptance suite passes.
-- Port the 32 acceptance tests onto `egui_kittest`/`kittest`, querying by label.
+- The frozen behavioural contract (option inventory, generation counter, queue
+  drop, max-two-workers, panic capture) was ported from `textrill-gui/SURFACE.md`
+  as `egui_kittest` acceptance tests rather than as a re-drawn widget mapping.
+- A native GUI crate (`textrill-gui-rs`) depending only on `egui`/`eframe` and
+  the engine crate was added, and the Python/PySide6 GUI and the `pyo3` layer
+  were retired to `legacy-archive/` once its acceptance suite passed.
+- ~~Port the 32 acceptance tests onto `egui_kittest`/`kittest`, querying by label.~~ Done: 60 native GUI tests.
 - Keep the CLI's musl/static build path free of GUI dependencies.
 - The `qt6-base-dev` / `qt6-declarative-dev` packages are no longer required by
   the project and can be removed from the build prerequisites.

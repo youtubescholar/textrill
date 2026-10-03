@@ -22,14 +22,15 @@ What is **done**:
 
 - The conversion engine is byte-verified against the Perl original across a
   differential corpus of 48 cases and 33 upstream golden files.
-- 95 Rust tests, a fuzzer, and a 58-test GUI suite.
+- 95 Rust tests, a fuzzer, and a 60-test native GUI suite.
 - Encoding detection was reworked: BOM → UTF-16 evidence → UTF-8 → CP1252, with
   explicit overrides for the encodings that cannot be detected.
 
 What is **not** done yet:
 
-- The GUI is still the Python/PySide6 front end. A native Rust GUI is the next
-  major step.
+- The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`. The
+  earlier Python/PySide6 front end is retired and archived under
+  `legacy-archive/`.
 - No Flatpak, no distro packaging yet.
 - Performance is roughly 2x slower than the Perl original. Not a correctness
   problem, but not good.
@@ -84,13 +85,16 @@ cargo build --release
 
 ### The GUI
 
-The GUI is Python-based for now and needs a Python 3.8+ and PySide6:
+The GUI is a native `egui`/`eframe` binary that links the engine directly — no
+Python runtime, no PySide6:
 
 ```sh
-cd textrill-gui
-pip install -e .
-textrill-gui
+cd textrill-gui-rs
+cargo run --release
 ```
+
+Packaging as a Flatpak is planned; there is no wheel or installed entry point
+yet.
 
 ## Usage
 

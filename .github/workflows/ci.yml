@@ -12,8 +12,6 @@
 #                   which is the only thing that can say "behaves like upstream".
 #   fuzz          - randomised input against the same reference, fixed seeds so
 #                   a failure is reproducible and a pass is a real statement.
-#   gui           - the Qt path, offscreen, with T2H_TFILES set so the golden
-#                   test actually runs instead of skipping itself silently.
 #   upstream canary - the reference's own t/*.t. This is the step that is easy
 #                   to leave out and expensive to miss: if the Perl side breaks,
 #                   every differential comparison above is comparing against
@@ -150,69 +148,3 @@ jobs:
           PERL5LIB: ${{ github.workspace }}/ref/stubs:${{ github.workspace }}/ref/txt2html-3.0/lib
         run: prove t/
 
-  # The Qt path. Offscreen, because there is no display on a runner, and the
-  # golden test gets T2H_TFILES so it runs instead of skipping: a skipped test
-  # in CI is indistinguishable from a passing one unless you know to look.
-  gui:
-    name: gui (offscreen, goldens)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install the toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          python3 --version
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            textrill/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('textrill/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
-      # The venv is built here rather than cached, because the extension is
-      # installed into it by `maturin develop` and a cached venv with a stale
-      # `.so` in it would test the wrong binary -- the same mistake as A1's
-      # stale debug build, one layer up.
-      - name: Build the venv
-        run: |
-          python3 -m venv .venv
-          .venv/bin/pip install --upgrade pip maturin PySide6
-
-      - name: Reference
-        run: make ref
-
-      # One run, and its output is kept. The GUI suite used to print a
-      # libshiboken error during interpreter shutdown -- BacklogTests bound its
-      # window to a local, so the MainWindow was collected while the QApplication
-      # lived on, and the converter's thread pool outlived both. It never failed a
-      # test, which is why it survived: a shutdown-ordering defect that only
-      # printed to stderr. Fixed by keeping the window on the class, so there is
-      # now nothing to tolerate and the log is uploaded on failure rather than
-      # annotated on success.
-      - name: GUI suite
-        env:
-          # No display on a runner; Qt needs to be told rather than left to
-          # find out.
-          QT_QPA_PLATFORM: offscreen
-          # Pointed at the reference's own tfiles so the golden comparison runs.
-          # Verified locally: with this set the reference-golden test executes
-          # and passes, without it the test skips itself and the run is still
-          # green. A skip in CI is indistinguishable from a pass.
-          T2H_TFILES: ${{ github.workspace }}/ref/txt2html-3.0/tfiles
-        run: make gui 2>&1 | tee "$RUNNER_TEMP/gui.log"
-
-      # The log either way, so a red GUI job says why inside the artifact rather
-      # than only in a scrolled-past log line.
-      - name: Keep the GUI log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gui-suite-log
-          path: ${{ runner.temp }}/gui.log
-          if-no-files-found: ignore

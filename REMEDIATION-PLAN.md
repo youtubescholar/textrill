@@ -1,7 +1,8 @@
 # txt2html — remediation plan
 
-Status: **in progress**, 2026-10-01. Covers `txt2html-rs` (Rust engine + CLI +
-Python bindings) and `txt2html-gui` (PySide6 front end).
+Status: **in progress**, 2026-10-01; Phase 6 updated 2026-10-03. Covers
+`textrill` (Rust engine + CLI) and `textrill-gui-rs` (native `egui` front end).
+The Python bindings and the PySide6 front end are retired to `legacy-archive/`.
 
 **Progress is recorded in §0.1 below. Done: P1–P5, P8–P10, P12, P14–P19, P21–P23,
 E1–E3, A1, A1b, A2–A10. P6 is **not met**: the two prescribed fixes are worth ~0% of
@@ -9,20 +10,22 @@ wall-clock, and the sound required-literal prefilter that followed them only buy
 another 5–15% of the link pass. The residual gap is `fancy_regex`'s backtracking
 engine, which `regex` cannot delegate to for patterns that need lookaround; see P6.
 P11 is done: `@file`, `~/.txt2htmlrc` and `./.txt2htmlrc` are read, with
-`file:line:` diagnostics. Phase 6 is **in progress**: the GUI/engine surface is
-frozen in `textrill-gui/SURFACE.md`. The GUI toolkit is **decided: `egui`/`eframe`**
-(pure Rust). The earlier Qt 6 decision was abandoned after the spike: `cxx-qt`
-0.10 fails to compile any Rust QObject on this toolchain, and Qt's official
-`qtbridge` requires Qt 6.10 while this host has 6.4.2. The evidence and the
-packaging analysis are in `RUST-GUI-FINDINGS.md`. `SURFACE.md`'s widget mapping
-still needs to be revised from QtWidgets to egui; the behavioural contract is
-unchanged.
+`file:line:` diagnostics. Phase 6's GUI is **done**: the native `egui`/`eframe` crate `textrill-gui-rs`
+passes its ported 60-test suite and ran side by side with the Python front end on
+2026-10-03; the Python/PySide6 front end and the pyo3 bindings it needed are
+retired to `legacy-archive/`. The toolkit evidence and packaging analysis are in
+`RUST-GUI-FINDINGS.md`; the earlier Qt 6 decision was abandoned after the spike
+(`cxx-qt` 0.10 fails to compile any Rust QObject on this toolchain, and Qt's
+official `qtbridge` requires Qt 6.10 while this host has 6.4.2). The frozen
+behavioural contract is `textrill-gui/SURFACE.md` (archived); its QtWidgets
+widget mapping was ported as tests rather than re-drawn for egui.
 P13 is answered: the deliverable is a single self-contained artifact, so the GUI
-is rewritten in Rust + Qt and **the engine is kept** — see P13 and Phase 6. Every
+was rewritten in Rust (egui, not Qt) and **the engine is kept** — see P13 and
+Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
 finished: all four defects it found are fixed, the panic divergence it surfaced
 (P22) is closed, and P20's alignment guard is in. What remains is the ordinary
-backlog, plus one planned rewrite.
+backlog, P6's performance gap, and packaging.
 
 > **Read Phase 0b before trusting any result in this document.** Checks in
 > `make verify` were found on 2026-10-01 to be structurally incapable of reporting
@@ -106,7 +109,7 @@ marked ✓ were run again that day; the rest are carried from 2026-09-30.
 | Check | Result |
 |---|---|
 | `cargo test --release` ✓ | **52/52** pass (14 lib, 4 optionstest, 13 cliexit, 5 linktest, 9 paratest, 4 alloctest, 3 doc) — was 33/33 |
-| GUI `unittest` (offscreen) ✓ | **46/46** pass, 1 skipped — was 30/30 |
+| GUI (Python/PySide6, offscreen) | **58** tests, 1 skipped — was recorded as 46/46; the suite had grown. Retired 2026-10-03, superseded by the 60-test native suite (`textrill-gui-rs`) |
 | corpus, clean `RUNDIR` ✓ | **48/48**, 33/33 goldens (was 38/40, 2 false passes — see P1). Now verified to **fail** when it should — see P15. The 48th is `pre_explicit`, which existed in the tree but never ran: `pre_explicit_blank` was declared twice, so A1's case was shadowed and its own assertions were dead (P21) |
 | `proptest.py` ✓ | OK — **0 known-open checks**. It used to report 30, all owned by A8, printed rather than silenced; A8 is fixed and the list is empty. Verified to return 1 on failure |
 | `alloctest` ✓ | 4/4, at any `--test-threads` (see P12) |
@@ -182,7 +185,7 @@ correct implementation instead of two.
 | P22, and P4 part 2 | **done** | a user regexp that does not compile no longer panics (exit 101, no output): validated up front, then a clean error naming the option, the pattern and the parser's complaint. A `/pattern/` link-dictionary entry took the same route and now does too — reported and skipped, which was the last user-reachable panic |
 | P5 | **done** | the inherited `/|.../` hang: an empty-matching dictionary pattern spun the substitution loop forever, in the Perl original too. Rejected at load with a diagnostic, reusing the P4 channel. The criterion is `re.is_match("")` because `translate_pattern` turns `\b` into a zero-width lookaround alternation and a `*` glob is not empty-matching. `-o`/`-s` deliberately unguarded: they substitute once, Perl accepts them, and guarding them would be a Tier 1 divergence |
 | P13 | **decided** | single artifact. The GUI is rewritten off Python + PySide6; **the 5,644-line engine is kept**. P5, P6 and P11 are sequenced *ahead* of it. P7, its stated prerequisite, is **done** — the encoding rule was implemented twice and the copies disagreed; they now agree. Plan in **Phase 6**. Delivery since refined: Flatpak, not a bundled binary, and the Qt assumption is open — see "Licensing and distribution" |
-| Phase 6 | **in progress** | the GUI rewrite: 1,365 lines of Python shell out, 32 tests ported as acceptance criteria. §6.3 step 1 done: surface frozen in `textrill-gui/SURFACE.md`. Step 2 done: `FileTests` moved to Rust, which required adding the engine's missing encoder (`src/encode.rs`) and fixed a UTF-16 decoder defect. Steps 3-5 (the shell itself) are in progress: the native crate `textrill-gui-rs` is in, with the `cli::SPECS`-generated options panel, `worker.py`'s concurrency contract, the document/file/settings model, the full chrome, the unsaved-changes prompt, native file choosers and `app.py`'s command line all ported — only window geometry/state persistence is left. The 32 acceptance criteria are covered by the native suite (60 tests). CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Toolkit **decided: `egui`/`eframe`** (pure Rust), after the Qt path was rejected — `cxx-qt` 0.10 does not compile Rust QObjects on this toolchain and `qtbridge` needs Qt 6.10 while the host has 6.4.2. Evidence and packaging analysis in `RUST-GUI-FINDINGS.md`. Open: run the two GUIs side by side on the same fixtures, then retire the Python one |
+| Phase 6 | **in progress** | the GUI rewrite: 1,365 lines of Python shell out, 32 tests ported as acceptance criteria. §6.3 step 1 done: surface frozen in `textrill-gui/SURFACE.md`. Step 2 done: `FileTests` moved to Rust, which required adding the engine's missing encoder (`src/encode.rs`) and fixed a UTF-16 decoder defect. Steps 3-5 (the shell itself) are done: the native crate `textrill-gui-rs` is in, with the `cli::SPECS`-generated options panel, `worker.py`'s concurrency contract, the document/file/settings model, the full chrome, the unsaved-changes prompt, native file choosers and `app.py`'s command line all ported — only window geometry/state persistence is left. The 32 acceptance criteria are covered by the native suite (60 tests). CLI fate **decided** (CLI stays, independently distributable); replace-vs-coexist **decided** (coexist until the ported suite passes, then replace); packaging **decided** (Flatpak, not a bundled binary). Toolkit **decided: `egui`/`eframe`** (pure Rust), after the Qt path was rejected — `cxx-qt` 0.10 does not compile Rust QObjects on this toolchain and `qtbridge` needs Qt 6.10 while the host has 6.4.2. Evidence and packaging analysis in `RUST-GUI-FINDINGS.md`. Step 5 done 2026-10-03: a side-by-side differential run — Python suite 58 tests (1 skipped) against native 60/60, both GUIs launched under Xvfb on the same fixtures, and a 10-encoding file-layer differential that decoded, detected and round-tripped byte-identically. The Python GUI and the pyo3 bindings are retired to `legacy-archive/`; `make gui` and the CI `gui` job are removed |
 | licensing | **decided** | engine and CLI stay **GPL-3.0-or-later**; GUI is **GPLv3**. BSD for the CLI was raised and declined as unnecessary — see "Licensing and distribution" |
 | toolchain | done | `make verify` gate, `cargo fmt`, `#![forbid(unsafe_code)]`, git with one logical change per commit |
 
@@ -1982,9 +1985,14 @@ Three things exist only because two languages are in the path:
    backlog is also a memory backlog. Generation-counter plus queue-drop is the
    design. Do not rediscover it — a 300 ms debounce alone does not bound memory
    if the queue drains slower than the user types.
-5. **Run both GUIs side by side until the ported suite passes.** Then delete the
-   Python one. Keeping it runnable is what makes the suite comparison meaningful
-   rather than a rewrite-from-memory.
+5. ~~**Run both GUIs side by side until the ported suite passes.**~~ **Done
+   2026-10-03.** The Python suite passed 58 tests (1 skipped) and the native
+   suite 60/60; both windows ran under Xvfb on the same fixtures; and across ten
+   encodings the two file layers decoded to identical text, detected the same
+   encoding, and wrote identical round-trip bytes — the duplicated encoding rule
+   agrees. The Python GUI and the pyo3 bindings it needed are retired to
+   `legacy-archive/` (nothing there is built or tested), and `make gui` and the
+   CI `gui` job are gone.
 
 ### 6.4 Verification
 
@@ -2006,10 +2014,10 @@ conversion can be compared byte-for-byte against Perl through the same harness
 the engine already uses. A GUI rewrite with no byte-level oracle would be
 guesswork; this one is not.
 
-`.github/workflows/ci.yml`'s `gui` job needs replacing: no venv, no maturin, no
-`PySide6`, no `T2H_TFILES` indirection — the Rust GUI links the engine directly,
-so the reference-golden test becomes an ordinary cargo test. The `T2H_TFILES`
-mechanism and the whole pyo3 install path are deletable from CI at the same time.
+`.github/workflows/ci.yml`'s `gui` job is **gone** (2026-10-03): no venv, no
+maturin, no `PySide6`, no `T2H_TFILES` indirection. The Rust GUI links the engine
+directly, and the `rust` job runs `make test-gui-rs` as ordinary cargo tests. The
+`T2H_TFILES` mechanism and the whole pyo3 install path were deleted with it.
 
 ### 6.5 Where Phase 5 goes
 

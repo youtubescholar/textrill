@@ -1,7 +1,7 @@
 # Single entry point for the project's checks. Everything is one command:
 #
 #   make verify      fmt-check, clippy, Rust tests (engine and GUI), the
-#                    differential corpus, fuzzer, GUI suite
+#                    differential corpus, fuzzer
 #   make fix         what is safe to apply automatically: cargo fmt
 #   make test        just the Rust tests
 #   make corpus      the Perl differential corpus
@@ -17,9 +17,7 @@ CARGO  ?= cargo
 PYTHON ?= python3
 ROOT  := $(CURDIR)
 RS    := $(ROOT)/textrill
-GUI   := $(ROOT)/textrill-gui
 GUI_RS := $(ROOT)/textrill-gui-rs
-VENV  ?= $(ROOT)/.venv
 
 RELEASE_BIN := $(RS)/target/release/textrill
 REFDIR      ?= $(ROOT)/ref/txt2html-3.0
@@ -46,11 +44,11 @@ FUZZ_JOBS ?= 8
 # other's evidence -- see fuzz.py --fail-dir.
 FUZZ_FAILDIR ?= $(RS)/tests/corpus/fuzz-fail
 
-.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz gui scale clean
+.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale clean
 
 all: verify
 
-verify: fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz gui
+verify: fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz
 	@echo
 	@echo "verify: OK"
 
@@ -84,9 +82,9 @@ clippy: build
 test: build
 	cd $(RS) && $(CARGO) test --release
 
-# The native GUI crate. It is the one that will replace the Python GUI, so it is
-# in the gate from the start rather than after the swap. The tests are headless
-# (`egui_kittest` drives the widget tree directly), so this needs no display.
+# The native GUI crate. The Python/PySide6 front end it replaced is archived in
+# legacy-archive/. The tests are headless (`egui_kittest` drives the widget tree
+# directly), so this needs no display.
 test-gui-rs:
 	cd $(GUI_RS) && $(CARGO) test
 
@@ -259,14 +257,6 @@ scale: build
 		cmp -s /tmp/scale_mine.html /tmp/scale_ref.html \
 			&& echo "  $$f: byte-identical" || echo "  $$f: DIFFER"; \
 	done
-
-# --- GUI ---------------------------------------------------------------------
-
-# The extension is reinstalled first: the GUI imports the compiled module, not
-# the crate, so without this the suite tests whatever maturin last built.
-gui: build
-	cd $(RS) && $(VENV)/bin/maturin develop --release
-	cd $(GUI) && $(VENV)/bin/python -m unittest discover -s tests
 
 clean:
 	cd $(RS) && $(CARGO) clean
