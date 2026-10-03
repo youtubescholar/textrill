@@ -316,6 +316,63 @@ fn discarding_the_prompt_runs_the_command() {
     );
 }
 
+/// Opening while there are edits asks first, like New.
+#[test]
+fn a_dirty_document_asks_before_open() {
+    let mut app = TextrillApp::default();
+    app.doc.text = "edited".to_string();
+    app.doc.dirty = true;
+    app.open_document();
+    assert!(app.is_prompting());
+}
+
+/// With nothing to lose, `Open` goes straight to the chooser.
+#[test]
+fn a_clean_document_opens_the_chosen_file() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let src =
+        std::env::temp_dir().join(format!("textrill-open-{}-{nanos}.txt", std::process::id()));
+    std::fs::write(&src, "hello").expect("write source");
+
+    let mut app = TextrillApp::default();
+    app.set_chooser(Box::new(PathChooser(src.clone())));
+    app.open_document();
+
+    assert!(!app.is_prompting());
+    assert_eq!(app.doc.path.as_deref(), Some(src.as_path()));
+    assert_eq!(app.doc.text, "hello");
+    let _ = std::fs::remove_file(&src);
+}
+
+/// Discarding the prompt runs the waiting `Open`, which loads the chosen file.
+#[test]
+fn discarding_the_prompt_opens_the_chosen_file() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let src =
+        std::env::temp_dir().join(format!("textrill-open-{}-{nanos}.txt", std::process::id()));
+    std::fs::write(&src, "hello").expect("write source");
+
+    let mut app = TextrillApp::default();
+    app.set_chooser(Box::new(PathChooser(src.clone())));
+    app.doc.text = "edited".to_string();
+    app.doc.dirty = true;
+    app.open_document();
+    assert!(app.is_prompting());
+
+    app.resolve_save_prompt(SaveAnswer::Discard, &egui::Context::default());
+
+    assert!(!app.is_prompting());
+    assert_eq!(app.doc.path.as_deref(), Some(src.as_path()));
+    assert_eq!(app.doc.text, "hello");
+    let _ = std::fs::remove_file(&src);
+}
+
 /// `Save` writes the text to the opened file, then runs the command.
 #[test]
 fn saving_the_prompt_writes_the_text_then_runs_the_command() {
@@ -415,6 +472,34 @@ fn the_prompt_is_drawn_and_discard_works() {
 
     assert!(!harness.state().is_prompting());
     assert!(harness.state().doc.text.is_empty());
+}
+
+/// The startup flags set the options the menu would, and open the file.
+#[test]
+fn the_command_line_sets_options_and_opens_a_file() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let src =
+        std::env::temp_dir().join(format!("textrill-args-{}-{nanos}.txt", std::process::id()));
+    std::fs::write(&src, "hello").expect("write source");
+
+    let args = textrill_gui::args::parse(
+        ["--no-xhtml", "--tables", src.to_str().unwrap()]
+            .iter()
+            .map(std::ffi::OsString::from),
+    )
+    .expect("parse args");
+
+    let mut app = TextrillApp::default();
+    app.apply_command_line(&args);
+
+    assert!(!app.opts.xhtml, "--no-xhtml did not reach the options");
+    assert!(app.opts.make_tables, "--tables did not reach the options");
+    assert_eq!(app.doc.path.as_deref(), Some(src.as_path()));
+    assert_eq!(app.doc.text, "hello");
+    let _ = std::fs::remove_file(&src);
 }
 
 fn wait_for_conversion(app: &mut TextrillApp, timeout: Duration) {

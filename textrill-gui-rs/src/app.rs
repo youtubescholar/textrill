@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use egui::Ui;
 use textrill::options::Options;
 
+use crate::args::Args;
 use crate::dialogs::{Chooser, NativeChooser};
 use crate::document::Document;
 use crate::options_panel::OptionsPanel;
@@ -75,6 +76,7 @@ pub enum SaveAnswer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingAction {
     New,
+    Open,
     LoadSample,
     Quit,
 }
@@ -194,6 +196,27 @@ impl TextrillApp {
             .and_then(|()| self.settings.set_options(&json));
         if let Err(error) = stored {
             self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Apply the startup choices from the command line, in the order `app.py`
+    /// did: open the file, set the dialect/table options, then reconvert if an
+    /// option was given so the preview matches straight away.
+    pub fn apply_command_line(&mut self, args: &Args) {
+        if let Some(file) = &args.file {
+            if let Err(error) = self.load_file(file) {
+                self.status = error;
+            }
+        }
+        if let Some(xhtml) = args.xhtml {
+            let value = if xhtml { "true" } else { "false" };
+            let _ = textrill::cli::set_value(&mut self.opts, "xhtml", value);
+        }
+        if args.tables {
+            let _ = textrill::cli::set_value(&mut self.opts, "make_tables", "true");
+        }
+        if args.xhtml.is_some() || args.tables {
+            self.convert_now();
         }
     }
 
@@ -361,8 +384,16 @@ impl TextrillApp {
         self.status = "HTML copied to the clipboard".to_string();
     }
 
-    /// `File → Open…`: ask for a text file, then load it.
-    pub fn open_command(&mut self) {
+    /// `File → Open…`: ask about unsaved text, then choose a file.
+    pub fn open_document(&mut self) {
+        if self.doc.dirty {
+            self.pending = Some(PendingAction::Open);
+        } else {
+            self.do_open();
+        }
+    }
+
+    fn do_open(&mut self) {
         let from = self.doc.path.clone();
         if let Some(path) = self.chooser.open_text(from.as_deref()) {
             if let Err(error) = self.load_file(&path) {
@@ -464,6 +495,7 @@ impl TextrillApp {
         self.pending = None;
         match action {
             PendingAction::New => self.do_new(),
+            PendingAction::Open => self.do_open(),
             PendingAction::LoadSample => self.do_load_sample(),
             PendingAction::Quit => {
                 self.store_settings();
@@ -545,7 +577,7 @@ impl TextrillApp {
                     ui.close();
                 }
                 if ui.button("Open…").clicked() {
-                    self.open_command();
+                    self.open_document();
                     ui.close();
                 }
                 if ui.button("Save").clicked() {

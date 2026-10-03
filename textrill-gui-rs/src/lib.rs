@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod args;
 mod dialogs;
 pub mod document;
 mod json;

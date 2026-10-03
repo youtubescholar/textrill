@@ -9,7 +9,27 @@
 
 #![forbid(unsafe_code)]
 
+use textrill_gui::args;
+
 fn main() -> eframe::Result<()> {
+    let parsed = match args::parse(std::env::args_os().skip(1)) {
+        Ok(parsed) => parsed,
+        Err(message) => {
+            eprintln!("{message}");
+            eprintln!("textrill-gui: try `textrill-gui --help` for more information");
+            std::process::exit(2);
+        }
+    };
+    if parsed.help {
+        print!("{}", args::USAGE);
+        return Ok(());
+    }
+    if parsed.version {
+        // The engine and this window are released together and share a version.
+        println!("textrill-gui for textrill {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // A window big enough for the input, the preview and the option panel
     // without scrolling on a typical screen. The minimum keeps the controls
     // reachable on something small; the user can scale the whole UI from the
@@ -24,6 +44,10 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "textrill",
         options,
-        Box::new(|_cc| Ok(Box::new(textrill_gui::TextrillApp::default()))),
+        Box::new(move |_cc| {
+            let mut app = textrill_gui::TextrillApp::default();
+            app.apply_command_line(&parsed);
+            Ok(Box::new(app))
+        }),
     )
 }
