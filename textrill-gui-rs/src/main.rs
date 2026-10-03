@@ -44,7 +44,8 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "textrill",
         options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
+            textrill_gui::fonts::install(&cc.egui_ctx);
             let mut app = textrill_gui::TextrillApp::default();
             app.apply_command_line(&parsed);
             Ok(Box::new(app))

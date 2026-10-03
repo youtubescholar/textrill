@@ -22,6 +22,7 @@ pub mod app;
 pub mod args;
 mod dialogs;
 pub mod document;
+pub mod fonts;
 mod json;
 pub mod options_panel;
 pub mod options_store;

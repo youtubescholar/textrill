@@ -195,7 +195,11 @@ verified present here, and a windowed run under `xvfb-run` with
   the usual GL/EGL/Wayland/X11/xkbcommon libraries, so an `eframe` app needs no
   unusual runtime extension. This is **simpler** than shipping Qt, because there
   is no Qt version to match against the runtime.
-- `default_fonts` bundles fonts, so there is no runtime font dependency.
+- Fonts are bundled, so there is no runtime font dependency: `default_fonts`
+  (Ubuntu-Light, a monochrome emoji face, Hack) plus Noto Sans Regular
+  (Greek/Cyrillic) and Noto Sans CJK TC (the full pan-CJK repertoire), appended
+  by the app as fallbacks. See §5.5 and §6 item 14 for the size and the SC/TC
+  choice.
 - If the OS accessibility bridge is enabled later, Flatpak needs
   `--talk-name=org.a11y.Bus`.
 - Distro packaging is equally straightforward: the binary's only hard runtime
@@ -233,6 +237,12 @@ copyleft-only, AGPL, SSPL or non-free. The classes present:
   Ubuntu-Light (Ubuntu font licence), both redistributable. Distros that prefer
   system fonts can drop `default_fonts`, at the cost of egui having no built-in
   glyphs.
+- The bundled `NotoSans-Regular.ttf` and `NotoSansCJKtc-Regular.otf`
+  (`textrill-gui-rs/assets/fonts/`, with `OFL.txt` and `OFL-NotoSansCJK.txt`)
+  are OFL-1.1. They add no crate to the graph. `Noto Sans` carries
+  Latin/Greek/Cyrillic; `Noto Sans CJK TC` carries the full pan-CJK repertoire
+  (CJK Unified Ideographs + Ext-A, kana, Hangul, Bopomofo). See §6 item 14 for
+  why `TC` and what it costs.
 - GPL-3.0-or-later: only our own two crates.
 
 **No network, telemetry or fingerprinting.** `cargo tree` contains no
@@ -312,6 +322,30 @@ The following were confirmed by running them, not by reading docs:
     were added (`rfd`, `pollster`); `percent-encoding`, `libc` and `log` were
     already in the graph. The `wayland` feature is left off because the dialog
     is not parented.
+13. The GUI's command line is hand-parsed (`src/args.rs`) rather than pulling in
+    `clap`, keeping parity with `app.py`: `[file]`, `--xhtml`/`--no-xhtml`,
+    `--tables`, `--version`, `-h`/`--help`. `--version` prints and exits before
+    any window is created; an unknown flag or a second file exits 2.
+14. `egui` renders only the fonts it is given and never reads the OS font
+    configuration, so "the system will supply CJK" is false without extra work.
+    The app bundles Noto Sans Regular (0.57 MB) and Noto Sans CJK TC Regular
+    (15.7 MB), both OFL-1.1, appended behind the stock faces.
+    - **Coverage:** the `CJK TC` file is the full pan-CJK repertoire, not a
+      Traditional-only subset — verified with `fc-query`: Traditional-only
+      codepoints (國門說體龍), kana (あカ), Hangul (한), and Bopomofo (ㄅ) are all
+      present. Japanese and Korean text therefore do not tofu.
+    - **SC vs TC:** `egui` applies no OpenType language features, so one default
+      shape set must be chosen. SC and TC have identical coverage; they differ
+      only in the default glyph shape for codepoints shared across regions
+      (直, 骨, 者…). `TC` was chosen so Traditional-default shapes are used.
+      Bundling both is pointless: both contain every codepoint, so the second is
+      never consulted.
+    - **Cost:** the CJK font dominates the app — stripped binary 28.6 MB (from
+      12.9 MB), ~15.7 MB compressed (≈ Flatpak download), up from ~4.2 MB. This
+      is in line with comparable self-contained Rust GUIs (e.g. LACT: 10.2 MB
+      download / 27.4 MB installed) and far below Electron editors
+      (150–230 MB). Dropping the CJK font is the one big size lever.
+    The engine converts CJK correctly regardless; this is display-only.
 
 ## 7. How to sequence this better next time
 
