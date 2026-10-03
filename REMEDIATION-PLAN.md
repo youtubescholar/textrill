@@ -1954,7 +1954,8 @@ Three things exist only because two languages are in the path:
    panel is generated from `cli::SPECS` with bounds from `numeric_range`, now
    with the Python panel's filter and reset. The document model, file state
    (source and output paths, source encoding, dirty and output-stale flags,
-   last-saved HTML), the `QSettings`-compatible `auto` store, the 300 ms
+   last-saved HTML), the `QSettings`-compatible store (the `auto` flag and the
+   whole option blob, in the JSON and INI escaping `QSettings` used), the 300 ms
    debounce, runtime UI zoom, the menu/toolbar/filter/drag-and-drop chrome, and
    the unsaved-changes prompt (Save/Discard/Cancel, including the window's own
    close button) are ported. `Open` and `Save As` still reach the explicit-path

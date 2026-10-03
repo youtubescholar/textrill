@@ -164,16 +164,24 @@ impl TextrillApp {
         opts
     }
 
-    /// Apply the persisted `auto` choice, if there is one.
+    /// Apply the persisted `auto` choice and option set, if there are any.
     pub fn restore_settings(&mut self) {
         if let Some(auto) = self.settings.auto() {
             self.auto = auto;
         }
+        if let Some(json) = self.settings.options() {
+            crate::options_store::decode(&json, &mut self.opts);
+        }
     }
 
-    /// Persist the current `auto` choice.
+    /// Persist the current `auto` choice and option set.
     pub fn store_settings(&mut self) {
-        if let Err(error) = self.settings.set_auto(self.auto) {
+        let json = crate::options_store::encode(&self.opts);
+        let stored = self
+            .settings
+            .set_auto(self.auto)
+            .and_then(|()| self.settings.set_options(&json));
+        if let Err(error) = stored {
             self.status = format!("could not save settings: {error}");
         }
     }
@@ -376,6 +384,7 @@ impl TextrillApp {
             self.pending = Some(PendingAction::Quit);
         } else {
             self.closing = true;
+            self.store_settings();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -422,7 +431,10 @@ impl TextrillApp {
         match action {
             PendingAction::New => self.do_new(),
             PendingAction::LoadSample => self.do_load_sample(),
-            PendingAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            PendingAction::Quit => {
+                self.store_settings();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
         }
     }
 
@@ -681,9 +693,12 @@ impl TextrillApp {
         // The window's own close button goes through the unsaved-changes prompt
         // too, unless we are already closing.
         if !self.closing && ui.ctx().input(|i| i.viewport().close_requested()) {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            // Persist before the window goes away, then hold the close only if
+            // there is unsaved text to ask about.
+            self.store_settings();
             if self.doc.dirty {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.pending = Some(PendingAction::Quit);
             }
         }

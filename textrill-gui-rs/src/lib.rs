@@ -20,7 +20,9 @@
 
 pub mod app;
 pub mod document;
+mod json;
 pub mod options_panel;
+pub mod options_store;
 pub mod settings;
 pub mod worker;
 

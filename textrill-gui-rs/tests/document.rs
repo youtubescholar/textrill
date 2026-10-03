@@ -270,6 +270,76 @@ fn store_settings_writes_the_choice_out() {
     assert_eq!(Settings::with_path(&path).auto(), Some(false));
 }
 
+/// Every value `get_value` can read back, for comparing a full option set.
+fn snapshot(opts: &textrill::options::Options) -> Vec<(String, String)> {
+    textrill::cli::SPECS
+        .iter()
+        .map(|spec| {
+            (
+                spec.names[0].to_string(),
+                textrill::cli::get_value(opts, spec.names[0]).unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_whole_option_set_round_trips_through_the_file() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    for (name, value) in [
+        ("demoronize", "false"),
+        ("hrule_min", "7"),
+        ("title", "a, b"),
+        ("infile", "one.txt"),
+        ("infile", "two.txt"),
+        ("table_type", "ALIGN=0"),
+        ("meta_charset", "true"),
+    ] {
+        textrill::cli::set_value(&mut app.opts, name, value).expect("set");
+    }
+    app.store_settings();
+
+    let reopened = TextrillApp::with_settings(Settings::with_path(&path));
+    assert_eq!(snapshot(&app.opts), snapshot(&reopened.opts));
+}
+
+#[test]
+fn a_hand_written_python_option_blob_is_understood() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    // Exactly the shape `QSettings` wrote for `json.dumps(values)`: the blob is
+    // a quoted INI value, quoting is backslash-escaped, and `json.dumps` emits
+    // non-ASCII as `\uXXXX`.
+    std::fs::write(
+        &path,
+        r#"[General]
+auto=true
+options="{\"hrule_min\": 5, \"title\": \"caf\u00e9\", \"demoronize\": false, \"infile\": [\"a.txt\", \"b.txt\"], \"table_type\": {\"ALIGN\": false}}"
+"#,
+    )
+    .expect("write config");
+
+    let settings = Settings::with_path(&path);
+    assert_eq!(settings.auto(), Some(true));
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    assert_eq!(
+        textrill::cli::get_value(&app.opts, "hrule_min").unwrap(),
+        "5"
+    );
+    assert_eq!(
+        textrill::cli::get_value(&app.opts, "title").unwrap(),
+        "café"
+    );
+    assert!(!app.opts.demoronize);
+    assert_eq!(
+        app.opts.infile,
+        vec!["a.txt".to_string(), "b.txt".to_string()]
+    );
+    assert!(!app.opts.table_type.align);
+}
+
 // ------------------------------------------------------------------- app
 
 #[test]

@@ -14,10 +14,11 @@
 //! the Python one -- and a hand-edited `auto=true` keeps working, which is what
 //! `test_auto_convert_setting_survives_a_hand_edited_config` pins.
 //!
-//! Only the keys this front end actually reads are modelled, so an unknown key
-//! in the file is preserved by being left alone rather than dropped. The write
-//! path rewrites the whole `[General]` section, which is what `QSettings` did
-//! too.
+//! Two keys are modelled: the `auto` flag and the `options` JSON blob the
+//! Python window stored with `json.dumps`. Values are escaped the way
+//! `QSettings` escaped them, so the same file round-trips between the two front
+//! ends. The write path rewrites the whole `[General]` section, which is what
+//! `QSettings` did too.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -75,6 +76,11 @@ impl Settings {
         self.get("auto").map(parse_bool)
     }
 
+    /// The stored option blob, exactly the JSON text `mainwindow.py` wrote.
+    pub fn options(&self) -> Option<String> {
+        self.get("options").map(str::to_string)
+    }
+
     /// Set `key` and write the file immediately.
     pub fn set(&mut self, key: &str, value: &str) -> Result<(), String> {
         self.values.insert(key.to_string(), value.to_string());
@@ -84,6 +90,11 @@ impl Settings {
     /// Set the `auto` flag.
     pub fn set_auto(&mut self, auto: bool) -> Result<(), String> {
         self.set("auto", if auto { "true" } else { "false" })
+    }
+
+    /// Set the option blob (raw JSON; it is escaped for the file on write).
+    pub fn set_options(&mut self, json: &str) -> Result<(), String> {
+        self.set("options", json)
     }
 
     /// Remove `key` and write the file immediately.
@@ -115,12 +126,16 @@ impl Settings {
             }
             if let Some((key, value)) = line.split_once('=') {
                 self.values
-                    .insert(key.trim().to_string(), value.trim().to_string());
+                    .insert(key.trim().to_string(), unescape_ini(value));
             }
         }
     }
 
     /// Write the `[General]` section back out, creating the directory.
+    ///
+    /// Values are escaped the way `QSettings` escapes them, so the option blob
+    /// (`{...}` with `"`, `,` and `=`) comes out quoted and a hand-written file
+    /// keeps working.
     fn write(&self) -> Result<(), String> {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -129,10 +144,69 @@ impl Settings {
         for (key, value) in &self.values {
             out.push_str(key);
             out.push('=');
-            out.push_str(value);
+            out.push_str(&escape_ini(value));
             out.push('\n');
         }
         std::fs::write(&self.path, out).map_err(|e| format!("{}: {e}", self.path.display()))
+    }
+}
+
+/// Escape a value the way `QSettings`' INI writer does: always escape the
+/// backslash and control characters, and quote when the value could otherwise
+/// be mistaken for a list or a key/value separator.
+fn escape_ini(value: &str) -> String {
+    let mut escaped = String::new();
+    for c in value.chars() {
+        match c {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c => escaped.push(c),
+        }
+    }
+    let quoted = value.starts_with(' ') || value.ends_with(' ') || value.contains([',', ';', '=']);
+    if quoted {
+        format!("\"{escaped}\"")
+    } else {
+        escaped
+    }
+}
+
+/// The inverse of [`escape_ini`]: strip the surrounding quotes if any, then
+/// resolve the backslash escapes. Unquoted values are trimmed, so a
+/// hand-written `auto = true` still reads as `true`.
+fn unescape_ini(value: &str) -> String {
+    let trimmed = value.trim();
+    let (inner, quoted) = match trimmed.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+        Some(inner) => (inner, true),
+        None => (trimmed, false),
+    };
+    let mut out = String::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    if quoted {
+        out
+    } else {
+        out.trim().to_string()
     }
 }
 
