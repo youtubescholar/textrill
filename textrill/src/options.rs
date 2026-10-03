@@ -242,6 +242,15 @@ pub struct Options {
     pub explicit_headings: bool,
     pub extract: bool,
     pub hrule_min: usize,
+    /// P5.1. Emit an HTML5 document: `<!DOCTYPE html>`, an `<html>` element
+    /// without the XHTML namespace, and `<meta charset="utf-8">`.
+    ///
+    /// Default **off**. Byte-identical output from the reference is the port's
+    /// contract, so HTML5 is strictly opt-in; turning it on by default would
+    /// move every golden. The tag and attribute case still follows
+    /// `lower_case_tags`, so `--html5 --lower_case_tags` gives idiomatic
+    /// lower-case HTML5 and `--html5` alone gives valid but upper-case tags.
+    pub html5: bool,
     pub indent_width: usize,
     pub indent_par_break: bool,
     pub italic_delimiter: String,
@@ -323,6 +332,7 @@ impl Default for Options {
             explicit_headings: false,
             extract: false,
             hrule_min: 4,
+            html5: false,
             indent_width: 2,
             indent_par_break: false,
             italic_delimiter: "*".to_string(),

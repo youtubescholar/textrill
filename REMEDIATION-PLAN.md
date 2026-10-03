@@ -274,7 +274,9 @@ Recommended order from here — **every item below is now done**:
    unreachable for its entire existence.
 
 What actually remains is not a defect: **packaging** (the Flatpak manifest is
-decided but not yet written) and the deferred **Phase 5** opt-in features. The
+decided but not yet written) and the remaining **Phase 5** opt-in features —
+**HTML5 mode** landed 2026-10-04 as `--html5` (P5.1); TOC, heading numbering and
+streaming are still open. The
 **musl CI build** landed 2026-10-03 — a static `x86_64-unknown-linux-musl`
 binary, run through the differential corpus in CI (`make musl`, `make
 corpus-musl`). See "What remains" near the top and Phase 5.
@@ -1875,13 +1877,13 @@ Deferred deliberately. Nothing here is a defect; these are gaps worth
 considering once the above is solid, informed by the survey in
 `/home/vicpu/build/TOOL-SURVEY.md`.
 
-1. **HTML5 output mode.** Confirmed by the survey (`TOOL-SURVEY.md` §4): of the
-   converters surveyed, txt2tags, pandoc and Asciidoctor all emit HTML5, and
-   docutils has committed to moving its default from `html4css1` to `html5` in
-   Docutils 2.0. This port emits HTML 4.01 / XHTML 1.0 Strict to match Perl. An
-   opt-in `html5` option with a `<meta charset>` and `<!DOCTYPE html>` would cost
-   little. Ship it the way docutils is doing it: an opt-in mode now, the default
-   changed at a named future version, and a changelog entry saying so.
+1. ~~**HTML5 output mode.**~~ — **done** (P5.1): an opt-in `--html5` emits the
+   short `<!DOCTYPE html>`, an `<html>` element with no namespace, and a forced
+   `<meta charset="utf-8">`, leaving the body markup identical. Off by default,
+   so the reference goldens do not move; the default prolog is still HTML 4.01 /
+   XHTML 1.0 Strict. `TOOL-SURVEY.md` §4 found txt2tags, pandoc and Asciidoctor
+   all emit HTML5 and docutils moves its default in Docutils 2.0; the named
+   future version at which this port's default changes is still to be chosen.
 2. ~~**Explicit encoding parameter** on the API and CLI~~ — **done**, twice: P7.3 added `--encoding auto|utf-8|cp1252` and P7.4 widened it to `iso-8859-1`, `cp1251`, `cp1253`, `koi8-r`, `utf-16le/be` and `utf-32le/be`. Single-byte charset *detection* remains open and is deferred to a separate project — see **Deferred: single-byte charset detection (Part B)** under P7.4, including why a wrong confident guess is worse than the mojibake it would replace.
 3. **Table of contents.** Strongly recommended by the survey
    (`TOOL-SURVEY.md` §4.1) — this is the one clearly high-value gap. Every
@@ -2089,8 +2091,8 @@ directly, and the `rust` job runs `make test-gui-rs` as ordinary cargo tests. Th
 
 ### 6.5 Where Phase 5 goes
 
-Phase 5 (HTML5 mode, TOC, heading numbering, streaming, footnotes) is
-**independent of the rewrite** — it is all engine-side. It was deferred until
+Phase 5 (TOC, heading numbering, streaming; HTML5 mode and footnotes are now
+settled) is **independent of the rewrite** — it is all engine-side. It was deferred until
 the rewrite was done, for one reason: each new engine option has to be added to
 `cli::SPECS`, and while the Python GUI existed that meant updating two front
 ends. The rewrite is done (2026-10-03), so there is now one front end and the

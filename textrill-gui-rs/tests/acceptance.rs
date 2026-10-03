@@ -65,7 +65,7 @@ fn option_help_strings_are_unique() {
             spec.help
         );
     }
-    assert_eq!(seen.len(), 54, "the engine's option count changed");
+    assert_eq!(seen.len(), 55, "the engine's option count changed");
 }
 
 /// Every option in `cli::SPECS` is reachable as a labelled widget.

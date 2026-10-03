@@ -112,7 +112,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **53 options** with **107 accepted spellings** including short
+There are **55 options** with **109 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The options are the Perl originals, unchanged, so that documents converted by
@@ -128,6 +128,7 @@ either tool are directly comparable. A few are worth calling out:
 | `--default_link_dict` | none | Load a link dictionary, as the original does |
 | `--extract` | off | Output only the body, without the surrounding document |
 | `--meta_charset` | off | Emit `<meta charset="utf-8">` |
+| `--html5` | off | Emit HTML5: `<!DOCTYPE html>`, no namespace, charset meta |
 | `--encoding` | `auto` | How to decode the input (see below) |
 
 The delimiter names are inherited from the Perl original and are not intuitive:
@@ -136,6 +137,16 @@ The delimiter names are inherited from the Perl original and are not intuitive:
 either tool. Note that the default delimiters are off unless enabled — with the
 defaults above, only `#...#` and `*...*` are converted; a bare `_word_` is left
 alone unless `--underline_delimiter` is matched by surrounding text.
+
+### HTML5 output
+
+By default the prolog matches the Perl original: an XHTML 1.0 Strict doctype
+with an `xmlns` on `<html>`, and no encoding declaration. `--html5` switches the
+prolog to HTML5 — the short `<!DOCTYPE html>`, an `<html>` element with no
+namespace, and a forced `<meta charset="utf-8">` — and leaves the body markup
+unchanged. It is **off by default** so output stays byte-identical to the
+reference; tag case is still governed by the usual `--xhtml`/`--lower_case_tags`
+settings, so a bare `--html5` is already lower-case.
 
 ### Encodings
 
