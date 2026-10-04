@@ -275,8 +275,10 @@ Recommended order from here — **every item below is now done**:
 
 What actually remains is not a defect: **packaging** (the Flatpak manifest is
 decided but not yet written) and the remaining **Phase 5** opt-in features —
-**HTML5 mode** landed 2026-10-04 as `--html5` (P5.1); TOC, heading numbering and
-streaming are still open. The
+**HTML5 mode** landed 2026-10-04 as `--html5` (P5.1), and **sectioning + TOC +
+multi-file chunking** landed the same day as `--section`/`--toc`/`--chunk`
+(P5.2, both output models, design below); heading numbering and streaming are
+still open. The
 **musl CI build** landed 2026-10-03 — a static `x86_64-unknown-linux-musl`
 binary, run through the differential corpus in CI (`make musl`, `make
 corpus-musl`). See "What remains" near the top and Phase 5.
@@ -1909,6 +1911,36 @@ considering once the above is solid, informed by the survey in
    tool, but rejected here: footnotes need unambiguous inline markers, and
    guessing `[^1]` in ordinary prose would silently turn text into links. Not
    compatible with the tool's contract.
+
+### Sectioning and TOC — design (2026-10-04)
+
+Settled while mining a deleted prior attempt at this product — see
+`template-research1/FINDINGS.md`.
+
+_Implemented 2026-04 (P5.2): `src/section.rs` plus `--section`, `--toc` and
+`--chunk`; `convert.rs::convert_sources` was split so the section pass runs over
+the body only, and `try_convert_chunked` writes the multi-file model. Gates:
+corpus 59/59, goldens 33/33, `sectiontest` 7/7, GUI acceptance 26/26, clippy and
+fmt clean. Chunk links are sibling file names, not write paths._
+
+- **Both output models, behind flags.** Single-page sectioning wraps each
+  heading-delimited section in `<article class="section" id="chunk-N">` and emits
+  one generated TOC; multi-file chunking splits at headings into separate pages
+  with a prev/next pager.
+- **Sequential `chunk-N` ids, assigned by the sectioner, not the
+  `make_anchors` `section_x_y` names.** Item 3 above warned that a TOC reusing
+  `make_anchors` ids must reproduce duplicate-heading suffixes exactly or it
+  contains dead links. Own sequential ids make that failure impossible: a
+  duplicate heading gets a distinct `chunk-N` because the counter is positional,
+  not derived from the heading text or level. This supersedes item 3's "reuse
+  `make_anchors` ids" instruction.
+- **Heading-based, not paragraph-count-based.** The mined tool's TOC used
+  first-paragraph snippets because its converter was not heading-aware; ours is,
+  so sections are heading boundaries.
+- **New options stay default-off** so every golden is unmoved, and note markers
+  use collision-proof sigils only. Evidence for the sigil rule is in FINDINGS.md
+  §3: the inherited default `#` bold delimiter already eats `C#`/`F#` in
+  ordinary prose, so ordinary-character markers cannot be trusted.
 
 Explicitly rejected by the survey, so they are not reconsidered later: multi-target
 output (a different product), syntax highlighting inside `<pre>`, a built-in

@@ -112,7 +112,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **55 options** with **109 accepted spellings** including short
+There are **58 options** with **112 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The options are the Perl originals, unchanged, so that documents converted by
@@ -129,6 +129,9 @@ either tool are directly comparable. A few are worth calling out:
 | `--extract` | off | Output only the body, without the surrounding document |
 | `--meta_charset` | off | Emit `<meta charset="utf-8">` |
 | `--html5` | off | Emit HTML5: `<!DOCTYPE html>`, no namespace, charset meta |
+| `--section` | off | Wrap each heading section in `<article id="chunk-N">` |
+| `--toc` | off | Prepend a generated table of contents (implies `--section`) |
+| `--chunk` | off | Write one HTML file per top-level section |
 | `--encoding` | `auto` | How to decode the input (see below) |
 
 The delimiter names are inherited from the Perl original and are not intuitive:
@@ -147,6 +150,29 @@ namespace, and a forced `<meta charset="utf-8">` — and leaves the body markup
 unchanged. It is **off by default** so output stays byte-identical to the
 reference; tag case is still governed by the usual `--xhtml`/`--lower_case_tags`
 settings, so a bare `--html5` is already lower-case.
+
+### Sectioning, TOC and multi-file output
+
+These three options are **new in textrill**, not part of the Perl original, and
+all are **off by default** so the reference output never moves.
+
+`--section` wraps each heading-delimited run of the body in
+`<article class="section" id="chunk-N">`. The ids are assigned sequentially in
+the order the sections appear (`chunk-1`, `chunk-2`, …), so they can never
+collide and a link to one can never go stale. `--toc` additionally prepends a
+`<nav class="toc" id="toc">` whose links target those ids; it implies
+`--section`.
+
+`--chunk` writes one file per heading at the shallowest level present — for a
+document with `h1` chapters, one file per chapter, with any `h2` subsections
+kept on their parent's page — instead of a single document. Files are named
+`<outfile stem>-chunk-NN.html` next to `--outfile`, which is required. Each page
+carries the same TOC (with cross-file links when `--toc` is set) and prev/next
+pager links. `--chunk` cannot be combined with `--extract`, `--instring`, or
+output to standard output.
+
+The markup here is HTML5 (`<article>`, `<nav>`), so these options are intended
+to be used together with `--html5`.
 
 ### Encodings
 

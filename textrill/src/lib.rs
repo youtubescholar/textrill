@@ -104,6 +104,7 @@ pub mod links;
 pub mod options;
 pub mod prefilter;
 pub mod rcfile;
+pub mod section;
 
 pub use convert::Converter;
 pub use options::Options;

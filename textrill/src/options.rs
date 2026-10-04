@@ -241,6 +241,22 @@ pub struct Options {
     pub escape_html_chars: bool,
     pub explicit_headings: bool,
     pub extract: bool,
+    /// Phase 5. Wrap each heading-delimited section of the body in an
+    /// `<article class="section" id="chunk-N">` element.
+    ///
+    /// Default **off**: the section markup is HTML5-flavoured and is intended
+    /// to be used with `--html5`. Off by default so the reference goldens do
+    /// not move.
+    pub section: bool,
+    /// Phase 5. Prepend a generated table of contents linking each section.
+    ///
+    /// Implies sectioning, because the links target the `chunk-N` ids that
+    /// sectioning assigns. Default **off**.
+    pub toc: bool,
+    /// Phase 5. Write one HTML file per top-level section instead of a single
+    /// document. Requires a file `--outfile`; not valid with `--extract` or
+    /// with output to standard output. Default **off**.
+    pub chunk: bool,
     pub hrule_min: usize,
     /// P5.1. Emit an HTML5 document: `<!DOCTYPE html>`, an `<html>` element
     /// without the XHTML namespace, and `<meta charset="utf-8">`.
@@ -331,6 +347,9 @@ impl Default for Options {
             escape_html_chars: true,
             explicit_headings: false,
             extract: false,
+            section: false,
+            toc: false,
+            chunk: false,
             hrule_min: 4,
             html5: false,
             indent_width: 2,

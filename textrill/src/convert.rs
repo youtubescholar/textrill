@@ -3024,40 +3024,63 @@ impl Converter {
     }
 
     fn convert_sources(&mut self, sources: Vec<String>, string_mode: bool) -> String {
-        let mut out = String::new();
+        let (start, body, tail) = self.convert_to_parts(sources, string_mode);
+        // P5.2. Sectioning is a pure post-pass over the body, so the reference
+        // path is untouched when both flags are off.
+        let body = if self.opts.section || self.opts.toc {
+            crate::section::sectionize(&body, self.opts.toc)
+        } else {
+            body
+        };
+        let mut out = String::with_capacity(start.len() + body.len() + tail.len());
+        out.push_str(&start);
+        out.push_str(&body);
+        out.push_str(&tail);
+        out
+    }
+
+    /// One top-level page produced by `--chunk`: a full document and the file
+    /// name it should be written to.
+    ///
+    /// The name is suggested by the caller's `--outfile`; this method only
+    /// derives it. See [`Converter::try_convert_chunked`].
+    fn convert_to_parts(
+        &mut self,
+        sources: Vec<String>,
+        string_mode: bool,
+    ) -> (String, String, String) {
+        let mut start = String::new();
+        let mut body = String::new();
         let mut count = 0;
         for source in &sources {
             if string_mode {
-                // each instring element is treated as one paragraph
                 let mut para = source.clone();
                 if let Some(stripped) = para.strip_suffix('\n') {
                     para = stripped.to_string();
                 }
                 if count == 0 {
-                    out.push_str(&self.do_file_start(&para));
+                    start.push_str(&self.do_file_start(&para));
                 }
                 self.links.sect_once_done = vec![false; self.links.rules.len()];
                 let p = self.process_chunk(&para, false, false);
-                out.push_str(&p);
-                out.push('\n');
+                body.push_str(&p);
+                body.push('\n');
                 self.print_count += 1;
                 count += 1;
                 continue;
             }
-
-            // paragraph mode ($/ = "") over LF text; then process_chunk
             for rec in paragraph_records(source) {
                 let mut para = rec;
                 if let Some(stripped) = para.strip_suffix('\n') {
                     para = stripped.to_string();
                 }
                 if count == 0 {
-                    out.push_str(&self.do_file_start(&para));
+                    start.push_str(&self.do_file_start(&para));
                 }
                 self.links.sect_once_done = vec![false; self.links.rules.len()];
                 let p = self.process_chunk(&para, false, false);
-                out.push_str(&p);
-                out.push('\n');
+                body.push_str(&p);
+                body.push('\n');
                 self.print_count += 1;
                 count += 1;
             }
@@ -3065,31 +3088,208 @@ impl Converter {
 
         if self.mode & LIST != 0 {
             let nl = self.listnum;
-            self.endlist(nl, &mut out, &mut 0);
+            self.endlist(nl, &mut body, &mut 0);
         }
         if self.mode & PRE != 0 {
             let tag = self.close_tag("pre");
-            out.push_str(&tag);
+            body.push_str(&tag);
         }
         if self.opts.xhtml && !self.opts.extract && !self.tags.is_empty() {
             let mut open_tag = self.tags.last().cloned().unwrap_or_default();
             while !self.tags.is_empty() && open_tag != "body" && open_tag != "html" {
-                out.push_str(&self.close_tag(""));
+                body.push_str(&self.close_tag(""));
                 open_tag = self.tags.last().cloned().unwrap_or_default();
             }
-            out.push('\n');
+            body.push('\n');
         }
         if !self.opts.append_file.is_empty() {
             if let Some(contents) = read_file_with(&self.opts.append_file, self.opts.encoding) {
-                out.push_str(&contents);
+                body.push_str(&contents);
             }
         }
+        let mut tail = String::new();
         if self.print_count > 0 && !self.opts.extract {
-            out.push_str(&self.close_tag("body"));
-            out.push('\n');
-            out.push_str(&self.close_tag("html"));
-            out.push('\n');
+            tail.push_str(&self.close_tag("body"));
+            tail.push('\n');
+            tail.push_str(&self.close_tag("html"));
+            tail.push('\n');
         }
+        (start, body, tail)
+    }
+
+    /// Phase 5.2. Convert and split the body into one full document per
+    /// top-level section, for `--chunk`.
+    ///
+    /// "Top-level" is the shallowest heading level present in the body; its
+    /// subsections are kept in the same page. Body content before the first
+    /// heading becomes the first page. The `(name, html)` pairs are returned in
+    /// document order; the caller writes them.
+    ///
+    /// Only `infile` inputs are chunked. `--chunk` with `--extract`, with
+    /// stdout, or with `instring` is a caller error and is reported by the
+    /// command line, not here.
+    pub fn try_convert_chunked(&mut self) -> (Vec<(String, String)>, Vec<String>) {
+        let mut sources: Vec<String> = Vec::new();
+        let mut unreadable: Vec<String> = Vec::new();
+        let mut worst = Resolved::Utf8;
+        for f in &self.opts.infile {
+            if f == "-" {
+                let mut buf = String::new();
+                use std::io::Read;
+                let _ = std::io::stdin().read_to_string(&mut buf);
+                sources.push(buf);
+            } else {
+                match read_with(f, self.opts.encoding) {
+                    Some((c, resolved)) => {
+                        if resolved.notice_rank() > worst.notice_rank() {
+                            worst = resolved;
+                        }
+                        sources.push(c);
+                    }
+                    None => {
+                        eprintln!("Could not open {f}\n");
+                        unreadable.push(f.clone());
+                    }
+                }
+            }
+        }
+        self.resolved = worst;
+        let (start, body, tail) = self.convert_to_parts(sources, false);
+        let files = self.assemble_chunked(&start, &body, &tail);
+        (files, unreadable)
+    }
+
+    /// Split an already-built body into pages and assemble each into a full
+    /// document. Shared by [`Converter::try_convert_chunked`].
+    fn assemble_chunked(&self, start: &str, body: &str, tail: &str) -> Vec<(String, String)> {
+        let (preamble, sections) = crate::section::split_sections(body);
+        if sections.is_empty() {
+            let mut single = String::with_capacity(start.len() + body.len() + tail.len());
+            single.push_str(start);
+            single.push_str(body);
+            single.push_str(tail);
+            return vec![(self.chunk_filename(1), single)];
+        }
+        let top = sections.iter().map(|s| s.level).min().unwrap_or(1);
+        let mut pages: Vec<String> = Vec::new();
+        let mut leading = String::new();
+        let mut current: Option<String> = None;
+        for s in &sections {
+            if s.level == top {
+                if let Some(page) = current.take() {
+                    pages.push(page);
+                }
+                let mut page = std::mem::take(&mut leading);
+                page.push_str(&s.html);
+                current = Some(page);
+            } else if let Some(page) = current.as_mut() {
+                page.push_str(&s.html);
+            } else {
+                leading.push_str(&s.html);
+            }
+        }
+        if let Some(page) = current {
+            pages.push(page);
+        } else if !leading.trim().is_empty() {
+            pages.push(leading);
+        }
+        if !preamble.is_empty() {
+            if let Some(first) = pages.first_mut() {
+                first.insert_str(0, &preamble);
+            } else {
+                pages.push(preamble);
+            }
+        }
+        let names: Vec<String> = (1..=pages.len()).map(|n| self.chunk_filename(n)).collect();
+        // Links between sibling files are bare file names, not the (possibly
+        // absolute) write path, so the pages stay portable if moved together.
+        let links: Vec<String> = (1..=pages.len()).map(|n| self.chunk_basename(n)).collect();
+        let toc = if self.opts.toc {
+            Some(self.render_page_toc(&sections, top, &links))
+        } else {
+            None
+        };
+        pages
+            .iter()
+            .enumerate()
+            .map(|(i, page)| {
+                let mut out = String::with_capacity(start.len() + page.len() + tail.len() + 256);
+                out.push_str(start);
+                if let Some(toc) = &toc {
+                    out.push_str(toc);
+                }
+                out.push_str(page);
+                out.push_str(&self.render_pager(&links, i));
+                out.push_str(tail);
+                (names[i].clone(), out)
+            })
+            .collect()
+    }
+
+    /// Base file name for page `n`: `<stem>-chunk-NN.html`.
+    fn chunk_basename(&self, n: usize) -> String {
+        let path = std::path::Path::new(&self.opts.outfile);
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "output".to_string());
+        format!("{stem}-chunk-{n:02}.html")
+    }
+
+    /// Write path for page `n`: its base name next to `--outfile`.
+    fn chunk_filename(&self, n: usize) -> String {
+        let name = self.chunk_basename(n);
+        match std::path::Path::new(&self.opts.outfile).parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => {
+                dir.join(name).to_string_lossy().into_owned()
+            }
+            _ => name,
+        }
+    }
+
+    /// TOC across files: each top-level page links to its own file.
+    fn render_page_toc(
+        &self,
+        sections: &[crate::section::Section],
+        top: usize,
+        names: &[String],
+    ) -> String {
+        let mut out = String::from("<nav class=\"toc\" id=\"toc\">\n<ol class=\"toc-list\">\n");
+        let mut page = 0usize;
+        for s in sections {
+            if s.level == top {
+                out.push_str("<li class=\"toc-h");
+                out.push_str(&s.level.to_string());
+                out.push_str("\"><a href=\"");
+                out.push_str(&names[page]);
+                out.push_str("\">");
+                out.push_str(&s.label);
+                out.push_str("</a></li>\n");
+                page += 1;
+            }
+        }
+        out.push_str("</ol>\n</nav>\n");
+        out
+    }
+
+    /// Prev/next links between chunked pages.
+    fn render_pager(&self, names: &[String], current: usize) -> String {
+        let mut out = String::from("<nav class=\"pager\" aria-label=\"Parts\">\n");
+        if current > 0 {
+            out.push_str("<a href=\"");
+            out.push_str(&names[current - 1]);
+            out.push_str("\" rel=\"prev\">&#8592; part ");
+            out.push_str(&(current).to_string());
+            out.push_str("</a>\n");
+        }
+        if current + 1 < names.len() {
+            out.push_str("<a href=\"");
+            out.push_str(&names[current + 1]);
+            out.push_str("\" rel=\"next\">part ");
+            out.push_str(&(current + 2).to_string());
+            out.push_str(" &#8594;</a>\n");
+        }
+        out.push_str("</nav>\n");
         out
     }
 }

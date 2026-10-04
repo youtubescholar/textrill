@@ -61,6 +61,44 @@ fn main() -> ExitCode {
 
     let mut conv = Converter::new(opts.clone());
 
+    // P5.2. `--chunk` writes one file per top-level section, so it needs a real
+    // output path to name the siblings next to and cannot be combined with the
+    // single-document `--extract` mode or an in-memory `--instring`.
+    if opts.chunk {
+        if opts.extract {
+            eprintln!("{PROG}: --chunk is not valid with --extract");
+            return ExitCode::from(1);
+        }
+        if !opts.instring.is_empty() {
+            eprintln!("{PROG}: --chunk is not valid with --instring");
+            return ExitCode::from(1);
+        }
+        if opts.outfile.is_empty() || opts.outfile == "-" {
+            eprintln!("{PROG}: --chunk requires --outfile");
+            return ExitCode::from(1);
+        }
+        let (files, unreadable) = conv.try_convert_chunked();
+        let mut wrote = true;
+        for (name, html) in &files {
+            if let Err(e) = std::fs::write(name, html) {
+                eprintln!("Error: unable to open {name},: {e}");
+                wrote = false;
+            }
+        }
+        if !unreadable.is_empty() {
+            eprintln!(
+                "{PROG}: could not read {} input file(s), exiting non-zero",
+                unreadable.len()
+            );
+            return ExitCode::from(1);
+        }
+        return if wrote {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        };
+    }
+
     // A9: an input file that could not be opened is a failure, not something to
     // carry on from. The reference prints `Could not open …` and exits 0, so a
     // Makefile or CI step reads a 0-byte output file as a successful build. The
