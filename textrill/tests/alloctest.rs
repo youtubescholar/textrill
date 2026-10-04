@@ -16,6 +16,7 @@
 //! any other test's timing or behaviour.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
@@ -25,13 +26,18 @@ use textrill::options::Options;
 
 static CUMULATIVE: AtomicUsize = AtomicUsize::new(0);
 static LIVE: AtomicUsize = AtomicUsize::new(0);
+/// The high-water mark of [`LIVE`]. Peak, not cumulative, is what distinguishes
+/// a streaming converter from a buffered one: both may allocate the same total,
+/// but only the buffered one holds the whole document live at once.
+static PEAK: AtomicUsize = AtomicUsize::new(0);
 
 struct Counting;
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
         CUMULATIVE.fetch_add(l.size(), Ordering::Relaxed);
-        LIVE.fetch_add(l.size(), Ordering::Relaxed);
+        let live = LIVE.fetch_add(l.size(), Ordering::Relaxed) + l.size();
+        PEAK.fetch_max(live, Ordering::Relaxed);
         unsafe { System.alloc(l) }
     }
 
@@ -44,9 +50,10 @@ unsafe impl GlobalAlloc for Counting {
     // would undercount exactly the churn a grow-in-place pattern produces, which
     // is one of the things this file exists to notice.
     unsafe fn realloc(&self, p: *mut u8, l: Layout, new_size: usize) -> *mut u8 {
-        LIVE.fetch_sub(l.size(), Ordering::Relaxed);
+        let live = LIVE.fetch_sub(l.size(), Ordering::Relaxed) - l.size() + new_size;
         CUMULATIVE.fetch_add(new_size, Ordering::Relaxed);
         LIVE.fetch_add(new_size, Ordering::Relaxed);
+        PEAK.fetch_max(live, Ordering::Relaxed);
         unsafe { System.realloc(p, l, new_size) }
     }
 }
@@ -120,6 +127,24 @@ fn measure<F: FnOnce()>(f: F) -> (usize, isize) {
     (
         CUMULATIVE.load(Ordering::Relaxed) - c0,
         LIVE.load(Ordering::Relaxed) as isize - l0 as isize,
+    )
+}
+
+/// Bytes allocated within `f` and the peak *live* bytes it needed on top of what
+/// was already live when it started.
+///
+/// Peak is the number a streaming path has to keep flat and a buffered path
+/// cannot, so it gets its own helper rather than being folded into [`measure`].
+/// Callers must already hold `MEASURE_LOCK`; see [`exclusive`].
+fn measure_peak<F: FnOnce()>(f: F) -> (usize, usize) {
+    let c0 = CUMULATIVE.load(Ordering::Relaxed);
+    let base = LIVE.load(Ordering::Relaxed);
+    PEAK.store(base, Ordering::Relaxed);
+    f();
+    let peak = PEAK.load(Ordering::Relaxed);
+    (
+        CUMULATIVE.load(Ordering::Relaxed) - c0,
+        peak.saturating_sub(base),
     )
 }
 
@@ -493,5 +518,87 @@ fn p6_link_pass_does_not_copy_the_paragraph_per_rule() {
     assert!(
         large_per < 9_000,
         "link pass allocated {large_per} bytes/paragraph; a per-rule paragraph copy is back"
+    );
+}
+
+// --------------------------------------------------------------------- P5.4
+// `--stream` exists to hold one paragraph, not the document, and the only way
+// to show that is the peak live-byte high-water mark: cumulative allocation can
+// be identical for both paths, because a streaming converter still allocates
+// (and frees) output one paragraph at a time. A buffered document of n
+// paragraphs keeps the whole thing live; a streamed one keeps the largest
+// paragraph plus the engine's fixed caches, no matter how long the input is.
+#[test]
+fn p5_4_streaming_peak_stays_flat_while_buffered_grows() {
+    let _g = exclusive();
+    let opts = Options {
+        default_link_dict: String::new(),
+        ..Options::default()
+    };
+
+    // One paragraph, repeated. Repeating it means the two documents compile the
+    // same patterns, so the caches are charged equally and only the document
+    // length differs.
+    let para = "Some *italic* and #bold# text with a http://example.com/link in it.\n\
+                Second line of the same paragraph, short.\n";
+    let doc = |n: usize| -> String {
+        let mut s = String::new();
+        for i in 0..n {
+            s.push_str(&format!("Paragraph {i}\n\n"));
+            s.push_str(para);
+            s.push('\n');
+        }
+        s
+    };
+    let small = doc(20);
+    let large = doc(3200);
+    let extra = large.len() - small.len();
+    assert!(
+        extra > 256 * 1024,
+        "the large document must be big enough to matter"
+    );
+
+    let stream_peak = |text: &str| -> usize {
+        let (_, peak) = measure_peak(|| {
+            let mut c = Converter::new(opts.clone());
+            c.convert_stream(text.as_bytes(), &mut io::sink()).unwrap();
+        });
+        peak
+    };
+    let buffered_peak = |text: &str| -> usize {
+        let (_, peak) = measure_peak(|| {
+            let mut c = Converter::new(opts.clone());
+            let _ = c.convert_text(text);
+        });
+        peak
+    };
+
+    let buf_small = buffered_peak(&small);
+    let buf_large = buffered_peak(&large);
+    let stream_small = stream_peak(&small);
+    let stream_large = stream_peak(&large);
+    let buf_growth = buf_large - buf_small;
+    let stream_growth = stream_large.saturating_sub(stream_small);
+    eprintln!(
+        "  P5.4 peak KiB (extra {extra} B): buffered {} -> {} (+{}), stream {} -> {} (+{})",
+        buf_small / 1024,
+        buf_large / 1024,
+        buf_growth / 1024,
+        stream_small / 1024,
+        stream_large / 1024,
+        stream_growth / 1024,
+    );
+
+    // The fixed engine caches (~2 MB: the compiled-pattern set and the link
+    // parser) dominate a small document, so the property is the *growth* on top
+    // of that, compared arm to arm. Buffered holds the extra document and its
+    // markup; streaming holds one paragraph regardless.
+    assert!(
+        buf_growth > extra,
+        "buffered peak did not grow by the extra document bytes ({extra}): +{buf_growth}"
+    );
+    assert!(
+        stream_growth < extra / 4,
+        "streaming peak grew with document length: +{stream_growth} for {extra} extra bytes"
     );
 }

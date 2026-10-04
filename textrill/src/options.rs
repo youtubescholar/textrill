@@ -262,6 +262,16 @@ pub struct Options {
     /// Composes with `--toc`, whose labels then carry the numbers. Default
     /// **off** so the reference goldens do not move.
     pub number_headings: bool,
+    /// P5.4. Read the input and write the output a paragraph at a time, so a
+    /// very large UTF-8 file can be piped without holding the whole document
+    /// and its markup in memory.
+    ///
+    /// Only meaningful for file/stdin input that is UTF-8 (decoded lossily, as
+    /// `--encoding utf-8` is); it is refused with `--instring` and with the
+    /// whole-body passes `--number_headings`, `--section`, `--toc` and
+    /// `--chunk`, which need the body in hand. Default **off**: the buffered
+    /// path is unchanged and the output is byte-identical either way.
+    pub stream: bool,
     pub hrule_min: usize,
     /// P5.1. Emit an HTML5 document: `<!DOCTYPE html>`, an `<html>` element
     /// without the XHTML namespace, and `<meta charset="utf-8">`.
@@ -356,6 +366,7 @@ impl Default for Options {
             toc: false,
             chunk: false,
             number_headings: false,
+            stream: false,
             hrule_min: 4,
             html5: false,
             indent_width: 2,

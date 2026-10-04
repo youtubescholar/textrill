@@ -273,12 +273,12 @@ Recommended order from here — **every item below is now done**:
    than a byte difference — the engine's `demoronize` table had been
    unreachable for its entire existence.
 
-What actually remains is not a defect: **packaging** (the Flatpak manifest is
-decided but not yet written) and the remaining **Phase 5** opt-in features —
+What actually remains is not a defect, and is now just one item: **packaging**
+(the Flatpak manifest is decided but not yet written). **Phase 5 is closed.**
 **HTML5 mode** landed 2026-10-04 as `--html5` (P5.1), **sectioning + TOC +
 multi-file chunking** the same day as `--section`/`--toc`/`--chunk` (P5.2, both
-output models, design below), and **heading numbering** as `--number_headings`
-(P5.3); only **streaming** is still open. The
+output models, design below), **heading numbering** as `--number_headings`
+(P5.3), and **streaming** as `--stream` (P5.4). The
 **musl CI build** landed 2026-10-03 — a static `x86_64-unknown-linux-musl`
 binary, run through the differential corpus in CI (`make musl`, `make
 corpus-musl`). See "What remains" near the top and Phase 5.
@@ -1903,10 +1903,20 @@ considering once the above is solid, informed by the survey in
    carry the numbers too. Independent of `--section`/`--toc`, default off, so
    the goldens do not move. txt2tags `-n`, Asciidoctor `sectnums`, docutils
    `sectnum` were the surveyed analogues (§4.2).
-5. **Streaming/large-file mode.** The engine holds the whole document plus the
-   accumulated output in memory. `process_chunk` already exists for the
-   incremental case; a documented streaming path would let very large inputs be
-   piped.
+ 5. ~~**Streaming/large-file mode.**~~ — **done** (P5.4): `--stream` feeds one
+    paragraph at a time through `Converter::convert_stream`, using a
+    `ParagraphReader` whose record boundary is the reference's `$/ = ""`
+    paragraph mode. All cross-paragraph state already lives in the converter, so
+    the output is byte-identical to the buffered path; that equality is pinned by
+    `stream_tests` in `convert.rs` and by `tests/streamtest.rs` end to end.
+    Input must be UTF-8: a wide BOM/NUL structure is refused before anything is
+    written and an invalid byte is an error rather than a replacement `char`,
+    because the buffered `Auto` path would have decoded such a file as CP1252.
+    Refused with `--instring` and with the whole-body passes `--number_headings`,
+    `--section`, `--toc`, `--chunk`. Opt-in and default off, so the goldens do
+    not move. The GUI panel picks the option up from `cli::SPECS` for free; it is
+    meaningful when the generated command is run on a file, and the live preview
+    (which converts in-memory text) is unaffected.
 6. **Footnotes.** Requested feature in the docutils/pandoc/asciidoctor class of
    tool, but rejected here: footnotes need unambiguous inline markers, and
    guessing `[^1]` in ordinary prose would silently turn text into links. Not
@@ -2129,16 +2139,20 @@ settled) is **independent of the rewrite** — it is all engine-side. It was def
 the rewrite was done, for one reason: each new engine option has to be added to
 `cli::SPECS`, and while the Python GUI existed that meant updating two front
 ends. The rewrite is done (2026-10-03), so there is now one front end and the
-options panel picks up a new option for free — Phase 5 is unblocked.
+options panel picks up a new option for free — Phase 5 is unblocked. **Phase 5 is
+now complete** (P5.1 `--html5`, P5.2 `--section`/`--toc`/`--chunk`, P5.3
+`--number_headings`, P5.4 `--stream`, all opt-in and default off).
 
-Two Phase 5 items have a real interaction with Phase 6 and should be sequenced
+Two Phase 5 items had a real interaction with Phase 6 and were sequenced
 deliberately:
 
 - **Explicit encoding parameter** is P7.3, and P7 is the rewrite's
-  prerequisite. Do it there, not here.
-- **Streaming mode** changes `process_chunk`'s role, and the GUI's
-  `process_chunk` call is how the live preview works. Do not change that
-  signature until the rewrite is done, or the port inherits a moving target.
+  prerequisite. Done there, not here.
+- **Streaming mode** was held back until the rewrite was done because it looked
+  like it would change `process_chunk`'s role, which the then-Python GUI's live
+  preview used. In the event it did not touch that signature at all: P5.4 adds
+  `Converter::convert_stream`, which *calls* `process_chunk` once per record, so
+  the buffered and streaming paths share the same per-paragraph engine.
 
 ### 6.6 Toolkit decision (closed 2026-10-02)
 

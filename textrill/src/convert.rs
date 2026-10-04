@@ -5,6 +5,7 @@
 //! subroutines.
 
 use std::collections::HashMap;
+use std::io::{self, BufRead, Write};
 
 use fancy_regex::Regex;
 
@@ -3092,9 +3093,21 @@ impl Converter {
             }
         }
 
+        self.finish_body(&mut body);
+        let tail = self.finish_tail();
+        (start, body, tail)
+    }
+
+    /// The state-dependent close-out appended to the body after the last
+    /// paragraph: end an open list or preformatted block, close any remaining
+    /// XHTML tags, then append `--append_file`.
+    ///
+    /// Shared by the buffered path and [`Converter::convert_stream`] so the two
+    /// cannot drift.
+    fn finish_body(&mut self, body: &mut String) {
         if self.mode & LIST != 0 {
             let nl = self.listnum;
-            self.endlist(nl, &mut body, &mut 0);
+            self.endlist(nl, body, &mut 0);
         }
         if self.mode & PRE != 0 {
             let tag = self.close_tag("pre");
@@ -3113,6 +3126,11 @@ impl Converter {
                 body.push_str(&contents);
             }
         }
+    }
+
+    /// The document footer: the `body` and `html` close tags, unless the output
+    /// was extracted or nothing was printed.
+    fn finish_tail(&mut self) -> String {
         let mut tail = String::new();
         if self.print_count > 0 && !self.opts.extract {
             tail.push_str(&self.close_tag("body"));
@@ -3120,7 +3138,67 @@ impl Converter {
             tail.push_str(&self.close_tag("html"));
             tail.push('\n');
         }
-        (start, body, tail)
+        tail
+    }
+
+    /// P5.4. Convert `input` to `out` one paragraph at a time.
+    ///
+    /// The engine's only cross-paragraph state lives in `self` (list number,
+    /// open tags, section headers, link rules), so feeding the records from a
+    /// reader in order produces exactly the bytes [`Converter::convert_text`]
+    /// would produce from the same text — while holding only one paragraph at a
+    /// time instead of the whole document and its markup. The record boundary
+    /// is the reference's `$/ = ""` paragraph mode; see [`ParagraphReader`].
+    ///
+    /// Input must be valid UTF-8; a UTF-16/UTF-32 byte-order mark or NUL
+    /// structure, or any byte sequence that is not valid UTF-8, is an
+    /// [`io::ErrorKind::InvalidData`] error rather than a silent
+    /// replacement-`char` — because the buffered `Auto` path would have decoded
+    /// such a file as CP1252, and quietly emitting something different is the
+    /// one thing this path must not do. The caller is responsible for refusing
+    /// whole-body post-passes (`--number_headings`, `--section`, `--toc`,
+    /// `--chunk`) and `--instring`, which need the assembled body.
+    pub fn convert_stream<R: BufRead, W: Write>(
+        &mut self,
+        mut input: R,
+        out: &mut W,
+    ) -> io::Result<()> {
+        // Refuse a wide encoding up front, before a byte is written. The NUL
+        // structure that marks UTF-16 is decodable as UTF-8 (a NUL is U+0000),
+        // so per-line validation alone would let a UTF-16 file through with a
+        // NUL between every character.
+        let head = input.fill_buf()?;
+        if let Some((encoding, _)) = bom(head) {
+            if encoding != Encoding::Utf8 {
+                return Err(not_utf8_error());
+            }
+        }
+        if sniff_utf16_or_32(head).is_some() {
+            return Err(not_utf8_error());
+        }
+        self.resolved = Resolved::Utf8;
+        let mut reader = ParagraphReader::new(input);
+        let mut rec = String::new();
+        let mut first = true;
+        while reader.next_record(&mut rec)? {
+            let para = rec.strip_suffix('\n').unwrap_or(&rec);
+            if first {
+                let start = self.do_file_start(para);
+                out.write_all(start.as_bytes())?;
+                first = false;
+            }
+            self.links.sect_once_done = vec![false; self.links.rules.len()];
+            let body = self.process_chunk(para, false, false);
+            out.write_all(body.as_bytes())?;
+            out.write_all(b"\n")?;
+            self.print_count += 1;
+        }
+        let mut body = String::new();
+        self.finish_body(&mut body);
+        out.write_all(body.as_bytes())?;
+        let tail = self.finish_tail();
+        out.write_all(tail.as_bytes())?;
+        Ok(())
     }
 
     /// Phase 5.2. Convert and split the body into one full document per
@@ -3593,6 +3671,61 @@ fn byte_len(s: &str) -> usize {
 
 /// Split a string into paragraphs the way Perl's paragraph mode (`$/ = ""`)
 /// does for LF text: on runs of blank (empty) lines.
+/// The error [`Converter::convert_stream`] returns for input that is not UTF-8.
+fn not_utf8_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "--stream needs UTF-8 input; use the buffered path for other encodings",
+    )
+}
+
+/// Yields paragraph records from a reader the way [`paragraph_records`] does
+/// from a string: a record ends at the first line that is exactly `"\n"`, blank
+/// lines before a record are skipped, repeated blank lines are discarded, and a
+/// line holding only whitespace is not blank.
+///
+/// Unlike [`paragraph_records`], the input is not held whole: each line is
+/// validated as UTF-8 on its own. That is safe because a newline byte can never
+/// occur inside a UTF-8 multi-byte sequence, so no character is split across a
+/// line boundary.
+struct ParagraphReader<R> {
+    inner: R,
+    line: Vec<u8>,
+}
+
+impl<R: BufRead> ParagraphReader<R> {
+    fn new(inner: R) -> Self {
+        ParagraphReader {
+            inner,
+            line: Vec::new(),
+        }
+    }
+
+    /// Read the next record into `out`, returning `false` at end of input.
+    fn next_record(&mut self, out: &mut String) -> io::Result<bool> {
+        out.clear();
+        loop {
+            self.line.clear();
+            if self.inner.read_until(b'\n', &mut self.line)? == 0 {
+                return Ok(!out.is_empty());
+            }
+            let line = std::str::from_utf8(&self.line)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            if out.is_empty() {
+                if line == "\n" {
+                    continue;
+                }
+                out.push_str(line);
+                continue;
+            }
+            out.push_str(line);
+            if line == "\n" {
+                return Ok(true);
+            }
+        }
+    }
+}
+
 fn paragraph_records(s: &str) -> Vec<String> {
     // Perl `$/ = ""` paragraph slurp mode: a record ends at the first
     // blank (empty) line, that line's newline included.  Blank lines
@@ -4541,5 +4674,123 @@ mod re_cache_tests {
         fn re_cache_len_for_test(&self) -> usize {
             self.re_cache.len()
         }
+    }
+}
+
+/// P5.4: the streaming path must be byte-for-byte the buffered path for any
+/// UTF-8 input, and must refuse input it cannot decode identically.
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    use crate::options::Options;
+
+    fn opts() -> Options {
+        Options {
+            default_link_dict: String::new(),
+            ..Options::default()
+        }
+    }
+
+    fn buffered(options: &Options, text: &str) -> String {
+        Converter::new(options.clone()).convert_text(text)
+    }
+
+    fn streamed(options: &Options, text: &str) -> String {
+        let mut out = Vec::new();
+        Converter::new(options.clone())
+            .convert_stream(text.as_bytes(), &mut out)
+            .expect("streaming a UTF-8 string should not fail");
+        String::from_utf8(out).unwrap()
+    }
+
+    /// Inputs chosen for the record splitter's edges: blank/no blank, leading
+    /// and repeated blanks, no trailing newline, CRLF blank separators, and
+    /// paragraphs that drive the list/pre/table state machines.
+    const BATTERY: &[&str] = &[
+        "plain\n\nsecond para\n",
+        "# heading\n\nbody *ital* and #bold#\n",
+        "line1\nline2\n\n- a\n- b\n\n    pre\n\nend\n",
+        "no trailing newline",
+        "\n\nleading blanks\n\n\n\ndouble blank\n",
+        "one\n\n\n\ntwo\n",
+        "setext\n=====\n\nunderlined\n---------\n",
+        "a\r\nb\r\n\r\nc\r\n",
+        "ALIGN table\nx | y\n\nplain\n",
+        "1. one\n2. two\n\n\n    code after list\n",
+    ];
+
+    #[test]
+    fn stream_matches_buffered_on_every_battery_case() {
+        let options = opts();
+        for text in BATTERY {
+            assert_eq!(
+                streamed(&options, text),
+                buffered(&options, text),
+                "stream and buffered differ on {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn stream_matches_buffered_under_non_default_options() {
+        let mut make_tables = opts();
+        make_tables.make_tables = true;
+        let mut xhtml = opts();
+        xhtml.xhtml = true;
+        let mut no_anchors = opts();
+        no_anchors.make_anchors = false;
+        let mut lower = opts();
+        lower.lower_case_tags = true;
+        lower.html5 = true;
+        let mut extract = opts();
+        extract.extract = true;
+        let mut hrule = opts();
+        hrule.hrule_min = 2;
+
+        for options in [make_tables, xhtml, no_anchors, lower, extract, hrule] {
+            for text in BATTERY {
+                assert_eq!(
+                    streamed(&options, text),
+                    buffered(&options, text),
+                    "stream and buffered differ under modified options on {text:?}"
+                );
+            }
+        }
+    }
+
+    /// A document large enough to cross the record-by-record state machine many
+    /// times, so an off-by-one in the loop would show rather than hide.
+    #[test]
+    fn stream_matches_buffered_on_a_long_document() {
+        let mut text = String::new();
+        for i in 0..200 {
+            text.push_str(&format!("# Section {i}\n\n"));
+            text.push_str("Some *italic* and #bold# text.\n\n");
+            text.push_str("- one\n- two\n\n    indented\n\n");
+        }
+        let options = opts();
+        assert_eq!(streamed(&options, &text), buffered(&options, &text));
+    }
+
+    #[test]
+    fn stream_rejects_invalid_utf8_without_writing_output() {
+        let mut out = Vec::new();
+        let err = Converter::new(opts())
+            .convert_stream(&b"ok line\n\xff\xfe bad\n"[..], &mut out)
+            .expect_err("invalid UTF-8 must be refused");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(out.is_empty(), "nothing should be written before the error");
+    }
+
+    #[test]
+    fn stream_rejects_utf16_even_though_ascii_utf16_is_valid_utf8() {
+        // 'a','b' in UTF-16LE: the NULs are valid UTF-8, so only the structural
+        // check can catch this.
+        let mut out = Vec::new();
+        let err = Converter::new(opts())
+            .convert_stream(&[0xFF, 0xFE, b'a', 0, b'b', 0, b'\n', 0][..], &mut out)
+            .expect_err("UTF-16 input must be refused");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(out.is_empty());
     }
 }

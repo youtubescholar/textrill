@@ -112,7 +112,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **59 options** with **113 accepted spellings** including short
+There are **60 options** with **114 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The options are the Perl originals, unchanged, so that documents converted by
@@ -133,6 +133,7 @@ either tool are directly comparable. A few are worth calling out:
 | `--toc` | off | Prepend a generated table of contents (implies `--section`) |
 | `--chunk` | off | Write one HTML file per top-level section |
 | `--number_headings` | off | Prefix headings with hierarchical numbers (`1`, `1.1`, …) |
+| `--stream` | off | Read and write a paragraph at a time (UTF-8 input only) |
 | `--encoding` | `auto` | How to decode the input (see below) |
 
 The delimiter names are inherited from the Perl original and are not intuitive:
@@ -179,6 +180,33 @@ in the `--toc` labels and in each `--chunk` page. It is independent of
 
 The markup here is HTML5 (`<article>`, `<nav>`), so these options are intended
 to be used together with `--html5`.
+
+### Streaming large inputs
+
+By default the engine reads each input whole, converts it, and holds the
+document and its markup in memory at once. `--stream` converts one paragraph at
+a time instead, so a very large file can be piped through without ever being
+held whole, and output begins before the input has been fully read:
+
+```sh
+textrill --stream huge-book.txt > huge-book.html
+```
+
+The record boundary is the same blank-line paragraph mode the buffered path
+uses, and every piece of cross-paragraph state (the open list, the preformatted
+block, the section header, link rules) is carried in the converter, so for any
+input the two paths accept the output is **byte-for-byte identical**. That is
+the property the tests pin.
+
+The restriction is encoding. A reader cannot run the full detection order that
+`Auto` uses — that needs every byte — so `--stream` reads strictly UTF-8. A
+UTF-16/UTF-32 byte-order mark or NUL structure is refused before anything is
+written, and a byte that is not valid UTF-8 is an error rather than being
+replaced, because the buffered `Auto` path would have decoded such a file
+differently and quietly emitting something else would be the one failure mode
+worth avoiding. For non-UTF-8 input, use the buffered path. `--stream` is also
+refused with `--instring` and with the whole-body passes `--number_headings`,
+`--section`, `--toc` and `--chunk`, all of which need the assembled body.
 
 ### Encodings
 

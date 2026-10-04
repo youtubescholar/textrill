@@ -12,7 +12,7 @@ use std::process::ExitCode;
 
 use textrill::cli;
 use textrill::convert::Converter;
-use textrill::options::Options;
+use textrill::options::{Encoding, Options};
 
 const PROG: &str = "textrill";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -60,6 +60,36 @@ fn main() -> ExitCode {
     }
 
     let mut conv = Converter::new(opts.clone());
+
+    // P5.4. `--stream` feeds one paragraph at a time. It is only valid when
+    // nothing needs the assembled body and the input is UTF-8, which is the
+    // only decoding a reader can do without holding the whole file.
+    if opts.stream {
+        if !opts.instring.is_empty() {
+            eprintln!("{PROG}: --stream is not valid with --instring");
+            return ExitCode::from(1);
+        }
+        if opts.chunk {
+            eprintln!("{PROG}: --stream is not valid with --chunk");
+            return ExitCode::from(1);
+        }
+        if opts.section || opts.toc {
+            eprintln!("{PROG}: --stream is not valid with --section or --toc");
+            return ExitCode::from(1);
+        }
+        if opts.number_headings {
+            eprintln!("{PROG}: --stream is not valid with --number_headings");
+            return ExitCode::from(1);
+        }
+        if !matches!(opts.encoding, Encoding::Auto | Encoding::Utf8) {
+            eprintln!(
+                "{PROG}: --stream needs UTF-8 input; --encoding {} needs the whole file",
+                opts.encoding.name()
+            );
+            return ExitCode::from(1);
+        }
+        return run_stream(&mut conv, &opts);
+    }
 
     // P5.2. `--chunk` writes one file per top-level section, so it needs a real
     // output path to name the siblings next to and cannot be combined with the
@@ -148,6 +178,65 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
     if !wrote {
+        return ExitCode::from(1);
+    }
+    ExitCode::SUCCESS
+}
+
+/// P5.4. Run the streaming path for `--stream`: open the output once, then feed
+/// each `--infile` through [`Converter::convert_stream`] in turn. Inputs are
+/// decoded as UTF-8 (see that method); a file that cannot be opened contributes
+/// nothing and makes the exit non-zero, mirroring the buffered path.
+fn run_stream(conv: &mut Converter, opts: &Options) -> ExitCode {
+    use std::io::{BufReader, BufWriter, Write};
+
+    let mut writer: Box<dyn Write> = if opts.outfile.is_empty() || opts.outfile == "-" {
+        Box::new(BufWriter::new(std::io::stdout()))
+    } else {
+        match std::fs::File::create(&opts.outfile) {
+            Ok(file) => Box::new(BufWriter::new(file)),
+            Err(e) => {
+                eprintln!("Error: unable to open {},: {}", opts.outfile, e);
+                return ExitCode::from(1);
+            }
+        }
+    };
+
+    let stdin = std::io::stdin();
+    let mut unreadable = 0usize;
+    for f in &opts.infile {
+        let result = if f == "-" {
+            conv.convert_stream(BufReader::new(stdin.lock()), &mut writer)
+        } else {
+            match std::fs::File::open(f) {
+                Ok(file) => conv.convert_stream(BufReader::new(file), &mut writer),
+                Err(_) => {
+                    // Same line the reference prints for an unopenable input.
+                    eprintln!("Could not open {f}\n");
+                    unreadable += 1;
+                    continue;
+                }
+            }
+        };
+        match result {
+            Ok(()) => {}
+            // `textrill file | head` is a normal way to stop, not a fault.
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("{PROG}: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    }
+
+    if let Err(e) = writer.flush() {
+        if e.kind() != std::io::ErrorKind::BrokenPipe {
+            eprintln!("{PROG}: {e}");
+            return ExitCode::from(1);
+        }
+    }
+    if unreadable > 0 {
+        eprintln!("{PROG}: could not read {unreadable} input file(s), exiting non-zero");
         return ExitCode::from(1);
     }
     ExitCode::SUCCESS

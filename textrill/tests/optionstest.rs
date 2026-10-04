@@ -7,6 +7,15 @@ use textrill::options::Options;
 // ---------------------------------------------------------------- options --
 
 #[test]
+fn the_option_and_spelling_counts_match_the_readme() {
+    // The README quotes these two numbers; keeping them asserted stops the
+    // prose from drifting away from `cli::SPECS`.
+    assert_eq!(cli::SPECS.len(), 60, "option count changed");
+    let spellings: usize = cli::SPECS.iter().map(|s| s.names.len()).sum();
+    assert_eq!(spellings, 114, "accepted-spelling count changed");
+}
+
+#[test]
 fn default_doctype_contains_a_newline() {
     // The Perl default is written across two source lines, so the emitted
     // doctype spans two output lines.

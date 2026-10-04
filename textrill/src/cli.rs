@@ -82,6 +82,7 @@ pub const SPECS: &[Spec] = specs![
     Flag "Keep the original indentation of list items." ["preserve_indent", "pi"],
     Flag "Wrap each heading section in <article> (P5.2)." ["section"],
     Int "Lines shorter than this are broken with <br/>." ["short_line_length", "shortline", "s"],
+    Flag "Read and write a paragraph at a time (P5.4)." ["stream"],
     Str "URL of a stylesheet linked into the output." ["style_url"],
     Int "Width of a tab character." ["tab_width", "tabwidth", "tw"],
     TableType "Enable one table type, e.g. ALIGN=0." ["table_type"],
@@ -212,6 +213,7 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
         "preserve_indent" => opts.preserve_indent.to_string(),
         "section" => opts.section.to_string(),
         "short_line_length" => opts.short_line_length.to_string(),
+        "stream" => opts.stream.to_string(),
         "style_url" => opts.style_url.clone(),
         "tab_width" => opts.tab_width.to_string(),
         "table_type" => format!(
@@ -513,6 +515,7 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         // P5.3.
         "number_headings" => opts.number_headings = value,
         "preserve_indent" => opts.preserve_indent = value,
+        "stream" => opts.stream = value,
         "titlefirst" => opts.titlefirst = value,
         "unhyphenation" => opts.unhyphenation = value,
         "utf8" => {}

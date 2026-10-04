@@ -104,7 +104,7 @@ fn a_headingless_document_is_unchanged_by_toc() {
 
 #[test]
 fn section_and_chunk_round_trip_through_the_cli() {
-    for name in ["section", "toc", "chunk", "number_headings"] {
+    for name in ["section", "toc", "chunk", "number_headings", "stream"] {
         let mut opts = Options::default();
         assert_eq!(cli::get_value(&opts, name).unwrap(), "false");
         cli::set_value(&mut opts, name, "1").unwrap();
