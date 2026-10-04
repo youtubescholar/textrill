@@ -3153,3 +3153,117 @@ P3 seed corpus should be extended with the new fixtures as seeds.
 - **A2 is the exception to "the harness will show you".** It is the one item
   whose defect is invisible to byte-comparison, so it is verified by P12's
   allocation budget instead, and its current figures are unverified.
+
+### Citations and glossary — detailed design (2026-10-04, deferred)
+
+**Status:** design-only, not implemented. Opt-in only; default-off. When the
+modes are off *and* no note markers are present, output remains byte-identical
+to the current behaviour.
+
+#### Principles (from FINDINGS.md §2)
+- **No inference.** Ordinary prose is never interpreted as a citation/glossary
+  reference. Only an explicit, **collision-proof, namespaced** marker family
+  triggers collection/reveal.
+- **Zero JavaScript.** Reveal uses CSS-only mechanics (`<input type="checkbox">`
+  + `<label for="…">` + sibling selectors), matching the swarm's CSS-only
+  notes pattern. No inline scripts, no event handlers.
+- **Fail closed when active.** If a mode is enabled, any dangling, duplicate,
+  empty, or ambiguous definition/reference is a **hard error** before writing
+  output. The engine emits nothing on such errors.
+- **Do not collide with existing features.** Lives in its own pass after the
+  body is produced (post-sectioning/chunking boundary considerations) and must
+  not interfere with templates, TOC, `--make_links`, dictionaries, or heading
+  anchors. 
+- **Security boundary respected.** If hrefs are ever generated for citations
+  (bibliography links), they must be scheme-allowlisted and include
+  `rel="noopener noreferrer"` (autolinking is the identified boundary in
+  FINDINGS.md §2). Definitions produce no `javascript:` URLs by construction.
+
+#### Proposed flags (opt-in)
+- `--citations` (or `--notes=citations`): enable citation collection/reveal
+- `--glossary` (or `--notes=glossary`): enable glossary terms/definitions
+- `--notes` (combined): enable both if desired. Each is default-off.
+Refusals: modes that own the document in incompatible ways follow the same
+"not valid with" pattern as templates/streaming (e.g. `--stream` + notes TBD at
+implementation time if the reveal structure conflicts with streaming emission;
+`--extract` likely refused or constrained).
+
+#### Syntax (namespaced, collision-proof)
+Consistent with templates' `{{textrill:*}}` namespace to avoid clashing with
+other engines, but using a distinct sub-namespace to avoid template slot
+ambiguity:
+- Citation reference: `{{textrill:cite:<id>}}` (inline)
+- Citation definition/target: `{{textrill:def:cite:<id>}}` or block form
+  `{{textrill:cite:def <id> ...}}`? Prefer balanced token form `{{textrill:...}}`
+  to match existing scanner in `template.rs` (which looks for `{{textrill:name}}`).
+- Glossary term/ref: `{{textrill:gloss:<id>}}`
+- Glossary definition: `{{textrill:def:gloss:<id>}}`
+
+`<id>` is a simple identifier (non-empty, no spaces/`}}`), collision-proof by
+being explicit. **No** `[^1]`, `^1`, `(1)`, or other common prose markers are
+treated as notes. Unknown `textrill:` subkeys remain subject to the same
+"unknown slot → hard error" discipline when templates/notes are active (or at
+least notes mode does not silently consume arbitrary tokens).
+
+#### Collection and pass model
+1. Parse input as today; emit body HTML (sectioned/chunked as configured).
+2. If notes modes inactive: output unchanged (byte-identical). If active: scan
+   for note markers in the *source* or in the generated body? Prefer scanning
+   the original source to avoid double-processing and to keep markers separate
+   from HTML; alternatively, a post-pass over the rendered text that only
+   matches the exact namespaced tokens. Implementation detail, but must preserve
+   byte-identity when unused.
+3. Build maps: refs → list of locations, defs → content. 
+4. Validation (hard errors, only when mode active):
+   - dangling ref: no def for `<id>`
+   - dangling def: unused def (or ambiguous policy)? Usually refs must exist;
+     defs may be required to be referenced? Or vice versa — prefer "every ref
+     needs a def; every def needs at least one ref" or choose one fail-closed
+     rule. Design: **dangling reference OR orphan definition** → hard error when
+     mode active (prevents stale notes).
+   - duplicate def for same id → hard error
+   - empty def/content → hard error
+   - ambiguous id (collision) → hard error
+5. Inject notes list(s) into the output at a designated location. With
+   `--template`, the notes block can be placed via a new optional slot (e.g.
+   `{{textrill:notes}}` or split `{{textrill:citations}}`/`{{textrill:glossary}}`)
+   to preserve layout control; with default skeleton, inject in a conventional
+   location (e.g. before `</body>` or in an appendix section) without changing
+   existing elements. When using `--document_template`, placement is fully
+   template-controlled.
+
+#### CSS-only reveal structure (sketch)
+- For each note item `k` with id `note-k`: 
+  `<input type="checkbox" id="note-ref-k" class="note-toggle" hidden>`
+  `<label for="note-ref-k" class="note-ref">[...]</label>`
+  `<span class="note-content">…</span>` (or list item in `<ol class="notes">`)
+- CSS uses `input.note-toggle:checked ~ .note-content { display: block }` (and
+  `:focus-visible` for accessibility). The exact structure avoids JS and works
+  with HTML4/HTML5.
+- Generated IDs must be stable and not collide with heading/section ids
+  (`chunk-N`).
+
+#### Interactions & constraints
+- **Templates:** add optional slots (`{{textrill:notes}}`,
+  `{{textrill:citations}}`, `{{textrill:glossary}}`). If a template omits them
+  but notes are active, inject in a safe default location (appendix) rather
+  than erroring — layout is flexible but content must not be lost. Unknown
+  `textrill:` slots remain hard errors per template validate.
+- **Streaming (`--stream`):** emission is paragraph-at-a-time. Injecting
+  checkbox/label pairs around inline refs is feasible if done during
+  conversion, but the notes *list* (definitions) is a global structure. Likely
+  `--notes` is **refused with `--stream`** initially (same as templates), or
+  notes deferred to a buffered pass. Choose fail-closed.
+- **Chunking (`--chunk`):** per-page pager exists; notes could be per-page
+  appendix or global. Prefer **global** notes collected across all chunks (to
+  avoid duplicates/dangling across page boundaries) — this means collection
+  happens before chunk emission. Refusal or specific behavior TBD.
+- **Section/TOC:** notes do not affect section ids or TOC generation.
+- **Encoding/UTF-8:** markers are ASCII `{{...}}`; definitions are document
+  text and flow through existing escaping rules.
+
+#### Non-goals
+- No markdown-style implicit footnotes; no heuristic inference.
+- No JavaScript (enforced by design). No templating language features.
+- Not a general bibliography processor (citeproc). Keep scope minimal: inline
+  refs + definition list with CSS reveal.
