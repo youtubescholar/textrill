@@ -3291,3 +3291,25 @@ least notes mode does not silently consume arbitrary tokens).
 - **Input hardening:** existing exit codes and "refused before writing output"
   pattern for invalid states (e.g. template slot errors, streaming contract
   violations) should be preserved. No logging of secrets (never introduced).
+### Flatpak packaging — design (2026-10-04)
+
+**Status:** preparation/design notes; not yet implemented. Blockers noted:
+public repo + app-id/naming decision (`txt2html` already packaged elsewhere);
+`flatpak-cargo-generator` may need to be installed (pip-installable) in the
+build environment.
+
+**Proposed approach (from FINDINGS.md §2 + RUST-GUI-FINDINGS.md):**
+- Runtime/SDK: `org.freedesktop.Platform` / `org.freedesktop.Sdk` 24.08. For
+  pure-Rust egui GUI (no PySide6), use the rust-stable SDK extension and
+  generate vendored sources via `flatpak-cargo-generator` (produces
+  `cargo-sources.json` from `Cargo.lock`).
+- Finish-args (transferable): `--share=ipc --socket=x11 --socket=wayland
+  --device=dri --filesystem=home --talk-name=org.freedesktop.portal.OpenURI`.
+- Artifacts: CLI (`textrill`) remains independently distributable; Flatpak
+  delivers the single artifact per the refined delivery goal. Coexistence during
+  transition is fine.
+- Build system: two crates (engine + GUI). Manifest will need to build both in
+  order; prefer offline/vendored deps for reproducibility.
+- Security/desktop integration: follow standard Flatpak sandboxing; OpenURI
+  portal for opening links in external browser. No hardcoded CSP; GUI uses
+  native file choosers.
