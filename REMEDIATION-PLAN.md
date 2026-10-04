@@ -4,14 +4,17 @@ Status: **in progress**, 2026-10-03. Covers
 `textrill` (Rust engine + CLI) and `textrill-gui-rs` (native `egui` front end).
 The Python bindings and the PySide6 front end are retired to `legacy-archive/`.
 
-Current gates (2026-10-03): corpus **59/59**, goldens **33/33**, 16 000 fuzz
-cases 0 mismatches, **164** engine tests, **74** native GUI tests. The dated
-figures elsewhere in this document (many sections still say `48/48`, `61 cargo
-tests`, `60/60`, `46/46`) are the state at the date they were written and are
-kept as that record, not corrected in place.
+Gates at 2026-10-04: corpus **59/59**, goldens **33/33**, **203** engine tests,
+**74** native GUI tests, `fmt`/`clippy` clean. (At 2026-10-03: corpus 59/59,
+goldens 33/33, 16 000 fuzz cases 0 mismatches, 164 engine tests, 74 GUI tests;
+the fuzzer and corpus are unchanged since.) The dated figures elsewhere in this
+document (many sections still say `48/48`, `61 cargo tests`, `60/60`, `46/46`)
+are the state at the date they were written and are kept as that record, not
+corrected in place.
 
-**Progress is recorded in §0.1 below. Done: P1–P6, P8–P10, P12, P14–P19, P21–P23,
-E1–E3, A1, A1b, A2–A10. P6's gap was not the two prescribed fixes (worth ~0%): it
+**Progress is recorded in §0.1 below. Done: P1–P6, P7, P8–P11, P12, P13,
+P14–P19, P21–P23, P5.1–P5.4, E1–E3, A1, A1b, A2–A10. P6's gap was not the two
+prescribed fixes (worth ~0%): it
 was a prefilter that silently did nothing for every `\b`-wrapped dictionary
 rule, because the translated pattern carries look-around that `regex-syntax`
 refuses to parse, so no literal was proven and `fancy_regex`'s backtracking VM
@@ -33,8 +36,9 @@ was rewritten in Rust (egui, not Qt) and **the engine is kept** — see P13 and
 Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
 finished: all four defects it found are fixed, the panic divergence it surfaced
-(P22) is closed, and P20's alignment guard is in. What remains is the ordinary
-backlog and packaging; P6's performance gap is closed (see P6).
+(P22) is closed, and P20's alignment guard is in. **Phase 5 feature work is
+complete** (P5.1–P5.4). What remains is packaging and the template design below,
+which is settled but not yet built; P6's performance gap is closed (see P6).
 
 > **Read Phase 0b before trusting any result in this document.** Checks in
 > `make verify` were found on 2026-10-01 to be structurally incapable of reporting
@@ -273,8 +277,9 @@ Recommended order from here — **every item below is now done**:
    than a byte difference — the engine's `demoronize` table had been
    unreachable for its entire existence.
 
-What actually remains is not a defect, and is now just one item: **packaging**
-(the Flatpak manifest is decided but not yet written). **Phase 5 is closed.**
+What actually remains is not a defect: **packaging** (the Flatpak manifest is
+decided but not yet written) and the **template** work described below, which is
+settled but not built. **Phase 5 is closed.**
 **HTML5 mode** landed 2026-10-04 as `--html5` (P5.1), **sectioning + TOC +
 multi-file chunking** the same day as `--section`/`--toc`/`--chunk` (P5.2, both
 output models, design below), **heading numbering** as `--number_headings`
@@ -1903,7 +1908,7 @@ considering once the above is solid, informed by the survey in
    carry the numbers too. Independent of `--section`/`--toc`, default off, so
    the goldens do not move. txt2tags `-n`, Asciidoctor `sectnums`, docutils
    `sectnum` were the surveyed analogues (§4.2).
- 5. ~~**Streaming/large-file mode.**~~ — **done** (P5.4): `--stream` feeds one
+5. ~~**Streaming/large-file mode.**~~ — **done** (P5.4): `--stream` feeds one
     paragraph at a time through `Converter::convert_stream`, using a
     `ParagraphReader` whose record boundary is the reference's `$/ = ""`
     paragraph mode. All cross-paragraph state already lives in the converter, so
@@ -1921,6 +1926,12 @@ considering once the above is solid, informed by the survey in
    tool, but rejected here: footnotes need unambiguous inline markers, and
    guessing `[^1]` in ordinary prose would silently turn text into links. Not
    compatible with the tool's contract.
+7. **Templates and slots.** Not in the survey's gap list, but the natural
+   companion to the TOC: let a user supply the page skeleton instead of the
+   engine hard-wiring it, so a TOC can sit in a sidebar, a print page can carry
+   its own footer, and a whole document can take on a house style. Design
+   settled below; **not yet implemented**. Distinct from the citation/glossary
+   work, which stays deferred (see the notes policy in FINDINGS.md §2).
 
 ### Sectioning and TOC — design (2026-10-04)
 
@@ -1956,6 +1967,65 @@ fmt clean. Chunk links are sibling file names, not write paths._
 Explicitly rejected by the survey, so they are not reconsidered later: multi-target
 output (a different product), syntax highlighting inside `<pre>`, a built-in
 stylesheet that is not opt-in, and the htmltoc-style post-processing TOC.
+
+### Templates and slots — design (2026-10-04)
+
+Settled while talking through how a user other than the author could slot in
+their own layout. **Not yet implemented.**
+
+The problem: the engine hard-wires the document skeleton (doctype, `<head>`,
+`<body>`), so the only customisation today is a handful of string options
+(`--append_head`, `--body_deco`, `--style_url`, `--prepend_file`,
+`--append_file`). That is enough to tweak, not enough to put a TOC in a sidebar
+or to take over the page.
+
+The model is **engine makes blocks, template arranges them**. The engine already
+knows the things a user must not hand-write — anchor ids, TOC targets that must
+not go stale, pager links — so it pre-renders named blocks and the template only
+decides where they go.
+
+- **Two ownership levels, the wrapper as the default.**
+  - `--template FILE` is a **fragment** placed inside `<body>`; the engine still
+    emits the doctype, `<head>` and the `<body>` tags. This is the common case
+    (sidebar TOC, footer, house wrapper) and does not require the user to know
+    the prolog.
+  - `--document_template FILE` is a **whole page**; the engine emits none of the
+    skeleton. For a different doctype or head.
+  - With neither, output is **byte-identical to today**, so the goldens do not
+    move and the default path is untouched.
+- **Namespaced slots, `textrill` prefix.** Slots are `{{textrill:name}}`:
+  `{{textrill:content}}` (the only **required** slot — the converted body with
+  its anchors), `{{textrill:toc}}` (the generated `<nav class="toc">`, empty when
+  `--toc` is off), `{{textrill:title}}` (`--title`/`--titlefirst`, escaped),
+  `{{textrill:head}}` (the engine's `<meta>`/`<link>`/generator block), and
+  `{{textrill:pager}}` (per-page prev/next under `--chunk`).
+- **Unknown `{{textrill:*}}` is a hard error; every other `{{...}}` passes
+  through untouched.** This is why the slot is namespaced rather than bare: in
+  HTML templates bare `{{ }}` is the most contested token space there is
+  (Mustache, Handlebars, Jinja2, Nunjucks, Twig, Liquid, Vue, Angular). A
+  namespace lets a template that also carries another engine's tokens keep
+  working, and leaves the general `{{ }}` space free for later slot families —
+  the same reason XML namespaces, `data-*`, `--css-vars`, `x-` headers and
+  `APP_` env prefixes exist. Familiarity buys learnability; uniqueness buys
+  stability, and the template is authored once and read many times.
+- **Not a template language.** No loops, conditionals, expressions, or
+  includes; no JavaScript. `{{textrill:toc}}` is a single pre-rendered block, so
+  there is nothing to iterate. If someone needs control flow, that is a static
+  site generator's job, not a text converter's.
+- **Composition with the existing options.** A template takes over
+  *arrangement*, not *content generation*: `--title`, `--style_url`,
+  `--meta_charset`, `--append_head` still feed `{{textrill:title}}` and
+  `{{textrill:head}}`. If a template omits a slot an active option would have
+  filled, that is reported rather than silently dropped (fail-loud, consistent
+  with `--stream`'s encoding refusal).
+- **Per project, not per invocation.** Because `./.txt2htmlrc` and `@file`
+  already work (P11), a project commits its template and points at it once in
+  the rc file.
+
+Open sub-decisions, to settle at implementation time: the exact slot set
+(and whether `{{textrill:head}}` should be auto-injected when absent), how
+`--chunk` applies the template per page, and whether `--document_template`
+supersedes conflicting prolog flags or errors on them.
 
 ## Phase 6 — The GUI rewrite (P13)
 
