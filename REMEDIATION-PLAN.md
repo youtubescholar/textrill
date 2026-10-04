@@ -3267,3 +3267,27 @@ least notes mode does not silently consume arbitrary tokens).
 - No JavaScript (enforced by design). No templating language features.
 - Not a general bibliography processor (citeproc). Keep scope minimal: inline
   refs + definition list with CSS reveal.
+
+### Security meta — design (2026-10-04, boundary notes)
+
+**Status:** design-only. No code change yet.
+
+- **Autolinking boundary (documented):** `--make_links` and
+  `--links_dictionaries` derive hrefs from document text (FINDINGS.md §2). The
+  engine must never emit `javascript:`, `data:` (except explicitly allowlisted
+  only if ever needed), `vbscript:`, `file:`, or other dangerous schemes. Plan:
+  enforce a strict scheme allowlist when autolinking (e.g. `http`, `https`,
+  `mailto`, `ftp` if required) and always add `rel="noopener noreferrer"` on
+  external links; internal anchors exempt from `rel`. This is a boundary
+  condition to enforce if/when expanding autolinking.
+- **Template slots do not create hrefs:** slots inject pre-rendered blocks
+  (engine-generated), not raw URLs from arbitrary user text. The namespace model
+  (`{{textrill:*}}`) does not change this.
+- **Citations/notes:** if they produce hrefs, same rules apply. CSS-only reveal
+  means no script-based navigation.
+- **CSP compatibility:** adding a CSP `meta` is opt-in (never hardcoded). A
+  hardcoded CSP would block `--style_url`/external styles/images; must remain
+  configurable (template-controlled or a future opt-in flag) per design notes.
+- **Input hardening:** existing exit codes and "refused before writing output"
+  pattern for invalid states (e.g. template slot errors, streaming contract
+  violations) should be preserved. No logging of secrets (never introduced).
