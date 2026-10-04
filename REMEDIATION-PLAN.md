@@ -275,10 +275,10 @@ Recommended order from here — **every item below is now done**:
 
 What actually remains is not a defect: **packaging** (the Flatpak manifest is
 decided but not yet written) and the remaining **Phase 5** opt-in features —
-**HTML5 mode** landed 2026-10-04 as `--html5` (P5.1), and **sectioning + TOC +
-multi-file chunking** landed the same day as `--section`/`--toc`/`--chunk`
-(P5.2, both output models, design below); heading numbering and streaming are
-still open. The
+**HTML5 mode** landed 2026-10-04 as `--html5` (P5.1), **sectioning + TOC +
+multi-file chunking** the same day as `--section`/`--toc`/`--chunk` (P5.2, both
+output models, design below), and **heading numbering** as `--number_headings`
+(P5.3); only **streaming** is still open. The
 **musl CI build** landed 2026-10-03 — a static `x86_64-unknown-linux-musl`
 binary, run through the differential corpus in CI (`make musl`, `make
 corpus-musl`). See "What remains" near the top and Phase 5.
@@ -1887,22 +1887,22 @@ considering once the above is solid, informed by the survey in
    all emit HTML5 and docutils moves its default in Docutils 2.0; the named
    future version at which this port's default changes is still to be chosen.
 2. ~~**Explicit encoding parameter** on the API and CLI~~ — **done**, twice: P7.3 added `--encoding auto|utf-8|cp1252` and P7.4 widened it to `iso-8859-1`, `cp1251`, `cp1253`, `koi8-r`, `utf-16le/be` and `utf-32le/be`. Single-byte charset *detection* remains open and is deferred to a separate project — see **Deferred: single-byte charset detection (Part B)** under P7.4, including why a wrong confident guess is worse than the mojibake it would replace.
-3. **Table of contents.** Strongly recommended by the survey
-   (`TOOL-SURVEY.md` §4.1) — this is the one clearly high-value gap. Every
-   comparable tool has it except the reference, which *explicitly disclaims* it:
-   the upstream README says txt2html "is not a program for automatically
-   generating a table of contents" and tells users to run `htmltoc` or
-   `hypertoc` over the generated file. That is a post-processing pass which must
-   re-parse the output it just produced. Generating the TOC in-conversion is
-   strictly better, and everything needed is already there: `make_anchors` emits
-   heading anchors, and `HTML::GenToc` is a sibling module in the same
-   distribution that the system dictionary already links (`SYSTEM_DICT`).
-   Must be opt-in, default off, or every golden changes; the TOC must reuse
-   `make_anchors` ids exactly, including duplicate-heading suffixes, or it will
-   contain dead links.
-4. **Heading numbering.** Recommended (§4.2). txt2tags `-n`, Asciidoctor
-   `sectnums`, docutils `sectnum`. Composes with the TOC above. Same opt-in
-   constraint.
+3. ~~**Table of contents.**~~ — **done** (P5.2): `--toc` (and the sectioning
+   `--section` / multi-file `--chunk` around it) generate the TOC in conversion
+   from `src/section.rs`. The survey (§4.1) rated this the one clearly
+   high-value gap; the reference *explicitly disclaims* it and points users at
+   the `htmltoc`/`hypertoc` post-processing passes. The original instruction
+   here was to reuse the `make_anchors` `section_x_y` ids exactly, including
+   duplicate suffixes; that was **superseded** (see the design note below) in
+   favour of sequential `chunk-N` ids assigned by the sectioner, which cannot
+   collide or leave a dead link. Opt-in and default off, so the goldens do not
+   move.
+4. ~~**Heading numbering.**~~ — **done** (P5.3): an opt-in `--number_headings`
+   prefixes each heading with its hierarchical position (`1`, `1.1`, `1.1.1`,
+   …), inserted before any sectioning so `--toc` labels and `--chunk` pages
+   carry the numbers too. Independent of `--section`/`--toc`, default off, so
+   the goldens do not move. txt2tags `-n`, Asciidoctor `sectnums`, docutils
+   `sectnum` were the surveyed analogues (§4.2).
 5. **Streaming/large-file mode.** The engine holds the whole document plus the
    accumulated output in memory. `process_chunk` already exists for the
    incremental case; a documented streaming path would let very large inputs be
@@ -1917,10 +1917,11 @@ considering once the above is solid, informed by the survey in
 Settled while mining a deleted prior attempt at this product — see
 `template-research1/FINDINGS.md`.
 
-_Implemented 2026-04 (P5.2): `src/section.rs` plus `--section`, `--toc` and
-`--chunk`; `convert.rs::convert_sources` was split so the section pass runs over
-the body only, and `try_convert_chunked` writes the multi-file model. Gates:
-corpus 59/59, goldens 33/33, `sectiontest` 7/7, GUI acceptance 26/26, clippy and
+_Implemented 2026-04: `src/section.rs` plus P5.2 `--section`/`--toc`/`--chunk`
+and P5.3 `--number_headings`; `convert.rs::convert_sources` was split so the
+passes run over the body only, and `try_convert_chunked` writes the multi-file
+model. Numbering runs before sectioning so TOC labels carry the numbers. Gates:
+corpus 59/59, goldens 33/33, `sectiontest` 9/9, GUI acceptance 26/26, clippy and
 fmt clean. Chunk links are sibling file names, not write paths._
 
 - **Both output models, behind flags.** Single-page sectioning wraps each
@@ -2228,7 +2229,8 @@ compiled binary targets musl.
   so it is the safest thing to hand to a new contributor.
 - Phase 5 items 3 and 4 (TOC, heading numbering) should be implemented together
   or not at all — a numbered TOC is the only reason to have heading numbering,
-  and both depend on the same heading pass.
+  and both depend on the same heading pass. **Done:** TOC as P5.2, numbering as
+  P5.3, both from `src/section.rs`.
 - Every phase must keep the corpus at **59/59** and the goldens at **33/33**
   byte-identical, except where a change is explicitly declared a deviation.
   (47/33 as of 2026-10-01, after A8 and A9; 46/29 as of 2026-09-30; 40 when

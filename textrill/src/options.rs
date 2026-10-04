@@ -257,6 +257,11 @@ pub struct Options {
     /// document. Requires a file `--outfile`; not valid with `--extract` or
     /// with output to standard output. Default **off**.
     pub chunk: bool,
+    /// P5.3. Prefix each heading with its hierarchical number (`1`, `1.1`, …).
+    ///
+    /// Composes with `--toc`, whose labels then carry the numbers. Default
+    /// **off** so the reference goldens do not move.
+    pub number_headings: bool,
     pub hrule_min: usize,
     /// P5.1. Emit an HTML5 document: `<!DOCTYPE html>`, an `<html>` element
     /// without the XHTML namespace, and `<meta charset="utf-8">`.
@@ -350,6 +355,7 @@ impl Default for Options {
             section: false,
             toc: false,
             chunk: false,
+            number_headings: false,
             hrule_min: 4,
             html5: false,
             indent_width: 2,

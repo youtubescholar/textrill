@@ -3025,8 +3025,14 @@ impl Converter {
 
     fn convert_sources(&mut self, sources: Vec<String>, string_mode: bool) -> String {
         let (start, body, tail) = self.convert_to_parts(sources, string_mode);
+        // P5.3. Number before sectioning so the TOC labels carry the numbers.
+        let body = if self.opts.number_headings {
+            crate::section::number_headings(&body)
+        } else {
+            body
+        };
         // P5.2. Sectioning is a pure post-pass over the body, so the reference
-        // path is untouched when both flags are off.
+        // path is untouched when all these flags are off.
         let body = if self.opts.section || self.opts.toc {
             crate::section::sectionize(&body, self.opts.toc)
         } else {

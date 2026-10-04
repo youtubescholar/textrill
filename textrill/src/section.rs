@@ -116,6 +116,53 @@ pub fn split_sections(body: &str) -> (String, Vec<Section>) {
     (preamble, sections)
 }
 
+/// Number every heading line with its hierarchical position (`1`, `1.1`, …)
+/// and return the rewritten body.
+///
+/// The number is inserted immediately after the opening `<hN>`, so it becomes
+/// part of the heading's text: a later [`sectionize`] therefore picks it up in
+/// the TOC label, and the `make_anchors` `name` is untouched. Headings are
+/// assumed to be nested in order, which is how the engine emits setext and
+/// regex-matched headings; a heading out of order is numbered in the stack
+/// rather than refused.
+pub fn number_headings(body: &str) -> String {
+    let mut out = String::with_capacity(body.len() + 16);
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    for line in body.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        match parse_heading(content) {
+            Some((level, _)) => {
+                while matches!(stack.last(), Some(&(l, _)) if l > level) {
+                    stack.pop();
+                }
+                match stack.last_mut() {
+                    Some(top) if top.0 == level => top.1 += 1,
+                    _ => stack.push((level, 1)),
+                }
+                let number = stack
+                    .iter()
+                    .map(|(_, c)| c.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                match content.find('>') {
+                    Some(gt) => {
+                        out.push_str(&content[..=gt]);
+                        out.push_str(&number);
+                        out.push(' ');
+                        out.push_str(&content[gt + 1..]);
+                    }
+                    None => out.push_str(content),
+                }
+            }
+            None => out.push_str(content),
+        }
+        if line.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// Render a flat TOC; `toc-hN` on each item lets CSS indent by level.
 fn render_toc(sections: &[Section]) -> String {
     let mut out = String::with_capacity(64 + sections.len() * 56);
@@ -231,5 +278,33 @@ mod tests {
     fn no_headings_is_a_noop() {
         let input = "<p>just text\n</p>\n";
         assert_eq!(sectionize(input, true), input);
+    }
+
+    #[test]
+    fn number_headings_walks_the_hierarchy() {
+        let input = "<h1>A</h1>\n<h2>A1</h2>\n<h2>A2</h2>\n<h1>B</h1>\n";
+        assert_eq!(
+            number_headings(input),
+            "<h1>1 A</h1>\n<h2>1.1 A1</h2>\n<h2>1.2 A2</h2>\n<h1>2 B</h1>\n"
+        );
+    }
+
+    #[test]
+    fn number_headings_starts_at_whatever_level_appears_first() {
+        // No `h1` in the document: the first `h2` is `1`, not `0.1`.
+        let input = "<h2>First</h2>\n<h3>Child</h3>\n<h2>Second</h2>\n";
+        assert_eq!(
+            number_headings(input),
+            "<h2>1 First</h2>\n<h3>1.1 Child</h3>\n<h2>2 Second</h2>\n"
+        );
+    }
+
+    #[test]
+    fn number_headings_keeps_anchors_and_leaves_non_headings_alone() {
+        let input = "<h1><a name=\"section_1\">A</a></h1>\n<p>x</p>\n";
+        assert_eq!(
+            number_headings(input),
+            "<h1>1 <a name=\"section_1\">A</a></h1>\n<p>x</p>\n"
+        );
     }
 }

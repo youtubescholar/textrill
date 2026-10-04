@@ -104,7 +104,7 @@ fn a_headingless_document_is_unchanged_by_toc() {
 
 #[test]
 fn section_and_chunk_round_trip_through_the_cli() {
-    for name in ["section", "toc", "chunk"] {
+    for name in ["section", "toc", "chunk", "number_headings"] {
         let mut opts = Options::default();
         assert_eq!(cli::get_value(&opts, name).unwrap(), "false");
         cli::set_value(&mut opts, name, "1").unwrap();
@@ -145,6 +145,46 @@ fn chunk_splits_at_top_level_sections() {
     // A subsection stays on its parent's page.
     assert!(files[0].1.contains("Sub"), "{}", files[0].1);
     assert!(!files[1].1.contains("Sub"), "{}", files[1].1);
+}
+
+#[test]
+fn number_headings_prefixes_hierarchically() {
+    let out = render(
+        &sample(),
+        Options {
+            number_headings: true,
+            ..Options::default()
+        },
+    );
+    assert!(
+        out.contains("<h1>1 <a name=\"section_1\">One</a></h1>"),
+        "{out:?}"
+    );
+    assert!(
+        out.contains("<h2>1.1 <a name=\"section_1_1\">Sub</a></h2>"),
+        "{out:?}"
+    );
+    assert!(
+        out.contains("<h1>2 <a name=\"section_2\">Two</a></h1>"),
+        "{out:?}"
+    );
+    // Numbering alone does not section.
+    assert!(!out.contains("<article"), "{out:?}");
+}
+
+#[test]
+fn numbered_toc_labels_carry_the_numbers() {
+    let out = render(
+        &sample(),
+        Options {
+            number_headings: true,
+            toc: true,
+            ..Options::default()
+        },
+    );
+    assert!(out.contains("<a href=\"#chunk-1\">1 One</a>"), "{out:?}");
+    assert!(out.contains("<a href=\"#chunk-2\">1.1 Sub</a>"), "{out:?}");
+    assert!(out.contains("<a href=\"#chunk-3\">2 Two</a>"), "{out:?}");
 }
 
 #[test]

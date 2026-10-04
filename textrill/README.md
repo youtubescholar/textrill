@@ -112,7 +112,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **58 options** with **112 accepted spellings** including short
+There are **59 options** with **113 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The options are the Perl originals, unchanged, so that documents converted by
@@ -132,6 +132,7 @@ either tool are directly comparable. A few are worth calling out:
 | `--section` | off | Wrap each heading section in `<article id="chunk-N">` |
 | `--toc` | off | Prepend a generated table of contents (implies `--section`) |
 | `--chunk` | off | Write one HTML file per top-level section |
+| `--number_headings` | off | Prefix headings with hierarchical numbers (`1`, `1.1`, …) |
 | `--encoding` | `auto` | How to decode the input (see below) |
 
 The delimiter names are inherited from the Perl original and are not intuitive:
@@ -170,6 +171,11 @@ kept on their parent's page — instead of a single document. Files are named
 carries the same TOC (with cross-file links when `--toc` is set) and prev/next
 pager links. `--chunk` cannot be combined with `--extract`, `--instring`, or
 output to standard output.
+
+`--number_headings` prefixes each heading with its hierarchical position
+(`1`, `1.1`, `1.1.1`, …) before any sectioning runs, so the numbers also appear
+in the `--toc` labels and in each `--chunk` page. It is independent of
+`--section`/`--toc` and, like them, **off by default**.
 
 The markup here is HTML5 (`<article>`, `<nav>`), so these options are intended
 to be used together with `--html5`.
