@@ -186,14 +186,30 @@ fn render_toc(sections: &[Section]) -> String {
 /// A body with no headings is returned unchanged, so `--toc` on a heading-less
 /// document is a no-op rather than an empty navigation.
 pub fn sectionize(body: &str, toc: bool) -> String {
+    let (toc_html, sectioned) = sectionize_parts(body, toc);
+    let mut out = String::with_capacity(toc_html.len() + sectioned.len());
+    out.push_str(&toc_html);
+    out.push_str(&sectioned);
+    out
+}
+
+/// As [`sectionize`], but returns the generated TOC separately from the
+/// sectioned body so a template can place the two independently.
+///
+/// The pair `(toc, body)` is exactly what [`sectionize`] concatenates, in that
+/// order, so the default output is unchanged. Both are empty/unchanged for a
+/// body with no headings.
+pub fn sectionize_parts(body: &str, toc: bool) -> (String, String) {
     let (preamble, sections) = split_sections(body);
     if sections.is_empty() {
-        return body.to_string();
+        return (String::new(), body.to_string());
     }
+    let toc_html = if toc {
+        render_toc(&sections)
+    } else {
+        String::new()
+    };
     let mut out = String::with_capacity(body.len() + sections.len() * 64);
-    if toc {
-        out.push_str(&render_toc(&sections));
-    }
     out.push_str(&preamble);
     for s in &sections {
         out.push_str("<article class=\"section\" id=\"");
@@ -205,7 +221,7 @@ pub fn sectionize(body: &str, toc: bool) -> String {
         }
         out.push_str("</article>\n");
     }
-    out
+    (toc_html, out)
 }
 
 #[cfg(test)]

@@ -22,7 +22,7 @@ What is **done**:
 
 - The conversion engine is byte-verified against the Perl original across a
   differential corpus of 59 cases and 33 upstream golden files.
-- 164 Rust tests, a fuzzer, and a 74-test native GUI suite.
+- 222 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.
@@ -112,7 +112,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **60 options** with **114 accepted spellings** including short
+There are **62 options** with **116 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The options are the Perl originals, unchanged, so that documents converted by
@@ -134,6 +134,8 @@ either tool are directly comparable. A few are worth calling out:
 | `--chunk` | off | Write one HTML file per top-level section |
 | `--number_headings` | off | Prefix headings with hierarchical numbers (`1`, `1.1`, …) |
 | `--stream` | off | Read and write a paragraph at a time (UTF-8 input only) |
+| `--template` | none | Wrap the body in a template file (slots, see below) |
+| `--document_template` | none | Use a whole-document template file |
 | `--encoding` | `auto` | How to decode the input (see below) |
 
 The delimiter names are inherited from the Perl original and are not intuitive:
@@ -207,6 +209,52 @@ differently and quietly emitting something else would be the one failure mode
 worth avoiding. For non-UTF-8 input, use the buffered path. `--stream` is also
 refused with `--instring` and with the whole-body passes `--number_headings`,
 `--section`, `--toc` and `--chunk`, all of which need the assembled body.
+
+### Templates
+
+A template lets you supply the page skeleton instead of accepting the one the
+engine writes. The model is simple: **the engine renders named blocks, the
+template decides where they go.** It is not a template language — there are no
+loops, conditionals, expressions or includes, and no JavaScript.
+
+There are two levels:
+
+- `--template FILE` inserts a **fragment inside `<body>`**. The engine still
+  emits the doctype, `<head>` and the `<body>` tags, so you only write the part
+  you want to change.
+- `--document_template FILE` takes over the **whole page**. The engine emits
+  none of its own prolog, so you write the doctype, head and body yourself.
+
+With neither option the output is byte-for-byte what it always was.
+
+Slots are written `{{textrill:name}}`:
+
+| Slot | Contents |
+| --- | --- |
+| `{{textrill:content}}` | The converted body (required) |
+| `{{textrill:toc}}` | The generated TOC nav, empty unless `--toc` is on |
+| `{{textrill:title}}` | The escaped document title |
+| `{{textrill:head}}` | The engine's `<head>` contents (title, metas, stylesheet) |
+| `{{textrill:pager}}` | Prev/next links (reserved for `--chunk`) |
+
+A known slot is replaced; an **unknown** `{{textrill:...}}` slot is an error;
+and every other `{{...}}` is passed through untouched, so a template can also
+carry another engine's tokens:
+
+```html
+<main class="page">
+  <aside class="sidebar">{{textrill:toc}}</aside>
+  <article>{{textrill:content}}</article>
+</main>
+```
+
+The `textrill` namespace exists exactly for that coexistence — Mustache,
+Handlebars, Jinja2 and friends all claim `{{ }}`, so this pass only ever looks
+at its own prefix. A template must contain `{{textrill:content}}`; the command
+line reports a missing or malformed one before writing anything.
+
+Because a template is an `Options` value, it can be set once in
+`./.txt2htmlrc`, so a project commits its template and points at it there.
 
 ### Encodings
 

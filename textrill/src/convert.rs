@@ -668,6 +668,17 @@ pub struct Converter {
     print_count: u32,
     /// P7.3. Set by `try_convert`; read back with `resolved_encoding()`.
     resolved: Resolved,
+    /// P5.5. The text between `<head>` and `</head>` the last `do_file_start`
+    /// emitted, exposed to a template as `{{textrill:head}}`.
+    head_inner: String,
+    /// P5.5. The final, escaped document title, for `{{textrill:title}}`.
+    title_text: String,
+    /// P5.5. The template file's contents, read once in [`Converter::new`].
+    /// Empty means no template is active.
+    template_text: String,
+    /// P5.5. True when `template_text` is a whole-document template rather than
+    /// a wrapper fragment.
+    document_template: bool,
 }
 
 impl Converter {
@@ -683,6 +694,25 @@ impl Converter {
                 heading_styles.insert(s.to_string(), num_heading_styles);
             }
         }
+
+        // P5.5. Read the template once, at construction, so conversion cannot
+        // fail on IO. `Options::validate` has already reported a missing or
+        // malformed template on the command-line path; a library caller that
+        // skips validation simply gets no templating when the file is
+        // unreadable, rather than an error part-way through output.
+        let (template_text, document_template) = if !opts.template.is_empty() {
+            (
+                std::fs::read_to_string(&opts.template).unwrap_or_default(),
+                false,
+            )
+        } else if !opts.document_template.is_empty() {
+            (
+                std::fs::read_to_string(&opts.document_template).unwrap_or_default(),
+                true,
+            )
+        } else {
+            (String::new(), false)
+        };
 
         let links = links::load_links(&opts);
         let number_match_default = if opts.bullets_ordered.is_empty() {
@@ -712,6 +742,10 @@ impl Converter {
             re_cache: HashMap::new(),
             print_count: 0,
             resolved: Resolved::Utf8,
+            head_inner: String::new(),
+            title_text: String::new(),
+            template_text,
+            document_template,
         }
     }
 
@@ -2805,110 +2839,10 @@ impl Converter {
                     out.push('\n');
                 }
             }
+            self.head_inner = self.build_head(&first_line);
             out.push_str(&self.get_tag("head", TAG_START, ""));
             out.push('\n');
-
-            // A title reaches the document by two routes, and they need
-            // different treatment. An explicit `--title` is an option value
-            // interpolated into element text with nothing stopping it from
-            // closing the tag (A8) -- `--title '</title><script>alert(3)</script>'`
-            // was emitted verbatim -- so it is always escaped, and `"` too
-            // because an option value can reach an attribute. A `--titlefirst`
-            // title is instead lifted out of the document's own first line, so
-            // it is already document text, and the reference's rule for document
-            // text (`escape_html_chars`) is both correct and sufficient: `<`, `>`
-            // and `&` are all that can break out of element text.
-            //
-            // Escaping both with `escape_attr` would be wrong in a way the fuzzer
-            // caught: it ignores `escape_html_chars`, so
-            // `--titlefirst --no-escape_HTML_chars` on `a & b` emitted
-            // `<title>a &amp; b</title>` where the reference emits
-            // `<title>a & b</title>`. That is a Tier 1 divergence introduced by
-            // an over-broad fix, so the derived route keeps the flag.
-            let title_escaped = if self.opts.titlefirst && self.opts.title.is_empty() {
-                // ($tit) = $first_line =~ /^ *(.*)/
-                let tit = first_line.trim_start_matches(' ').to_string();
-                let tit = tit.trim_end_matches(' ').to_string();
-                if self.opts.escape_html_chars {
-                    self.opts.title = chars::escape(&tit);
-                } else {
-                    self.opts.title = tit;
-                }
-                // Already escaped above; emitting it again would double escape.
-                true
-            } else {
-                false
-            };
-            out.push_str(&self.get_tag("title", TAG_START, ""));
-            if title_escaped {
-                out.push_str(&self.opts.title);
-            } else {
-                out.push_str(&chars::escape_attr(&self.opts.title));
-            }
-            out.push_str(&self.close_tag("title"));
-            out.push('\n');
-
-            if self.opts.append_head_available() {
-                if let Some(contents) = read_file_with(&self.opts.append_head, self.opts.encoding) {
-                    out.push_str(&contents);
-                }
-            }
-
-            if self.opts.lower_case_tags {
-                out.push_str(&self.get_tag(
-                    "meta",
-                    TAG_EMPTY,
-                    &format!(" name=\"generator\" content=\"{PROG} v{VERSION}\""),
-                ));
-            } else {
-                out.push_str(&self.get_tag(
-                    "meta",
-                    TAG_EMPTY,
-                    &format!(" NAME=\"generator\" CONTENT=\"{PROG} v{VERSION}\""),
-                ));
-            }
-            // P7.4. Optional, off by default, because the reference emits no
-            // charset declaration and byte-identical output is a stated goal of
-            // this port -- turning this on by default would move every golden.
-            // A GUI turns it on, because there the consumer is a browser that
-            // is about to guess, and it will guess wrong for exactly the
-            // CP1252-derived input this port decodes.
-            // The line break belongs to the element, not to the option: the
-            // generator meta above is written without one, and adding this
-            // second meta after it means someone has to. When meta_charset is
-            // off the push below is the only newline, so the generator keeps
-            // the exact single trailing newline it has always had and no golden
-            // moves.
-            if self.opts.meta_charset || self.opts.html5 {
-                out.push('\n');
-                out.push_str(&self.get_tag(
-                    "meta",
-                    TAG_EMPTY,
-                    if self.opts.lower_case_tags {
-                        " charset=\"utf-8\""
-                    } else {
-                        " CHARSET=\"utf-8\""
-                    },
-                ));
-            }
-            out.push('\n');
-            if !self.opts.style_url.is_empty() {
-                let style_url = chars::escape_attr(&self.opts.style_url);
-                if self.opts.lower_case_tags {
-                    out.push_str(&self.get_tag(
-                        "link",
-                        TAG_EMPTY,
-                        &format!(" rel=\"stylesheet\" type=\"text/css\" href=\"{style_url}\""),
-                    ));
-                } else {
-                    out.push_str(&self.get_tag(
-                        "link",
-                        TAG_EMPTY,
-                        &format!(" REL=\"stylesheet\" TYPE=\"text/css\" HREF=\"{style_url}\""),
-                    ));
-                }
-                out.push('\n');
-            }
+            out.push_str(&self.head_inner);
             out.push_str(&self.close_tag("head"));
             out.push('\n');
             let body_deco = self.opts.body_deco.clone();
@@ -2924,6 +2858,122 @@ impl Converter {
             if let Some(contents) = read_file_with(&self.opts.prepend_file, self.opts.encoding) {
                 out.push_str(&contents);
             }
+        }
+        out
+    }
+
+    /// P5.5. The contents of the document `<head>`: the `<title>`, any
+    /// `--append_head` file, the generator and charset metas, and the
+    /// stylesheet link.
+    ///
+    /// Split out of `do_file_start` with no behaviour change: the returned
+    /// string is exactly the bytes that used to be written between `<head>` and
+    /// `</head>`. It also records the final escaped title in `self.title_text`
+    /// so a template can use it as `{{textrill:title}}`.
+    fn build_head(&mut self, first_line: &str) -> String {
+        let mut out = String::new();
+
+        // A title reaches the document by two routes, and they need
+        // different treatment. An explicit `--title` is an option value
+        // interpolated into element text with nothing stopping it from
+        // closing the tag (A8) -- `--title '</title><script>alert(3)</script>'`
+        // was emitted verbatim -- so it is always escaped, and `"` too
+        // because an option value can reach an attribute. A `--titlefirst`
+        // title is instead lifted out of the document's own first line, so
+        // it is already document text, and the reference's rule for document
+        // text (`escape_html_chars`) is both correct and sufficient: `<`, `>`
+        // and `&` are all that can break out of element text.
+        //
+        // Escaping both with `escape_attr` would be wrong in a way the fuzzer
+        // caught: it ignores `escape_html_chars`, so
+        // `--titlefirst --no-escape_HTML_chars` on `a & b` emitted
+        // `<title>a &amp; b</title>` where the reference emits
+        // `<title>a & b</title>`. That is a Tier 1 divergence introduced by
+        // an over-broad fix, so the derived route keeps the flag.
+        let title_escaped = if self.opts.titlefirst && self.opts.title.is_empty() {
+            // ($tit) = $first_line =~ /^ *(.*)/
+            let tit = first_line.trim_start_matches(' ').to_string();
+            let tit = tit.trim_end_matches(' ').to_string();
+            if self.opts.escape_html_chars {
+                self.opts.title = chars::escape(&tit);
+            } else {
+                self.opts.title = tit;
+            }
+            // Already escaped above; emitting it again would double escape.
+            true
+        } else {
+            false
+        };
+        out.push_str(&self.get_tag("title", TAG_START, ""));
+        if title_escaped {
+            self.title_text = self.opts.title.clone();
+        } else {
+            self.title_text = chars::escape_attr(&self.opts.title);
+        }
+        out.push_str(&self.title_text);
+        out.push_str(&self.close_tag("title"));
+        out.push('\n');
+
+        if self.opts.append_head_available() {
+            if let Some(contents) = read_file_with(&self.opts.append_head, self.opts.encoding) {
+                out.push_str(&contents);
+            }
+        }
+
+        if self.opts.lower_case_tags {
+            out.push_str(&self.get_tag(
+                "meta",
+                TAG_EMPTY,
+                &format!(" name=\"generator\" content=\"{PROG} v{VERSION}\""),
+            ));
+        } else {
+            out.push_str(&self.get_tag(
+                "meta",
+                TAG_EMPTY,
+                &format!(" NAME=\"generator\" CONTENT=\"{PROG} v{VERSION}\""),
+            ));
+        }
+        // P7.4. Optional, off by default, because the reference emits no
+        // charset declaration and byte-identical output is a stated goal of
+        // this port -- turning this on by default would move every golden.
+        // A GUI turns it on, because there the consumer is a browser that
+        // is about to guess, and it will guess wrong for exactly the
+        // CP1252-derived input this port decodes.
+        // The line break belongs to the element, not to the option: the
+        // generator meta above is written without one, and adding this
+        // second meta after it means someone has to. When meta_charset is
+        // off the push below is the only newline, so the generator keeps
+        // the exact single trailing newline it has always had and no golden
+        // moves.
+        if self.opts.meta_charset || self.opts.html5 {
+            out.push('\n');
+            out.push_str(&self.get_tag(
+                "meta",
+                TAG_EMPTY,
+                if self.opts.lower_case_tags {
+                    " charset=\"utf-8\""
+                } else {
+                    " CHARSET=\"utf-8\""
+                },
+            ));
+        }
+        out.push('\n');
+        if !self.opts.style_url.is_empty() {
+            let style_url = chars::escape_attr(&self.opts.style_url);
+            if self.opts.lower_case_tags {
+                out.push_str(&self.get_tag(
+                    "link",
+                    TAG_EMPTY,
+                    &format!(" rel=\"stylesheet\" type=\"text/css\" href=\"{style_url}\""),
+                ));
+            } else {
+                out.push_str(&self.get_tag(
+                    "link",
+                    TAG_EMPTY,
+                    &format!(" REL=\"stylesheet\" TYPE=\"text/css\" HREF=\"{style_url}\""),
+                ));
+            }
+            out.push('\n');
         }
         out
     }
@@ -3033,16 +3083,50 @@ impl Converter {
             body
         };
         // P5.2. Sectioning is a pure post-pass over the body, so the reference
-        // path is untouched when all these flags are off.
-        let body = if self.opts.section || self.opts.toc {
-            crate::section::sectionize(&body, self.opts.toc)
+        // path is untouched when all these flags are off. The TOC is kept
+        // separate from the sectioned body so a template can place it.
+        let (toc, body) = if self.opts.section || self.opts.toc {
+            crate::section::sectionize_parts(&body, self.opts.toc)
         } else {
-            body
+            (String::new(), body)
         };
-        let mut out = String::with_capacity(start.len() + body.len() + tail.len());
+        // P5.5. A template replaces the default arrangement. `--template`
+        // wraps the body inside the engine's own prolog and epilog; a
+        // `--document_template` owns the whole page, so neither is emitted.
+        if !self.template_text.is_empty() {
+            return self.apply_template(&start, &body, &toc, &tail);
+        }
+        let mut out = String::with_capacity(start.len() + toc.len() + body.len() + tail.len());
         out.push_str(&start);
+        out.push_str(&toc);
         out.push_str(&body);
         out.push_str(&tail);
+        out
+    }
+
+    /// P5.5. Fill the active template's slots and assemble the page.
+    ///
+    /// `{{textrill:content}}` is the sectioned body (with the TOC already
+    /// separated out), `{{textrill:toc}}` the generated navigation,
+    /// `{{textrill:title}}` and `{{textrill:head}}` the escaped title and the
+    /// `<head>` contents the engine produced, and `{{textrill:pager}}` empty
+    /// (pagers belong to `--chunk`, which is refused with a template).
+    fn apply_template(&self, start: &str, body: &str, toc: &str, tail: &str) -> String {
+        let slots = [
+            ("content", body),
+            ("toc", toc),
+            ("title", self.title_text.as_str()),
+            ("head", self.head_inner.as_str()),
+            ("pager", ""),
+        ];
+        let filled = crate::template::apply(&self.template_text, &slots);
+        if self.document_template {
+            return filled;
+        }
+        let mut out = String::with_capacity(start.len() + filled.len() + tail.len());
+        out.push_str(start);
+        out.push_str(&filled);
+        out.push_str(tail);
         out
     }
 

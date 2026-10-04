@@ -49,6 +49,7 @@ pub const SPECS: &[Spec] = specs![
     Str "Link dictionary loaded at start-up." ["default_link_dict", "dict"],
     Flag "Convert Microsoft character codes into sensible HTML." ["demoronize"],
     Str "Document type declaration, without the surrounding quotes." ["doctype", "dt"],
+    Str "Use a whole-document template file (P5.5)." ["document_template"],
     Flag "Assume the input is plain 7-bit ASCII." ["eight_bit_clean", "8"],
     Flag "Escape &, < and > in text." ["escape_HTML_chars", "escapechars", "ec"],
     Flag "Number custom headings by the order of their regexps." ["explicit_headings", "EH"],
@@ -86,6 +87,7 @@ pub const SPECS: &[Spec] = specs![
     Str "URL of a stylesheet linked into the output." ["style_url"],
     Int "Width of a tab character." ["tab_width", "tabwidth", "tw"],
     TableType "Enable one table type, e.g. ALIGN=0." ["table_type"],
+    Str "Wrap the body in a template file (P5.5)." ["template"],
     Str "Document title." ["title", "t"],
     Flag "Use the first line of the text as the title." ["titlefirst", "tf"],
     Flag "Prepend a generated table of contents (P5.2)." ["toc"],
@@ -180,6 +182,7 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
         "default_link_dict" => opts.default_link_dict.clone(),
         "demoronize" => opts.demoronize.to_string(),
         "doctype" => opts.doctype.clone(),
+        "document_template" => opts.document_template.clone(),
         "eight_bit_clean" => opts.eight_bit_clean.to_string(),
         "escape_HTML_chars" => opts.escape_html_chars.to_string(),
         "explicit_headings" => opts.explicit_headings.to_string(),
@@ -223,6 +226,7 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
             opts.table_type.border as u8,
             opts.table_type.delim as u8
         ),
+        "template" => opts.template.clone(),
         "title" => opts.title.clone(),
         "titlefirst" => opts.titlefirst.to_string(),
         "toc" => opts.toc.to_string(),
@@ -540,6 +544,7 @@ pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
         "caps_tag" => opts.caps_tag = v.to_string(),
         "default_link_dict" => opts.default_link_dict = v.to_string(),
         "doctype" => opts.doctype = v.to_string(),
+        "document_template" => opts.document_template = v.to_string(),
         "italic_delimiter" => opts.italic_delimiter = v.to_string(),
         // P7.3. The only string option whose value is not stored verbatim: an
         // unrecognised encoding is a user error worth reporting, not a string
@@ -550,6 +555,7 @@ pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
         "preformat_end_marker" => opts.preformat_end_marker = v.to_string(),
         "prepend_file" => opts.prepend_file = v.to_string(),
         "style_url" => opts.style_url = v.to_string(),
+        "template" => opts.template = v.to_string(),
         "title" => opts.title = v.to_string(),
         "underline_delimiter" => opts.underline_delimiter = v.to_string(),
         other => {

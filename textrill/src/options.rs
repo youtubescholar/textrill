@@ -237,6 +237,20 @@ pub struct Options {
     pub default_link_dict: String,
     pub demoronize: bool,
     pub doctype: String,
+    /// P5.5. Path to a wrapper template inserted inside `<body>`.
+    ///
+    /// The template owns the arrangement of the body: it must contain a
+    /// `{{textrill:content}}` slot, and may use `{{textrill:toc}}`,
+    /// `{{textrill:title}}`, `{{textrill:head}}` and `{{textrill:pager}}`. The
+    /// engine still emits the doctype, `<head>` and the `<body>` tags. Empty
+    /// (the default) means output is byte-identical to the reference.
+    pub template: String,
+    /// P5.5. Path to a whole-document template.
+    ///
+    /// Like [`Options::template`], but the template owns the entire page
+    /// (doctype, head and body included), so none of the engine prolog is
+    /// emitted. Mutually exclusive with [`Options::template`]. Empty by default.
+    pub document_template: String,
     pub eight_bit_clean: bool,
     pub escape_html_chars: bool,
     pub explicit_headings: bool,
@@ -358,6 +372,8 @@ impl Default for Options {
             demoronize: true,
             doctype: "-//W3C//DTD HTML 4.01//EN\"\n\"http://www.w3.org/TR/html4/strict.dtd"
                 .to_string(),
+            template: String::new(),
+            document_template: String::new(),
             eight_bit_clean: false,
             escape_html_chars: true,
             explicit_headings: false,
@@ -459,7 +475,52 @@ impl Options {
             crate::links::try_compile_pattern(pattern, false)
                 .map_err(|e| format!("{name}: invalid regular expression {pattern:?}: {e}"))?;
         }
+        self.validate_template_options()?;
         Ok(())
+    }
+
+    /// P5.5. Check the template options and, when one is set, load it and check
+    /// its slots. Doing this before conversion means a bad template is reported
+    /// as a message and a non-zero exit rather than part-way through output.
+    ///
+    /// The two template options are mutually exclusive and each is refused with
+    /// the modes that own the surrounding document (`--extract`, `--chunk`,
+    /// `--stream`); `--document_template` is additionally refused with
+    /// `--prepend_file`, whose content has no slot in a template and would
+    /// otherwise be dropped silently.
+    fn validate_template_options(&self) -> Result<(), String> {
+        let wrapper = !self.template.is_empty();
+        let whole = !self.document_template.is_empty();
+        if !wrapper && !whole {
+            return Ok(());
+        }
+        if wrapper && whole {
+            return Err("--template and --document_template cannot be combined".to_string());
+        }
+        let flag = if wrapper {
+            "--template"
+        } else {
+            "--document_template"
+        };
+        if self.extract {
+            return Err(format!("{flag} is not valid with --extract"));
+        }
+        if self.chunk {
+            return Err(format!("{flag} is not valid with --chunk"));
+        }
+        if self.stream {
+            return Err(format!("{flag} is not valid with --stream"));
+        }
+        if whole && !self.prepend_file.is_empty() {
+            return Err("--document_template is not valid with --prepend_file".to_string());
+        }
+        let path = if wrapper {
+            &self.template
+        } else {
+            &self.document_template
+        };
+        let body = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+        crate::template::validate(&body)
     }
 
     /// The options whose value is a regular expression supplied by the caller,

@@ -4,7 +4,7 @@ Status: **in progress**, 2026-10-03. Covers
 `textrill` (Rust engine + CLI) and `textrill-gui-rs` (native `egui` front end).
 The Python bindings and the PySide6 front end are retired to `legacy-archive/`.
 
-Gates at 2026-10-04: corpus **59/59**, goldens **33/33**, **203** engine tests,
+Gates at 2026-10-04: corpus **59/59**, goldens **33/33**, **222** engine tests,
 **74** native GUI tests, `fmt`/`clippy` clean. (At 2026-10-03: corpus 59/59,
 goldens 33/33, 16 000 fuzz cases 0 mismatches, 164 engine tests, 74 GUI tests;
 the fuzzer and corpus are unchanged since.) The dated figures elsewhere in this
@@ -13,7 +13,7 @@ are the state at the date they were written and are kept as that record, not
 corrected in place.
 
 **Progress is recorded in §0.1 below. Done: P1–P6, P7, P8–P11, P12, P13,
-P14–P19, P21–P23, P5.1–P5.4, E1–E3, A1, A1b, A2–A10. P6's gap was not the two
+P14–P19, P21–P23, P5.1–P5.5, E1–E3, A1, A1b, A2–A10. P6's gap was not the two
 prescribed fixes (worth ~0%): it
 was a prefilter that silently did nothing for every `\b`-wrapped dictionary
 rule, because the translated pattern carries look-around that `regex-syntax`
@@ -37,8 +37,8 @@ Phase 6. Every
 High and Medium item from the attack pass is closed. The Phase 0b gate audit is
 finished: all four defects it found are fixed, the panic divergence it surfaced
 (P22) is closed, and P20's alignment guard is in. **Phase 5 feature work is
-complete** (P5.1–P5.4). What remains is packaging and the template design below,
-which is settled but not yet built; P6's performance gap is closed (see P6).
+complete** (P5.1–P5.5). What remains is packaging; P6's performance gap is
+closed (see P6).
 
 > **Read Phase 0b before trusting any result in this document.** Checks in
 > `make verify` were found on 2026-10-01 to be structurally incapable of reporting
@@ -278,12 +278,12 @@ Recommended order from here — **every item below is now done**:
    unreachable for its entire existence.
 
 What actually remains is not a defect: **packaging** (the Flatpak manifest is
-decided but not yet written) and the **template** work described below, which is
-settled but not built. **Phase 5 is closed.**
+decided but not yet written). **Phase 5 is closed.**
 **HTML5 mode** landed 2026-10-04 as `--html5` (P5.1), **sectioning + TOC +
 multi-file chunking** the same day as `--section`/`--toc`/`--chunk` (P5.2, both
 output models, design below), **heading numbering** as `--number_headings`
-(P5.3), and **streaming** as `--stream` (P5.4). The
+(P5.3), **streaming** as `--stream` (P5.4), and **templates** as
+`--template`/`--document_template` (P5.5, design below). The
 **musl CI build** landed 2026-10-03 — a static `x86_64-unknown-linux-musl`
 binary, run through the differential corpus in CI (`make musl`, `make
 corpus-musl`). See "What remains" near the top and Phase 5.
@@ -1926,12 +1926,32 @@ considering once the above is solid, informed by the survey in
    tool, but rejected here: footnotes need unambiguous inline markers, and
    guessing `[^1]` in ordinary prose would silently turn text into links. Not
    compatible with the tool's contract.
-7. **Templates and slots.** Not in the survey's gap list, but the natural
-   companion to the TOC: let a user supply the page skeleton instead of the
-   engine hard-wiring it, so a TOC can sit in a sidebar, a print page can carry
-   its own footer, and a whole document can take on a house style. Design
-   settled below; **not yet implemented**. Distinct from the citation/glossary
-   work, which stays deferred (see the notes policy in FINDINGS.md §2).
+7. ~~**Templates and slots.**~~ — **done** (P5.5): `--template FILE` wraps the
+   body inside the engine's prolog (a fragment inside `<body>`), and
+   `--document_template FILE` takes over the whole page. Slots use a `textrill`
+   namespace (`{{textrill:content}}` required, plus `:toc`, `:title`, `:head`,
+   `:pager`); an unknown `textrill` slot is a hard error and every other
+   `{{...}}` passes through untouched, so another engine's tokens survive. Not
+   a template language: no loops, conditionals, includes or JavaScript. Off by
+   default, so the goldens do not move; refused with `--extract`, `--chunk`,
+   `--stream`, with each other, and (`--document_template`) with
+   `--prepend_file`. `{{textrill:head}}` split the `<head>` contents out of
+   `do_file_start` into `build_head` with no byte change, and the generated TOC
+   is now returned separately from the sectioned body so a template can place
+   it. Distinct from the citation/glossary work, which stays deferred (see the
+   notes policy in FINDINGS.md §2).
+   **Citations and glossary (design decision, 2026-10-04):** deferred by default.
+   If built, these will be **opt-in only**, behind a new flag (or flags), and
+   triggered exclusively by a **collision-proof, namespaced sigil** (not `^1`,
+   not `[^1]`). Reveal must be **CSS-only** (checkbox/label) with no JavaScript.
+   Definitions/citations are collected in their own pass and any
+   dangling/duplicate/empty/ambiguous reference is a **hard error** when the
+   mode is active; when off and unused, output must remain byte-identical to
+   current behaviour. They will not reuse the `{{...}}` forms in a way that
+   conflicts with templates except by a distinct sub-namespace under
+   `textrill:`; autolinking safety (scheme allowlisting + `rel="noopener
+   noreferrer"`) remains a boundary condition if hrefs are produced. This is
+   design-only; no code change yet.
 
 ### Sectioning and TOC — design (2026-10-04)
 
@@ -1971,7 +1991,11 @@ stylesheet that is not opt-in, and the htmltoc-style post-processing TOC.
 ### Templates and slots — design (2026-10-04)
 
 Settled while talking through how a user other than the author could slot in
-their own layout. **Not yet implemented.**
+their own layout. **Implemented 2026-10-04 as P5.5** — options + `cli::SPECS`
+entries (`--template`, `--document_template`), `src/template.rs`
+(`apply`/`validate`), `section::sectionize_parts`, `build_head` in `convert.rs`,
+and `tests/templatetest.rs`. Off by default, so the corpus and goldens are
+unmoved. The sub-decisions below are resolved as noted at the end.
 
 The problem: the engine hard-wires the document skeleton (doctype, `<head>`,
 `<body>`), so the only customisation today is a handful of string options
@@ -2022,10 +2046,15 @@ decides where they go.
   already work (P11), a project commits its template and points at it once in
   the rc file.
 
-Open sub-decisions, to settle at implementation time: the exact slot set
-(and whether `{{textrill:head}}` should be auto-injected when absent), how
-`--chunk` applies the template per page, and whether `--document_template`
-supersedes conflicting prolog flags or errors on them.
+Sub-decisions, as implemented: the slot set is exactly `content`, `toc`,
+`title`, `head`, `pager`; `{{textrill:head}}` is **not** auto-injected, so a
+whole-document template that omits it simply loses the engine metas, and a
+template is required only to contain `{{textrill:content}}`. `--chunk` is
+refused with a template rather than applying it per page (the pager slot is
+reserved for a later change), and `--document_template` errors with
+`--prepend_file` rather than silently dropping it. The one behaviour worth
+revisiting if a user asks: folding a wrapper and a document template into a
+single cascading option.
 
 ## Phase 6 — The GUI rewrite (P13)
 
