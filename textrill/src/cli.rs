@@ -260,7 +260,7 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
 #[derive(Clone, Debug)]
 pub enum Source {
     CommandLine,
-    /// A file, with the label the user would recognise (`~/.txt2htmlrc`, ...).
+    /// A file, with the label the user would recognise (`~/.textrillrc`, ...).
     File(String, usize),
 }
 
@@ -395,7 +395,8 @@ pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
 /// The reference reads option files before its command line
 /// (`Getopt::ArgvFile::argvFile` prepends its expansion to `@ARGV`), so a
 /// command-line value always wins. Precedence is therefore
-/// `@file` < `~/.txt2htmlrc` < `./.txt2htmlrc` < command line, and `@file` is
+/// `@file` < `~/.textrillrc` < `./.textrillrc` < command line (the legacy
+/// `.txt2htmlrc` names being read in place of the new ones), and `@file` is
 /// expanded where it appears so a later command-line option overrides it.
 pub fn parse_args_with_rc(
     args: &[String],
@@ -704,8 +705,8 @@ pub fn usage() -> String {
     let mut s = String::new();
     s.push_str("Usage: textrill [ options ] [ file ... ]\n");
     s.push_str(
-        "Convert plain text to HTML.  A reimplementation of txt2html 3.0; \
-         see the textrill README for details.\n\n",
+        "Convert plain text to HTML, inferring structure from layout.  See the\n\
+         textrill README for details.\n\n",
     );
     for spec in SPECS {
         let mut names = String::new();
@@ -731,11 +732,12 @@ pub fn usage() -> String {
     // P11. Documented here rather than only in the README because this is the
     // only place a user learns the precedence order without opening a second file.
     s.push_str(
-        "\nOptions may also be read from @file groups, and from ~/.txt2htmlrc or\n\
-         ./.txt2htmlrc -- one option per line, `#` comments, and a `--` line to end\n\
-         option processing.  Lowest precedence first:\n\
+        "\nOptions may also be read from @file groups, and from ~/.textrillrc or\n\
+         ./.textrillrc -- one option per line, `#` comments, and a `--` line to end\n\
+         option processing.  The legacy names ~/.txt2htmlrc and ./.txt2htmlrc are\n\
+         still read when no .textrillrc is present.  Lowest precedence first:\n\
          \n\
-         \x20   @file < ~/.txt2htmlrc < ./.txt2htmlrc < command line\n",
+         \x20   @file < ~/.textrillrc < ./.textrillrc < command line\n",
     );
     // P7.4. --help spells the detection order out, because --encoding is the
     // one option whose behaviour cannot be guessed from its name, and the

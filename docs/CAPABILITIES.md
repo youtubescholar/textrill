@@ -109,9 +109,10 @@ every other `{{…}}` is passed through.
 
 ## 4. What is weak
 
-All five are things the tool does badly or claims falsely about itself. None is
-a regression: the first two are byte-for-byte what the Perl original does, which
-is why the parity framing never surfaced them.
+All five were things the tool did badly or claimed falsely about itself; §4.3
+and §4.5 are fixed and recorded as such. The rest are not regressions: the first
+two are byte-for-byte what the Perl original does, which is why the parity
+framing never surfaced them.
 
 ### 4.1 A numbered list that does not start at 1 is not a list
 
@@ -180,17 +181,21 @@ are in `docs/PLAN.md` § "Item 1.1, resolved".
 Two near-identically named options with opposite behaviour and no diagnostic.
 Worth a distinct name, or a warning when a document template lacks `<html>`.
 
-### 4.5 The tool has no name of its own
+### 4.5 The tool has no name of its own — fixed
 
-Outside the binary path, textrill is still txt2html in every user-visible place:
+It was: outside the binary path, textrill was still txt2html in every
+user-visible place —
 
 - `~/.txt2htmlrc`, `./.txt2htmlrc`, `@file` groups
 - `~/.txt2html.dict`, `.txt2html.dict`
 - `--help` line 1: *"A reimplementation of txt2html 3.0"*
 
-Every one of these needs a textrill identity, with the old names kept working
-for people who have muscle memory — which is a compatibility decision, and the
-one place where matching the old behaviour is genuinely right.
+Now the preferred names are `~/.textrillrc`, `./.textrillrc`,
+`~/.textrill.dict`, `.textrill.dict`, and `--help` line 1 describes what the
+tool does. The old names are still read where the new one is absent — that is a
+compatibility decision, and the one place where matching the old behaviour is
+genuinely right. Rationale, the directory-dedup rule and the sabotage runs are
+in `docs/PLAN.md` § "Items 1.2–1.4, resolved".
 
 ---
 
@@ -270,6 +275,6 @@ but it must be visible.
 ```sh
 make examples                                  # the smoke run over examples/
 textrill --help                                # the 65-option surface
-cargo test --manifest-path textrill/Cargo.toml # 306 tests
+cargo test --manifest-path textrill/Cargo.toml # 324 tests
 bash textrill/tests/corpus/run.sh              # 60 differential cases, 33 goldens
 ```

@@ -35,10 +35,12 @@ export MINE     := $(RELEASE_BIN)
 FUZZ_SEEDS ?= 99 424242 20260929 7 31337 555 90210 1
 FUZZ_CASES ?= 2000
 # P19: the seeds run concurrently. 8 x 2000 cases took ~99 min one at a time on
-# a 20-core machine, and a gate nobody runs is not a gate. Eight at a time is
-# ~13 min, which is short enough that `make verify` can actually include it.
-# Lower FUZZ_JOBS on a smaller box; the number is echoed at the start of a run.
-FUZZ_JOBS ?= 8
+# a 20-core machine, and a gate nobody runs is not a gate. At one job per core
+# the eight seeds finish in ~13 min, which is short enough that `make verify`
+# can actually include it. The default is `nproc`, so a smaller box is given a
+# smaller width rather than oversubscribed; FUZZ_JOBS overrides it and the
+# number is echoed at the start of a run.
+FUZZ_JOBS ?= $(shell nproc 2>/dev/null || echo 8)
 # Each seed gets its own failure directory. Two seeds reach the same case index
 # from the same source file, so a shared directory would have them overwrite each
 # other's evidence -- see fuzz.py --fail-dir.

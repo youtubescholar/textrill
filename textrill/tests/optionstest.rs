@@ -298,4 +298,54 @@ mod p11_rcexamples {
         let o = parse(&["in.txt"], &d).unwrap();
         assert!(!o.extract, "--no_extract in an rc file");
     }
+
+    // --- P1.2/P1.3: textrill's own names, with the legacy ones kept working --
+
+    #[test]
+    fn the_textrillrc_name_is_read() {
+        let d = tmpdir("textrillrc");
+        write(&d, ".textrillrc", "--extract\n--title \"Mine\"\n");
+        let o = parse(&["in.txt"], &d).unwrap();
+        assert!(o.extract, "--extract from ./.textrillrc");
+        assert_eq!(o.title, "Mine");
+    }
+
+    #[test]
+    fn the_legacy_rc_name_still_works() {
+        // Compatibility is the point of P1.2: a `.txt2htmlrc` written for the
+        // Perl tool keeps being read, and nothing about it has to change.
+        let d = tmpdir("legacy-rc");
+        write(&d, ".txt2htmlrc", "--extract\n");
+        let o = parse(&["in.txt"], &d).unwrap();
+        assert!(o.extract, "--extract from the legacy ./.txt2htmlrc");
+    }
+
+    #[test]
+    fn both_names_in_one_directory_are_not_both_read() {
+        // Two files in one directory would apply an array option twice, and a
+        // user who has written a `.textrillrc` has said which one they mean.
+        let d = tmpdir("both-rc");
+        write(&d, ".textrillrc", "--custom_heading_regexp '^ *T'\n");
+        write(&d, ".txt2htmlrc", "--custom_heading_regexp '^ *L'\n--toc\n");
+        let o = parse(&["in.txt"], &d).unwrap();
+        assert_eq!(
+            o.custom_heading_regexp,
+            vec!["^ *T"],
+            "the legacy file was read as well"
+        );
+        assert!(!o.toc, "an option from the unselected file leaked");
+    }
+
+    #[test]
+    fn home_textrillrc_beats_cwd_legacy_file_by_directory_not_by_name() {
+        // Precedence is by directory first: home, then cwd. The names only
+        // decide within a directory.
+        let home = tmpdir("mix-home");
+        let cwd = tmpdir("mix-cwd");
+        write(&home, ".textrillrc", "--title \"Home\"\n");
+        write(&cwd, ".txt2htmlrc", "--title \"Current\"\n");
+        let mut o = Options::default();
+        cli::parse_args_with_rc(&[], &mut o, Some(&home), &cwd).unwrap();
+        assert_eq!(o.title, "Current", "cwd beats home regardless of the name");
+    }
 }

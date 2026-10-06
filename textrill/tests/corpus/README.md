@@ -1,8 +1,9 @@
 # Corpus tests
 
 `run.sh` converts every `tfiles/*.txt` of the upstream distribution with both
-the Perl reference (`HTML::TextToHTML` 3.0) and this Rust port, then compares
-the two outputs byte for byte.
+the Perl reference (`HTML::TextToHTML` 3.0) and textrill, then compares the two
+outputs byte for byte. The reference is an oracle for this tier, not the
+specification — see `docs/PLAN.md` § "What this is".
 
 The reference is not in version control. `make ref` builds it from the tracked
 `txt2html-3.0.tar.gz` plus a tracked stub, offline:
@@ -22,8 +23,8 @@ script's own location, so a fresh checkout works; none of them is load-bearing:
 |-------------|--------------------------------------------------------|
 | `REFDIR`    | `<checkout>/ref/txt2html-3.0`                          |
 | `STUBS`     | `<checkout>/ref/stubs`                                 |
-| `MINE`      | `<crate>/target/debug/txt2html`                        |
-| `RUNDIR`    | `${TMPDIR:-/tmp}/txt2html-corpus`                      |
+| `MINE`      | `<crate>/target/debug/textrill`                        |
+| `RUNDIR`    | `${TMPDIR:-/tmp}/textrill-corpus`                      |
 | `PERL5LIB`  | `$STUBS:$REFDIR/lib`                                   |
 
 `<checkout>` is the directory holding this repository and `ref/`; `<crate>` is
@@ -64,7 +65,7 @@ reports success wrongly" below.
   * `pre2` — the golden file has a trailing newline the reference output does
     not. Upstream's own comparison strips CR and LF before diffing.
 
-Current status: **59/59 cases byte-identical**, and all 33 upstream golden
+Current status: **60/60 cases byte-identical**, and all 33 upstream golden
 checks reproduce byte for byte across 29 distinct files (the `empty1`–`empty4`
 cases all compare against the one `good_empty.html`, which is why the count of
 checks exceeds the count of files; the other skipped cases are the `NOGOLDEN`
@@ -88,13 +89,13 @@ never found them.
    perl error on stderr instead of 40 misleading "port regression" failures.
 2. **A stale port binary.** The runner warns when `$MINE` is older than the
    sources, because a stale binary passes cases the current code would fail.
-   The default is `target/debug/txt2html`, so **`cargo build --release` on its
+   The default is `target/debug/textrill`, so **`cargo build --release` on its
    own leaves the corpus testing a stale debug binary** — which will happily
-   report 46/46 for code that does not even compile into it. Either `cargo
+   report a clean pass for code that does not even compile into it. Either `cargo
    build` as well, or point the run at the release binary explicitly:
 
    ```sh
-   MINE=$PWD/target/release/txt2html tests/corpus/run.sh
+   MINE=$PWD/target/release/textrill tests/corpus/run.sh
    ```
 3. **The runner could not fail at all** (`P15`, found 2026-10-01). It counted
    `pass`/`fail` and printed `PASS=46 FAIL=0` — but had no `exit` statement, so
@@ -146,7 +147,7 @@ never found them.
 > **The rule these five produced: a gate that has never been observed failing is
 > not a gate.** Before trusting any check here, break it on purpose and confirm it
 > exits non-zero. `MINE=/path/to/stub-that-writes-garbage tests/corpus/run.sh`
-> is the test, and it should print `PASS=0 FAIL=59` *and* exit non-zero. The
+> is the test, and it should print `PASS=0 FAIL=60` *and* exit non-zero. The
 > equivalent for `make fuzz` is a fuzzer stub that exits 3. See
 > `legacy-archive/REMEDIATION-PLAN.md` Phase 0b.
 
@@ -191,11 +192,25 @@ each half on purpose:
 The count is printed unconditionally, including when it is zero, because a
 normalisation that quietly stopped applying would leave the corpus green.
 
+The fuzzer applies the same rule by importing `normalise_bytes` from
+`normalize.py` rather than growing a second copy of it, and prints its own
+`NORMALISED: <n>` in the summary for the same reason. It needed one: at `c6fc271`
+the corpus normalised the generator line and the fuzzer compared it raw, so
+`make verify` was red at the fuzz stage with 1 864 mismatches in 2 000 cases on
+seed 1 while `make corpus` beside it was green. Every mismatch was the one line.
+With the shared rule: 60/60 compared, 0 mismatches, `NORMALISED: 106`. That the
+rule still catches what it is supposed to catch was checked with `caps_tag`
+defaulted to `B` instead of `STRONG` — 6 mismatches, exit 1, `NORMALISED` still
+106, i.e. the canonicalisation did not swallow a real difference in tag
+rendering.
+
 ## Fuzzer
 
 `fuzz.py` is a seeded differential fuzzer over the same pair of converters. It
 builds each case by taking a seed from `tfiles/`, mutating it, and choosing a
-random subset of the real options, then compares the two outputs strictly.
+random subset of the real options, then compares the two outputs strictly —
+after the single-line generator canonicalisation described above, and nothing
+else.
 
 ```sh
 tests/corpus/fuzz.py                          # 300 cases, default seed
@@ -245,7 +260,10 @@ Exit status and hangs, both found 2026-10-01 (`P14`, `P16`):
   that checked nothing.
 - The summary line reports `compared` separately from `mismatches`, and splits
   `timed out (port N, reference M)`. Only a *port* timeout fails the run; the
-  reference hanging is the oracle's problem, not the port's.
+  reference hanging is the oracle's problem, not the port's. It also prints
+  `NORMALISED: <n> generator meta line(s)` — unconditional, same rule as the
+  corpus, so a canonicalisation that stopped applying shows as a zero rather
+  than as silence.
 - `--keep` saves to `--fail-dir` (default `RUNDIR/fuzz-fail`), and saved names
   include the seed. Give each concurrent run its own directory; `make fuzz`
   already does.
@@ -262,7 +280,8 @@ which those are, so it needs the oracle that has no such table.
 ### The domain the fuzzer claims
 
 `sanitise()` restricts generated input to ASCII with no trailing whitespace
-before a line ending, for two documented reasons.
+before a line ending, and strips dangerous scheme tokens, for three documented
+reasons.
 
 **Non-ASCII.** The reference is byte-oriented end to end — it opens the file
 with no `:encoding` layer and never decodes — while the port decodes UTF-8 when
@@ -292,6 +311,18 @@ Latin-1 and demoronize did nothing for so long without anything going red. The
 **Trailing whitespace** is the trigger for two open divergences where the port
 drops a space the reference keeps: `'   e\n '` with `--indent_par_break`, and
 the three-space-indent ALIGN table `'   . \n3  .'`.
+
+**Scheme tokens** (`javascript:`, `data:`, `vbscript:`, `file:`) leave the
+input, added 2026-10-06. The first sweep after the fuzzer started normalising
+the generator line reported 4 mismatches in 16 000 cases, all one shape:
+upstream's `tfiles/pre.txt` contains `file:Here`, the reference links it, and
+textrill refuses it. That refusal is policy — `src/urlscheme.rs` names those
+four as `DANGEROUS_SCHEMES` and unwraps a refused anchor with the text kept —
+and it has its own oracles in `tests/urlschemetest.rs` and the corpus case
+`opt_injection`. The reference has no scheme policy, so no byte sequence could
+match it: Tier 2, and a byte comparison is the wrong oracle. It is removed from
+the claimed domain rather than recorded as a known divergence, because that list
+is the machinery this file removed on purpose and it would outlive its reason.
 
 Tabs are *kept*: with ASCII-only input, tab expansion agrees with the
 reference, and the structural fixtures need tabs and CRs.

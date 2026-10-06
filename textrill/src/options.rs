@@ -416,11 +416,7 @@ impl Default for Options {
             bold_delimiter: "#".to_string(),
             caps_tag: "STRONG".to_string(),
             custom_heading_regexp: Vec::new(),
-            default_link_dict: if home.is_empty() {
-                ".txt2html.dict".to_string()
-            } else {
-                format!("{home}/.txt2html.dict")
-            },
+            default_link_dict: default_link_dict(&home),
             demoronize: true,
             doctype: "-//W3C//DTD HTML 4.01//EN\"\n\"http://www.w3.org/TR/html4/strict.dtd"
                 .to_string(),
@@ -478,6 +474,36 @@ impl Default for Options {
             instring: Vec::new(),
         }
     }
+}
+
+/// The default link-dictionary location.
+///
+/// The option points at a single file, so the default has to choose: textrill's
+/// own name if that file exists, the legacy `.txt2html.dict` if only that one
+/// does, and the textrill name when neither does. A user who has never heard of
+/// textrill still has `~/.txt2html.dict` from the Perl tool and it keeps being
+/// read; a user who has written both gets theirs read once, for the reason
+/// given at [`crate::rcfile`'s `RC_NAMES`].
+///
+/// With `HOME` unset the name is relative, so it resolves against the working
+/// directory -- which is what the legacy default did.
+fn default_link_dict(home: &str) -> String {
+    const NAMES: [&str; 2] = [".textrill.dict", ".txt2html.dict"];
+    if home.is_empty() {
+        for n in NAMES {
+            if std::path::Path::new(n).exists() {
+                return n.to_string();
+            }
+        }
+        return NAMES[0].to_string();
+    }
+    for n in NAMES {
+        let p = format!("{home}/{n}");
+        if std::path::Path::new(&p).exists() {
+            return p;
+        }
+    }
+    format!("{home}/{}", NAMES[0])
 }
 
 /// Normalization / post-processing of options done once, mirroring
@@ -719,5 +745,52 @@ impl Options {
         if self.xhtml {
             self.lower_case_tags = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod dict_default_tests {
+    use super::default_link_dict;
+    use std::path::PathBuf;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("textrill-dict-{tag}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn home_of(d: &std::path::Path) -> &str {
+        d.to_str().expect("utf-8 temp path")
+    }
+
+    #[test]
+    fn the_textrill_name_wins_where_both_dictionaries_exist() {
+        let d = scratch("both");
+        std::fs::write(d.join(".textrill.dict"), "").unwrap();
+        std::fs::write(d.join(".txt2html.dict"), "").unwrap();
+        let got = default_link_dict(home_of(&d));
+        assert!(got.ends_with("/.textrill.dict"), "{got}");
+    }
+
+    #[test]
+    fn the_legacy_dictionary_is_used_when_only_that_one_exists() {
+        let d = scratch("legacy");
+        std::fs::write(d.join(".txt2html.dict"), "").unwrap();
+        let got = default_link_dict(home_of(&d));
+        assert!(got.ends_with("/.txt2html.dict"), "{got}");
+    }
+
+    #[test]
+    fn with_nothing_on_disk_the_default_is_the_textrill_name() {
+        let d = scratch("empty");
+        let got = default_link_dict(home_of(&d));
+        assert!(got.ends_with("/.textrill.dict"), "{got}");
+        assert!(!got.contains("txt2html"), "{got}");
+    }
+
+    #[test]
+    fn without_a_home_the_name_is_relative_to_the_working_directory() {
+        assert_eq!(default_link_dict(""), ".textrill.dict");
     }
 }

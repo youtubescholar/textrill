@@ -43,6 +43,9 @@ the meta. So the two halves together are still a complete gate: this file
 proves content parity with the reference, that test proves correct provenance.
 
 Usage: normalize.py FILE...   (rewrites in place; prints how many lines changed)
+
+The fuzzer imports `normalise_bytes` so both gates apply this one rule and
+neither grows its own copy of it.
 """
 
 import re
@@ -58,11 +61,15 @@ GENERATOR_META = re.compile(
 SENTINEL = '<meta name="generator" content="NORMALISED"/>'
 
 
-def normalise(path):
-    """Rewrite generator meta lines in `path`. Returns the number replaced."""
-    with open(path, "rb") as handle:
-        raw = handle.read()
+def normalise_bytes(raw):
+    """Return `(bytes, replaced)` with generator meta lines canonicalised.
 
+    The bytes in are whatever a converter wrote; the bytes out differ only in
+    the lines matching `GENERATOR_META`. Decoding is UTF-8 with
+    `surrogateescape` so unrepresentable bytes round-trip untouched -- this is a
+    comparison filter, not a transcoder, and a byte it does not understand has
+    to come back out exactly as it went in.
+    """
     text = raw.decode("utf-8", "surrogateescape")
     # splitlines(keepends=True) so the trailing newline state of the file is
     # preserved exactly; this file is compared against a reference, so a
@@ -71,17 +78,25 @@ def normalise(path):
     replaced = 0
     for line in text.splitlines(keepends=True):
         body = line.rstrip("\r\n")
-        if GENERATOR_META.match(body):
-            indent = GENERATOR_META.match(body).group(1)
+        m = GENERATOR_META.match(body)
+        if m:
             ending = line[len(body):]
-            out.append(indent + SENTINEL + ending)
+            out.append(m.group(1) + SENTINEL + ending)
             replaced += 1
         else:
             out.append(line)
+    return "".join(out).encode("utf-8", "surrogateescape"), replaced
 
+
+def normalise(path):
+    """Rewrite generator meta lines in `path`. Returns the number replaced."""
+    with open(path, "rb") as handle:
+        raw = handle.read()
+
+    new, replaced = normalise_bytes(raw)
     if replaced:
         with open(path, "wb") as handle:
-            handle.write("".join(out).encode("utf-8", "surrogateescape"))
+            handle.write(new)
     return replaced
 
 

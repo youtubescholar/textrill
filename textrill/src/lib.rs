@@ -1,18 +1,24 @@
 //! textrill — convert plain text to HTML.
 //!
-//! A Rust reimplementation of `HTML::TextToHTML` v3.0 and its `txt2html`
-//! script, originally by Seth Golub.
+//! Structure is inferred from layout: no markup language is required, assumed
+//! or accepted. This crate provides the core conversion engine (`Converter`)
+//! plus the options model (`Options`).
 //!
-//! Converts plain text to HTML. This crate provides the core conversion
-//! engine (`Converter`) plus the options model (`Options`).
+//! # Provenance
+//!
+//! Behaviour was originally pinned by differential testing against
+//! `HTML::TextToHTML` v3.0 and its `txt2html` script, originally by Seth Golub.
+//! That reference is the oracle for the differential tier of the test suite
+//! (`tests/corpus`) and a historical artifact — not the specification. Where the
+//! two disagree the question is which is right, and textrill decides.
 //!
 //! # Compatibility
 //!
-//! The conversion output is byte-identical to the Perl module for 29 of the 31
-//! golden files in the upstream `tfiles` corpus (see `tests/corpus`). The other
-//! two are not divergences: upstream's own comparison is looser than
-//! byte-comparison there, so the port's output is the correct one and the
-//! goldens are not. Perl-isms that the output depends on are reproduced
+//! The conversion output is byte-identical to the reference across all 33
+//! upstream golden checks (29 distinct files in `tfiles`, see
+//! `tests/corpus`). Upstream's own comparison is looser than byte-comparison on
+//! two of them, so textrill's output is the correct one there and the goldens
+//! are not. Perl-isms that the output depends on are reproduced
 //! deliberately: `$/ = ""` paragraph records, `$` matching before one trailing
 //! newline, `"0"` being false, one-byte placeholders in the table space maps, and
 //! option tables that keep their state between calls.

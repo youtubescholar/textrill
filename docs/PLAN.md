@@ -44,18 +44,20 @@ answered per input class, and answered by us.
 
 ## Phase 1 — Give the tool its own name
 
-Nothing here changes behaviour. All of it is the port still wearing the Perl
-module's identity, which is embarrassing in every document produced and wrong in
-the `generator` metadata.
+Nothing here changes behaviour. All of it was the port wearing the Perl module's
+identity — embarrassing in every document produced, and wrong in the `generator`
+metadata. **All four items are done**; the notes below record what each cost and
+which gate holds it.
 
 | # | item | why |
 |---|---|---|
 | 1.1 | ~~`generator` meta says `textrill`, not `HTML::TextToHTML v3.0`~~ **done** | `convert.rs` hard-coded the Perl module. Every file the tool writes claimed Perl made it. Attribution belongs in `LICENSE`, not in provenance. See "Item 1.1, resolved" below. |
-| 1.2 | Read `~/.textrillrc` and `./.textrillrc`; keep `.txt2htmlrc` working | Same precedence order, new preferred names. |
-| 1.3 | Read `~/.textrill.dict` / `.textrill.dict`; keep the old names | Same. |
-| 1.4 | `--help` line 1 describes textrill | Currently: *"A reimplementation of txt2html 3.0"*. |
+| 1.2 | ~~Read `~/.textrillrc` and `./.textrillrc`; keep `.txt2htmlrc` working~~ **done** | Same precedence order, new preferred names. See "Items 1.2–1.4, resolved". |
+| 1.3 | ~~Read `~/.textrill.dict` / `.textrill.dict`; keep the old names~~ **done** | Same. |
+| 1.4 | ~~`--help` line 1 describes textrill~~ **done** | Was: *"A reimplementation of txt2html 3.0"*. |
 
-Items 1.2–1.4 are compatibility-preserving, so the parity tier should stay green.
+Items 1.2–1.4 are compatibility-preserving, so the parity tier should stay green:
+corpus 60/60 with 33/33 goldens after the change, as recorded below.
 
 ### Item 1.1, resolved
 
@@ -99,6 +101,64 @@ failures, so the normaliser is not a general one that swallows differences.
 `NORMALISED: 67` is printed on every corpus run, including when it is zero. A
 normalisation that quietly stopped applying would still leave the corpus green,
 so the count is part of the gate's output rather than a debug aid.
+
+**Follow-up, found 2026-10-06: the fuzzer had never been taught the declared
+divergence.** `run.sh` normalises through `normalize.py`; `fuzz.py` compared raw
+bytes, so at `c6fc271` `make verify` failed at the fuzz stage — 1 864 mismatches
+in 2 000 cases on seed 1, every one of them the generator line — while
+`make corpus` beside it passed 60/60. `fuzz.py` now imports
+`normalize.normalise_bytes`, so there is one implementation of the rule rather
+than two that can drift, and its summary prints `NORMALISED: <n>` unconditionally
+for the reason above. Checked both ways: over 60 cases the shared rule gives 0
+mismatches with `NORMALISED: 106`, and defaulting `caps_tag` to `B` instead of
+`STRONG` still gives 6 mismatches with `NORMALISED` unchanged — the
+canonicalisation does not swallow a real difference.
+
+**Third finding from the same sweep:** 4 mismatches in 16 000 cases, all one
+shape — upstream's own `tfiles/pre.txt` contains `file:Here`, the reference
+links it, textrill refuses it. That is A11's scheme policy against a reference
+that has no policy, declared Tier 2 with its own oracles
+(`tests/urlschemetest.rs`, corpus case `opt_injection`), so the four dangerous
+scheme tokens now leave the fuzzer's claimed input domain in `sanitise()` —
+alongside non-ASCII and trailing whitespace — rather than entering a
+known-divergence list. The three affected seeds re-ran at 0 mismatches with
+`NORMALISED` unchanged.
+
+### Items 1.2–1.4, resolved
+
+**textrill uses its own names, and the old ones still work.**
+
+- **1.2 — option files.** `rcfile::RC_NAMES` is `[.textrillrc, .txt2htmlrc]`.
+  The preferred name is read if it exists and the legacy one otherwise, *within
+  a directory*: precedence is still `@file` < home < cwd < command line, and
+  never both files in one directory, because two array sources there would apply
+  twice. Deduplication is by directory rather than by path, so `HOME=$PWD` is
+  read once under whichever of its two names exists — the shape the reference's
+  `home=>1, current=>1` has no protection against. `--help` documents the
+  preferred names and says the legacy ones are still read.
+- **1.3 — link dictionary.** `options::default_link_dict(home)` picks
+  `~/.textrill.dict` when it exists, `~/.txt2html.dict` when only that does, and
+  the textrill name when neither does (`HOME` unset: the same two names relative
+  to the working directory). The option still points at one file, so this is a
+  choice, not an accumulation.
+- **1.4 — `--help`.** Line 1 is *"Convert plain text to HTML, inferring
+  structure from layout. See the textrill README for details."* The reference is
+  named only where it is factually relevant: the legacy option-file names.
+
+Cost: the parity tier does not move, because no option spelling or default that
+a corpus case depends on changed — corpus 60/60, goldens 33/33 after the change.
+
+Gates added, each broken on purpose per § Standing rule:
+
+| sabotage | expected | observed |
+|---|---|---|
+| `RC_NAMES` reversed to `[.txt2htmlrc, .textrillrc]` | rc-name tests red | 1 `optionstest` + 2 `rcfile` unit tests failed |
+| `NAMES` reversed to `[.txt2html.dict, .textrill.dict]` | dict tests red | 3 of 4 failed; the legacy-only case passes under either order, by design |
+| `--help` line 1 reverted to *"A reimplementation of txt2html 3.0"* | provenance red | `help_describes_textrill_and_not_the_reference` failed |
+
+The tests are `tests/optionstest.rs` (P1.2, end to end), `src/rcfile.rs` and
+`src/options.rs` unit tests (name selection and directory dedup), and
+`tests/provenance.rs` (the help line, alongside the generator meta).
 
 ## Phase 2 — Fix what is wrong
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Seeded differential fuzzer: this port vs the Perl reference.
+"""Seeded differential fuzzer: textrill vs the Perl reference.
 
 Each case is a mutation of an upstream ``tfiles/*.txt`` corpus file, converted
-by both ``HTML::TextToHTML`` 3.0 and the Rust binary under a random option set,
-and the two outputs are compared byte for byte.
+by both ``HTML::TextToHTML`` 3.0 and the textrill binary under a random option
+set, and the two outputs are compared byte for byte.
 
 Mutating real corpus files rather than generating synthetic text is deliberate:
 a failing case is reproducible from the repository with a fixed seed, and the
@@ -41,19 +41,25 @@ once ``make ref`` has built the reference.
 import argparse
 import os
 import random
+import re
 import subprocess
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# normalize.py sits beside this file. This gate applies the corpus's own
+# one-line canonicalisation by importing it, so there is one implementation of
+# "the declared divergence" and not two that can drift apart.
+sys.path.insert(0, HERE)
+from normalize import normalise_bytes  # noqa: E402
 # Derived from __file__, not hardcoded: see the note in run.sh. A fresh clone has
 # to be able to run this. `make ref` materialises the reference checkout.
 ROOT = os.path.dirname(os.path.dirname(HERE))
 REPO = os.path.dirname(ROOT)
 REFDIR = os.environ.get("REFDIR", os.path.join(REPO, "ref", "txt2html-3.0"))
 STUBS = os.environ.get("STUBS", os.path.join(REPO, "ref", "stubs"))
-MINE = os.environ.get("MINE", os.path.join(ROOT, "target", "debug", "txt2html"))
-RUNDIR = os.environ.get("RUNDIR", os.path.join(tempfile.gettempdir(), "txt2html-corpus"))
+MINE = os.environ.get("MINE", os.path.join(ROOT, "target", "debug", "textrill"))
+RUNDIR = os.environ.get("RUNDIR", os.path.join(tempfile.gettempdir(), "textrill-corpus"))
 # Both halves live under ref/ in the repo.  An earlier version kept them in
 # /tmp, and a reboot wiped them: the reference then exited non-zero on every
 # case, which this fuzzer counts as "reference refused" and skips, so the run
@@ -360,10 +366,32 @@ STRUCTURAL_EXTRA = {
 # so restricting the alphabet costs no coverage that exists anywhere else.
 # Tabs are kept: with the input ASCII-only, tab expansion agrees with the
 # reference, and the structural fixtures need tabs and CRs.
+#
+# Scheme tokens are the third restriction, added 2026-10-06 after the first
+# clean generator-normalised sweep reported 4 mismatches in 16 000 cases, all of
+# them one shape: upstream's own `tfiles/pre.txt` contains `file:Here`, and the
+# reference links it while textrill refuses it. That refusal is policy
+# (src/urlscheme.rs: javascript, data, vbscript and file are DANGEROUS_SCHEMES,
+# and a refused anchor is unwrapped with the text kept), and it has its own
+# oracles -- tests/urlschemetest.rs and the corpus case `opt_injection`. The
+# reference has no scheme policy at all, so there is no byte sequence textrill
+# could emit to match it: this is a Tier 2 divergence, not a defect, and a byte
+# comparison is simply the wrong oracle for this input.
+#
+# It is removed from the claimed domain rather than recorded as a known
+# divergence, because a list keyed on an output shape is the machinery this file
+# removed on purpose (see below): it would outlive its reason and start hiding
+# real link-handling regressions. The input domain statement stays honest
+# instead -- the fuzzer compares byte for byte over inputs where byte comparison
+# is the right oracle, and the scheme policy is tested where it belongs.
+DANGEROUS_SCHEME = re.compile(r"(?i)\b(?:javascript|data|vbscript|file)\s*:")
+
+
 def sanitise(text):
     out = []
     for line in text.split("\n"):
         line = "".join(c if ord(c) < 0x80 else "?" for c in line)
+        line = DANGEROUS_SCHEME.sub("", line)
         out.append(line.rstrip(" \t"))
     return "\n".join(out)
 
@@ -565,6 +593,7 @@ def main():
     port_timeouts = 0
     ref_timeouts = 0
     compared = 0
+    normalised = 0
 
     for n in range(args.cases):
         name, text, flags = build_case(rng, seeds)
@@ -669,6 +698,17 @@ def main():
             a = fh.read()
         with open(myout, "rb") as fh:
             b = fh.read()
+        # P1.1. Both converters name themselves in the one
+        # `meta name="generator"` line, so neither byte sequence can match the
+        # other's -- the same declared divergence the corpus normalises through
+        # normalize.py. Both sides go through that rule, and the count is
+        # reported in the summary for the same reason the corpus prints
+        # NORMALISED unconditionally: a canonicalisation that quietly stopped
+        # applying would leave this gate comparing something it no longer means
+        # to, and a zero that is not printed cannot be noticed.
+        a, na = normalise_bytes(a)
+        b, nb = normalise_bytes(b)
+        normalised += na + nb
         if a != b:
             mismatches += 1
             print(f"case {n} (seed {args.seed}, from {name}): MISMATCH")
@@ -689,7 +729,8 @@ def main():
         f"fuzz: {args.cases} cases, seed {args.seed}, "
         f"{compared} compared, "
         f"{mismatches} mismatches, "
-        f"{port_timeouts} port timeouts, {ref_timeouts} reference timeouts"
+        f"{port_timeouts} port timeouts, {ref_timeouts} reference timeouts, "
+        f"NORMALISED: {normalised} generator meta line(s)"
     )
     # A port timeout is a defect, so it fails the run on its own. A reference
     # timeout is not the port's fault and does not, but a run that compared

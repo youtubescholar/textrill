@@ -1,19 +1,23 @@
-//! Option files: `@file`, `~/.txt2htmlrc` and `./.txt2htmlrc`.
+//! Option files: `@file`, `~/.textrillrc` and `./.textrillrc`.
 //!
 //! The reference script reads option files before parsing its command line:
 //! `scripts/txt2html:838-845` calls
 //! `Getopt::ArgvFile::argvFile(startupFilename=>".txt2htmlrc", home=>1, current=>1)`,
 //! and the POD at `scripts/txt2html:509,759-771` documents all three forms as
-//! active behaviour. The port had none of it, so `textrill @opts.txt` treated
-//! `@opts.txt` as an input filename and failed with `Could not open @opts.txt`
-//! -- a confusing failure rather than an honest "unknown option".
+//! active behaviour. textrill reads the same three forms under its own names:
+//! `.textrillrc` is preferred, `.txt2htmlrc` is still accepted, so an existing
+//! configuration keeps working. Before any option file was read,
+//! `textrill @opts.txt` treated `@opts.txt` as an input filename and failed with
+//! `Could not open @opts.txt` -- a confusing failure rather than an honest
+//! "unknown option".
 //!
 //! # Precedence
 //!
-//! `@file` first, then `~/.txt2htmlrc`, then `./.txt2htmlrc`, then the command
-//! line, so the command line always wins. That matches upstream, where
-//! `argvFile` prepends its expansion to `@ARGV` and the command line is
-//! therefore parsed last.
+//! `@file` first, then the home directory, then the working directory, then the
+//! command line, so the command line always wins. Within a directory the
+//! preferred `.textrillrc` is read if it exists and `.txt2htmlrc` otherwise --
+//! never both, so an option array is applied once however many names a
+//! migrating user has.
 //!
 //! # Syntax
 //!
@@ -176,35 +180,46 @@ where
     Ok(true)
 }
 
+/// The option-file names, preferred first.
+///
+/// `.txt2htmlrc` is the name upstream gave the file and is still read, so a
+/// configuration written for the Perl tool keeps working. `.textrillrc` is
+/// textrill's own and wins when both exist in one directory: reading both would
+/// apply an array option twice, and a user who has written a `.textrillrc` has
+/// said which one they mean.
+const RC_NAMES: [&str; 2] = [".textrillrc", ".txt2htmlrc"];
+
 /// The rc files to read, in precedence order, that exist.
 ///
 /// `home` is taken from `$HOME` and `current` is the working directory. A
-/// missing file is not an error -- upstream treats both as optional -- but a
-/// file that exists and cannot be read is, since that is a real fault.
+/// missing file is not an error -- the reference treats both as optional -- but
+/// a file that exists and cannot be read is, since that is a real fault.
 ///
-/// `~/.txt2htmlrc` and `./.txt2htmlrc` are listed separately rather than
-/// deduplicated: on many systems they are the same file, and reading it twice
-/// would apply array options twice. Upstream's `home=>1, current=>1` has the same
-/// duplication, but a user who sets `HOME=$PWD` should not get their
-/// `custom_heading_regexp` entries twice, so the paths are compared.
+/// The two directories are deduplicated rather than the two paths: on many
+/// systems they are the same directory (`HOME=$PWD`, a service unit, a
+/// container), and each directory is read exactly once, under whichever of its
+/// two names exists. The reference's `home=>1, current=>1` has no such
+/// protection and would apply the same file twice.
 pub fn rc_files(home: Option<&Path>, current: &Path) -> Vec<(PathBuf, String)> {
     let mut files: Vec<(PathBuf, String)> = Vec::new();
-    if let Some(h) = home {
-        let p = h.join(".txt2htmlrc");
-        if p.exists() {
-            files.push((p.clone(), display_path(&p, home)));
+    let mut handled: Vec<&Path> = Vec::new();
+    for dir in [home, Some(current)].into_iter().flatten() {
+        if handled.contains(&dir) {
+            continue;
         }
-    }
-    let cur = current.join(".txt2htmlrc");
-    if cur.exists() && !files.iter().any(|(p, _)| *p == cur) {
-        let label = display_path(&cur, home);
-        files.push((cur, label));
+        handled.push(dir);
+        let found = RC_NAMES.iter().map(|n| dir.join(n)).find(|p| p.exists());
+        if let Some(p) = found {
+            let label = display_path(&p, home);
+            files.push((p, label));
+        }
     }
     files
 }
 
-/// Render a path the way a user would recognise it: `~/.txt2htmlrc` for the
-/// home file, `./.txt2htmlrc` for the current-directory one, absolute otherwise.
+/// Render a path the way a user would recognise it: `~/.textrillrc` for the
+/// home file, `./.textrillrc` for the current-directory one, absolute
+/// otherwise. The name shown is the name that was read.
 fn display_path(path: &Path, home: Option<&Path>) -> String {
     if let Some(h) = home {
         if let Ok(rest) = path.strip_prefix(h) {
@@ -254,6 +269,91 @@ mod tests {
         assert_eq!(
             toks("--extract\n--\n-dashed.txt\n# not a comment\n"),
             vec!["--extract", "-dashed.txt", "# not a comment"]
+        );
+    }
+
+    // --- P1.2: textrill's own names, with the legacy ones still read ----------
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("textrill-rcfile-{tag}"));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn the_textrill_name_wins_where_both_names_exist() {
+        let d = scratch("both");
+        std::fs::write(d.join(".textrillrc"), "--extract\n").unwrap();
+        std::fs::write(d.join(".txt2htmlrc"), "--toc\n").unwrap();
+
+        let got = rc_files(None, &d);
+        assert_eq!(got.len(), 1, "a directory yields one file: {got:?}");
+        assert!(
+            got[0].0.ends_with(".textrillrc"),
+            "preferred name not chosen: {:?}",
+            got[0].0
+        );
+        assert!(
+            got[0].1.ends_with(".textrillrc"),
+            "label should show the name that was read: {}",
+            got[0].1
+        );
+    }
+
+    #[test]
+    fn the_legacy_name_is_read_when_it_is_the_one_that_exists() {
+        let d = scratch("legacy");
+        std::fs::write(d.join(".txt2htmlrc"), "--extract\n").unwrap();
+
+        let got = rc_files(None, &d);
+        assert_eq!(got.len(), 1);
+        assert!(got[0].0.ends_with(".txt2htmlrc"), "{:?}", got[0].0);
+    }
+
+    #[test]
+    fn home_and_cwd_are_one_directory_when_they_are_the_same_directory() {
+        // `HOME=$PWD`. The directory is handled once, under whichever of its
+        // two names exists, so an array option is applied once.
+        for tag in ["same-both", "same-legacy"] {
+            let d = scratch(tag);
+            if tag == "same-both" {
+                std::fs::write(d.join(".textrillrc"), "--extract\n").unwrap();
+                std::fs::write(d.join(".txt2htmlrc"), "--toc\n").unwrap();
+            } else {
+                std::fs::write(d.join(".txt2htmlrc"), "--extract\n").unwrap();
+            }
+            let got = rc_files(Some(&d), &d);
+            assert_eq!(got.len(), 1, "{tag}: {got:?}");
+            let expected = if tag == "same-both" {
+                ".textrillrc"
+            } else {
+                ".txt2htmlrc"
+            };
+            assert!(got[0].0.ends_with(expected), "{tag}: {:?}", got[0].0);
+        }
+    }
+
+    #[test]
+    fn home_is_read_before_cwd_and_each_keeps_its_own_name() {
+        let home = scratch("prec-home");
+        let cwd = scratch("prec-cwd");
+        std::fs::write(home.join(".textrillrc"), "--extract\n").unwrap();
+        std::fs::write(cwd.join(".txt2htmlrc"), "--toc\n").unwrap();
+
+        let got = rc_files(Some(&home), &cwd);
+        let names: Vec<String> = got
+            .iter()
+            .map(|(p, _)| p.to_string_lossy().into())
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(names[0].ends_with(".textrillrc"), "{names:?}");
+        assert!(names[1].ends_with(".txt2htmlrc"), "{names:?}");
+        assert!(got[0].1.starts_with("~/"), "home label: {}", got[0].1);
+        assert!(
+            got[1].1 == names[1],
+            "a cwd outside home is shown as itself: {}",
+            got[1].1
         );
     }
 

@@ -141,3 +141,40 @@ fn a_full_document_from_the_cli_names_textrill() {
     let _ = std::fs::remove_file(&infile);
     let _ = std::fs::remove_file(&outfile);
 }
+
+#[test]
+fn help_describes_textrill_and_not_the_reference() {
+    // P1.4. The first line a user read was "A reimplementation of txt2html
+    // 3.0": the tool describing itself in someone else's voice. It now
+    // describes what it does, and the reference is named only where it is
+    // factually relevant -- the legacy option-file names, which are still read.
+    let out = Command::new(env!("CARGO_BIN_EXE_textrill"))
+        .arg("--help")
+        .output()
+        .expect("spawn textrill --help");
+    assert!(out.status.success(), "{:?}", out.status);
+    let text = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(
+        lines[0].starts_with("Usage: textrill "),
+        "usage line: {:?}",
+        lines[0]
+    );
+    assert!(
+        lines[1].starts_with("Convert plain text to HTML"),
+        "help line 1: {:?}",
+        lines[1]
+    );
+    assert!(
+        !lines[1].to_lowercase().contains("txt2html"),
+        "help line 1 still names the reference: {:?}",
+        lines[1]
+    );
+    assert!(
+        !text.to_lowercase().contains("reimplementation"),
+        "help still defines textrill against the reference:\n{text}"
+    );
+    // The rc epilog names the preferred files and says the legacy ones work.
+    assert!(text.contains("~/.textrillrc"), "{text}");
+    assert!(text.contains("legacy names ~/.txt2htmlrc"), "{text}");
+}

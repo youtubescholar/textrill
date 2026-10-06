@@ -19,7 +19,7 @@ genuinely small group. From the survey, re-checked against the current sources:
 | Tool | Status | Note |
 |---|---|---|
 | `HTML::TextToHTML` 3.0 (Perl) | the origin | the archived reference; still shipped |
-| **textrill** | active | the Rust reimplementation, plus a native GUI |
+| **textrill** | active | this project; a native GUI and a static binary |
 | txt2tags | active | closest sibling; requires `====`/`----` underlining |
 | dmTxt2Html | effectively dead | Python/CGI, historically interesting |
 | pandoc | very active | *requires* markup — see below |

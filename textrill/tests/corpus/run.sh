@@ -22,7 +22,7 @@ STUBS="${STUBS:-$REPO/ref/stubs}"
 MINE="${MINE:-$ROOT/target/debug/textrill}"
 # Scratch directory for the two output sets. Derived from TMPDIR rather than
 # hardcoded, so it works on a machine that keeps its temporary files elsewhere.
-RUNDIR="${RUNDIR:-${TMPDIR:-/tmp}/txt2html-corpus}"
+RUNDIR="${RUNDIR:-${TMPDIR:-/tmp}/textrill-corpus}"
 
 # P1.1. Counts generator meta lines canonicalised by normalize.py, so the one
 # declared divergence is visible in the run's output instead of being an

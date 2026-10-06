@@ -817,8 +817,8 @@ impl TextrillApp {
             .open(&mut self.about_open)
             .show(ctx, |ui| {
                 ui.label(format!("textrill {}", env!("CARGO_PKG_VERSION")));
-                ui.label("A Rust port of HTML::TextToHTML 3.0, with an egui front end.");
-                ui.label("The conversion is byte-identical to the original Perl module.");
+                ui.label("Plain text to HTML, with an egui front end.");
+                ui.label("Structure is inferred from layout; no markup required.");
                 ui.label("Released under the GNU General Public License, version 3 or later.");
             });
     }

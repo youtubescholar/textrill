@@ -2,27 +2,29 @@
 
 Convert plain text to HTML.
 
-`textrill` is a Rust reimplementation of
+`textrill` converts plain text to HTML, inferring structure from the
+conventions text authors already use: indentation for lists, blank lines for
+paragraphs, underlines and setext rules for headings, trailing punctuation for
+link labels, and so on. No markup language is required or assumed.
+
+It began as a Rust port of
 [`HTML::TextToHTML`](https://metacpan.org/pod/HTML::TextToHTML) 3.0 and its
-`txt2html` script, originally written by Seth Golub. It reads plain text and
-writes HTML, inferring structure from the conventions text authors already use:
-indentation for lists, blank lines for paragraphs, underlines and setext rules
-for headings, trailing punctuation for link labels, and so on.
+`txt2html` script, originally written by Seth Golub, and the two can still be
+compared byte for byte — see
+[Relationship to upstream](#relationship-to-upstream).
 
 This is a fork. It is not endorsed by, and carries no affiliation with, the
 upstream `txt2html` project or its authors. See [Licence](#licence).
 
 ## Status
 
-Early. `0.1.0` is the first release of the fork, and it is a rename plus a set
-of correctness fixes on top of the existing port — see
-[Relationship to upstream](#relationship-to-upstream).
+Early. `0.1.0` is the first release of the fork.
 
 What is **done**:
 
-- The conversion engine is byte-verified against the Perl original across a
+- The conversion engine is byte-verified against the upstream reference across a
   differential corpus of 60 cases and 33 upstream golden files.
-- 306 Rust tests, a fuzzer, and a 74-test native GUI suite.
+- 324 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.
@@ -40,8 +42,8 @@ What is **not** done yet:
 
 The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`; the
 earlier Python/PySide6 front end is retired and archived under `legacy-archive/`.
-Performance is no longer a gap: the P6 link-pass fix puts the port ahead of the
-Perl original on the link-dense benchmark (see `../legacy-archive/REMEDIATION-PLAN.md`, P6).
+Performance is no longer a gap: the P6 link-pass fix puts textrill ahead of the
+reference on the link-dense benchmark (see `../legacy-archive/REMEDIATION-PLAN.md`, P6).
 
 
 ## Option files
@@ -50,14 +52,14 @@ Options can come from the command line, from `@file` groups, or from an rc file.
 Precedence, lowest first:
 
 1. `@file` groups, in the order they appear on the command line
-2. `~/.txt2htmlrc`
-3. `./.txt2htmlrc`
+2. `~/.textrillrc`
+3. `./.textrillrc`
 4. the command line
 
 One option per line, using the same spellings as the command line:
 
 ```sh
-# .txt2htmlrc
+# .textrillrc
 --extract
 --title "Release notes"
 --bold_delimiter "@"
@@ -74,6 +76,13 @@ textrill @opts.txt notes.txt
 
 Both rc files are optional; a missing one is not an error. An `@file` that does
 not exist *is* an error, since the name was given explicitly.
+
+The legacy names `~/.txt2htmlrc` and `./.txt2htmlrc` are read when no
+`textrillrc` is present in the same directory, so a configuration written for
+the Perl tool keeps working. Where both exist, `.textrillrc` is the one read.
+The link dictionary follows the same rule: `~/.textrill.dict` if it exists,
+otherwise `~/.txt2html.dict` (`./.textrill.dict` / `./.txt2html.dict` when
+`HOME` is unset).
 
 ## Install
 
@@ -120,8 +129,8 @@ textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > RE
 There are **65 options** with **121 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
-The options are the Perl originals, unchanged, so that documents converted by
-either tool are directly comparable. A few are worth calling out:
+The option names and defaults are the upstream ones, unchanged, so a document
+converts the same way under either tool. A few are worth calling out:
 
 | Option | Default | Effect |
 | --- | --- | --- |
@@ -270,7 +279,7 @@ at its own prefix. A template must contain `{{textrill:content}}`; the command
 line reports a missing or malformed one before writing anything.
 
 Because a template is an `Options` value, it can be set once in
-`./.txt2htmlrc`, so a project commits its template and points at it there.
+`./.textrillrc`, so a project commits its template and points at it there.
 
 ### Citations and glossary
 
@@ -389,22 +398,25 @@ match conv.try_convert() {
 ## Relationship to upstream
 
 `txt2html` 3.0 is a Perl module plus a wrapper script by Seth Golub, later
-maintained by Kathryn Andersen and Joao Eriberto Mota Filho. This project is a
-Rust reimplementation of it, kept byte-compatible with the original wherever
-that is achievable.
+maintained by Kathryn Andersen and Joao Eriberto Mota Filho. textrill began as
+a Rust port of it. That reference is still the oracle for the differential tier
+of the test suite — the only thing that can say "this document converts the way
+it did before" — and it is a historical artifact, not the specification. Where
+the two disagree the question is which is right, and textrill decides; see
+`../docs/PLAN.md`.
 
-The compatibility work is the point. A plain-text-to-HTML converter is only
-useful if it agrees with the tool people already have, so behaviour was pinned
-by differential testing against the actual Perl implementation rather than
-guessed from documentation:
+Behaviour was pinned by differential testing against the real implementation
+rather than guessed from documentation, which is why the option names and
+defaults are the upstream ones and a document can be converted by either tool
+and compared:
 
-- `tests/corpus/` runs 59 documents through both implementations and requires
+- `tests/corpus/` runs 60 documents through both implementations and requires
   byte-identical output.
 - The 33 upstream golden files are compared byte for byte.
 - The fuzzer hunts for divergences in Unicode handling, delimiter recovery and
   encoding detection.
 
-Where this fork deliberately differs from upstream, the divergence is declared
+Where textrill deliberately differs from upstream, the divergence is declared
 and explained in `tests/corpus/README.md` rather than left to be discovered.
 Known differences:
 
