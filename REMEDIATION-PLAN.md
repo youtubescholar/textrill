@@ -3405,6 +3405,65 @@ no-`target` half is then checked again across eight option combinations, one of
 them turning on every flag at once. Reverting the `\S` fix makes the first fail,
 which is the only evidence a test like that is worth anything.
 
+### Budget-driven page boundaries — proposed (P5.7), **not implemented**
+
+**The ask.** Given a text file, count its characters including whitespace, then
+pick the heading level that `--chunk` should split at so that no page holds more
+than a chosen budget of text. Useful because a page is currently as large as its
+top-level section happens to be, and nobody knows that number until they have
+already converted.
+
+**Counting is not the hard part.** `try_convert_chunked` (`convert.rs`) reads
+every `--infile` into a `String` through `read_with` before conversion starts, so
+the source is fully materialised and counting it is free. `assemble_chunked`
+already holds a `Vec<Section>` carrying both `level` and `html`, so candidate
+page sizes per heading level are a few dozen lines away. Choosing the cut is the
+whole of the design.
+
+**Why this is not simply a sort-and-split, and cannot always succeed:**
+
+* **Page boundaries are heading boundaries.** The sectioner never splits inside
+  a section, so one section larger than the budget produces an oversized page at
+  *every* level. No choice of level helps. The budget is therefore a request, and
+  an implementation must say out loud that it was not met, and name the section
+  that overflowed. Reporting a silent overflow would be worse than having no
+  budget at all, because the user asked for a guarantee.
+* **Cutting at exactly level L is not monotone.** If the document has no heading
+  at level L, that level yields a single page holding the entire body — strictly
+  larger than cutting one level up. Walking levels in search of "coarsest cut that
+  fits" can therefore step past a level that fitted onto one that does not.
+  Cutting at every heading of level *or shallower* restores monotonicity at the
+  cost of an orphan page holding a heading's preamble. That is a real choice, not
+  an implementation detail, and it has not been made.
+* **Only levels the document actually contains** should be candidates, or the
+  report describes cut strategies that cannot happen.
+* **Characters, bytes, or grapheme clusters.** `str::len` is bytes,
+  `chars().count` is Unicode scalars, and neither is what a reader counts. On
+  this project's own inputs the three disagree, which is the same reason
+  `fix/non-ascii-delimiter-predicate` exists.
+* **Source characters, body HTML, or output bytes are three different numbers.**
+  Each page is `start + toc + page + tail`, so the template is paid *per page*,
+  and HTML inflates the body unpredictably. "How much text went into each
+  template" needs to be its own figure or the two will never agree and the feature
+  will read as broken.
+
+**What a report should print.** Per page: index, output bytes, source characters,
+cut level. Then pages, and min/median/max. Median rather than mean, because one
+enormous section drags a mean to nothing — and that section is exactly the case
+the reader needs to see.
+
+**Measure first.** The natural first step is a report-only flag that changes no
+behaviour. That is not a way of avoiding the decision; it is how the decision gets
+made, because nothing in this repository currently measures the section-size
+distribution of any real input. Whether the budget can do anything at all depends
+on whether real documents are heading-uniform, and that is unknown here.
+
+**Not proposed.** Splitting by paragraph count, which would contradict the settled
+heading-based decision recorded under *Sectioning and TOC — design*. And failing
+the conversion when the budget cannot be met: the size of one section is a fact
+about the input, not an error in it, so it must not turn a document into a
+non-zero exit.
+
 ### Link integrity — investigated 2026-10-04, one defect found and fixed
 
 Asked whether the links textrill *generates* actually work, given that A11 had
