@@ -58,6 +58,30 @@ the `generator` metadata.
 Item 1.1 is the one that matters. 1.2–1.4 are compatibility-preserving, so the
 parity tier should stay green.
 
+**1.1 is not the freebie it looks like.** `golden_check` compares with a
+byte-exact `cmp` against the upstream Perl `tfiles/good_*.html`, and **13 of the
+32 goldens contain** `<meta name="generator" content="HTML::TextToHTML v3.0"/>`.
+Correcting the provenance breaks 13 golden comparisons on the spot, and there
+are only three defensible ways to handle that:
+
+| option | cost |
+|---|---|
+| Normalise the one line out before `cmp` | Keeps golden coverage on all 32 stems, but the harness now has a normalisation step, which is the shape of thing this project has been burned by before. |
+| Exempt the 13 stems via `NOGOLDEN[]` | No harness change, but those stems lose golden coverage entirely — and `NOGOLDEN` means *skipped*, so a real regression in them goes unseen. |
+| Keep the Perl string | Zero cost, and the tool keeps lying about its own provenance in every file it writes. |
+
+This is a decision about what the parity tier is *for*. It is not a
+mechanical consequence of fixing a string, and it is deliberately left
+unresolved here rather than picked quietly. Whichever way it goes, the
+13 affected stems must be enumerated by name in the corpus README — a silent
+reduction in golden coverage is exactly the failure mode recorded in that
+file's § "Six ways this reported success wrongly". They are:
+
+```
+heading1  links3  list-4  list-5  list-advanced  list-custom  list-styles
+mixed  news  robo  sample  umlauttest  xhtml_sample
+```
+
 ## Phase 2 — Fix what is wrong
 
 All four were found by the investigation, and none is a regression: the first
