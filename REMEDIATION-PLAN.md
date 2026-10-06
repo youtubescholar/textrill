@@ -3464,6 +3464,46 @@ the conversion when the budget cannot be met: the size of one section is a fact
 about the input, not an error in it, so it must not turn a document into a
 non-zero exit.
 
+### Oracle coverage: which options have one — audited 2026-10-06
+
+Derived mechanically so that it can be re-derived, because a coverage claim
+nobody can reproduce is a coverage rumour. `cli.rs` `SPECS` gives the port side
+(65 options, 121 names counting aliases). The `GetOptions` block in
+`ref/txt2html-3.0/scripts/txt2html` gives what the reference implements (58 spec
+entries, 113 names). The two oracles are the 60 differential cases and the
+seeded fuzzer; both were read by sourcing `cases.sh` and scanning `fuzz.py`, not
+by grepping for option names, because a grep cannot tell `--escape_HTML_chars`
+from an option that is merely never mentioned.
+
+| class | n | what it means |
+| --- | --- | --- |
+| explicit differential oracle | 45 | varied by a corpus case or a fuzz seed, then compared byte for byte against Perl |
+| no reference equivalent | 13 | txt2tags has no equivalent, so nothing can be diffed |
+| default path verified only | 3 | `doctype`, `preformat_start_marker`, `preformat_end_marker`: the default value is byte-verified in passing, the non-default branch is not |
+| nothing verified | 2 | `append_head`, `prepend_file` |
+| plumbing | 1 | `outfile` |
+| no-op | 1 | `utf8`, accepted and ignored |
+
+**The 13 are structural, not an oversight.** `html5`, `section`, `toc`, `chunk`,
+`number_headings`, `stream`, `template`, `document_template`, `citations`,
+`glossary`, `meta_charset`, `encoding`, `allowed_url_schemes`. They rest on the
+33 goldens and on hand-written assertions, and a golden pins output against our
+own past output: it catches unintended change superbly and cannot catch a wrong
+decision that was implemented consistently and then frozen. A11 and A12 are the
+argument for taking that limit seriously rather than citing the test count.
+
+**The 2 are a coverage gap, not a correctness one.** Both were checked by hand
+against the reference on 2026-10-06 and are byte-identical, so the honest
+statement is "correct but unpinned". The fix is two corpus cases.
+
+**A correction, because the first version of this audit was wrong.** Counting
+only the 60 cases reported roughly 34 options with no oracle. That was wrong in
+both directions: it ignored `fuzz.py`, which varies 30 options and is a real
+differential oracle, and it treated "never passed on the command line" as
+"unverified", when an option whose default is inert *and* which nothing varies
+is the only category that actually means nothing was checked. The number that
+survives checking is 2, not 34.
+
 ### Link integrity — investigated 2026-10-04, one defect found and fixed
 
 Asked whether the links textrill *generates* actually work, given that A11 had
