@@ -111,7 +111,7 @@ fn main() -> ExitCode {
         let mut wrote = true;
         for (name, html) in &files {
             if let Err(e) = std::fs::write(name, html) {
-                eprintln!("Error: unable to open {name},: {e}");
+                eprintln!("Error: unable to open {name}: {e}");
                 wrote = false;
             }
         }
@@ -160,7 +160,7 @@ fn main() -> ExitCode {
             true
         }
         Err(e) => {
-            eprintln!("Error: unable to open {},: {}", opts.outfile, e);
+            eprintln!("Error: unable to open {}: {}", opts.outfile, e);
             false
         }
     };
@@ -196,7 +196,7 @@ fn run_stream(conv: &mut Converter, opts: &Options) -> ExitCode {
         match std::fs::File::create(&opts.outfile) {
             Ok(file) => Box::new(BufWriter::new(file)),
             Err(e) => {
-                eprintln!("Error: unable to open {},: {}", opts.outfile, e);
+                eprintln!("Error: unable to open {}: {}", opts.outfile, e);
                 return ExitCode::from(1);
             }
         }

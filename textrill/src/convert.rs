@@ -3377,16 +3377,23 @@ impl Converter {
         }
         let top = sections.iter().map(|s| s.level).min().unwrap_or(1);
         let mut pages: Vec<String> = Vec::new();
+        // The `chunk-N` id of the top-level section each page holds, in page
+        // order. Needed so a cross-file TOC can point *into* a page rather than
+        // only at its top, and so `--section` has something to do here.
+        let mut page_ids: Vec<String> = Vec::new();
         let mut leading = String::new();
         let mut current: Option<String> = None;
+        let mut current_id = String::new();
         for s in &sections {
             if s.level == top {
                 if let Some(page) = current.take() {
                     pages.push(page);
+                    page_ids.push(std::mem::take(&mut current_id));
                 }
                 let mut page = std::mem::take(&mut leading);
                 page.push_str(&s.html);
                 current = Some(page);
+                current_id = s.id.clone();
             } else if let Some(page) = current.as_mut() {
                 page.push_str(&s.html);
             } else {
@@ -3395,8 +3402,12 @@ impl Converter {
         }
         if let Some(page) = current {
             pages.push(page);
+            page_ids.push(current_id);
         } else if !leading.trim().is_empty() {
+            // No top-level section at all, which cannot happen while `top` is the
+            // minimum level present, but a page still needs an id to be a target.
             pages.push(leading);
+            page_ids.push(String::new());
         }
         if !preamble.is_empty() {
             if let Some(first) = pages.first_mut() {
@@ -3410,7 +3421,7 @@ impl Converter {
         // absolute) write path, so the pages stay portable if moved together.
         let links: Vec<String> = (1..=pages.len()).map(|n| self.chunk_basename(n)).collect();
         let toc = if self.opts.toc {
-            Some(self.render_page_toc(&sections, top, &links))
+            Some(self.render_page_toc(&sections, top, &links, &page_ids))
         } else {
             None
         };
@@ -3423,7 +3434,27 @@ impl Converter {
                 if let Some(toc) = &toc {
                     out.push_str(toc);
                 }
-                out.push_str(page);
+                // `--section` under `--chunk` used to be silently ignored, because
+                // a page *is* one top-level section and there was nothing left to
+                // wrap.
+                //
+                // The wrapper is emitted for `--toc` as well as `--section`, and
+                // that is the point: it is the anchor the TOC's own `file#chunk-N`
+                // points at. Single-file `--toc` already implies its targets, since
+                // `sectionize_parts` wraps whenever either flag is set, and a TOC
+                // that can emit a dangling link is worse than a redundant `<article>`.
+                if (self.opts.section || self.opts.toc) && !page_ids[i].is_empty() {
+                    out.push_str("<article class=\"section\" id=\"");
+                    out.push_str(&page_ids[i]);
+                    out.push_str("\">\n");
+                    out.push_str(page);
+                    if !page.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push_str("</article>\n");
+                } else {
+                    out.push_str(page);
+                }
                 out.push_str(&self.render_pager(&links, i));
                 out.push_str(tail);
                 (names[i].clone(), out)
@@ -3458,6 +3489,7 @@ impl Converter {
         sections: &[crate::section::Section],
         top: usize,
         names: &[String],
+        page_ids: &[String],
     ) -> String {
         let mut out = String::from("<nav class=\"toc\" id=\"toc\">\n<ol class=\"toc-list\">\n");
         let mut page = 0usize;
@@ -3467,6 +3499,13 @@ impl Converter {
                 out.push_str(&s.level.to_string());
                 out.push_str("\"><a href=\"");
                 out.push_str(&names[page]);
+                // Deep-link into the page. Harmless when the page has no anchor
+                // of its own, and the fragment is skipped rather than emitted
+                // empty so the href stays a clean relative path.
+                if let Some(id) = page_ids.get(page).filter(|id| !id.is_empty()) {
+                    out.push('#');
+                    out.push_str(id);
+                }
                 out.push_str("\">");
                 out.push_str(&s.label);
                 out.push_str("</a></li>\n");

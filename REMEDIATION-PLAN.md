@@ -4,7 +4,7 @@ Status: **in progress**, 2026-10-03. Covers
 `textrill` (Rust engine + CLI) and `textrill-gui-rs` (native `egui` front end).
 The Python bindings and the PySide6 front end are retired to `legacy-archive/`.
 
-Gates at 2026-10-04: corpus **60/60**, goldens **33/33**, **258** engine tests,
+Gates at 2026-10-04: corpus **60/60**, goldens **33/33**, **263** engine tests,
 **74** native GUI tests, `fmt`/`clippy` clean. (At 2026-10-03: corpus 59/59,
 goldens 33/33, 16 000 fuzz cases 0 mismatches, 164 engine tests, 74 GUI tests;
 the fuzzer and corpus are unchanged since.) The dated figures elsewhere in this
@@ -3216,6 +3216,64 @@ Three decisions that were not obvious:
 diverge and the comparison cannot be the oracle. The real oracle is
 `tests/urlschemetest.rs` (20 cases). Worth recording that `ci_dict` broke on the
 first cut of this, which is what forced the denylist decision above.
+
+### Link integrity — investigated 2026-10-04, one defect found and fixed
+
+Asked whether the links textrill *generates* actually work, given that A11 had
+just established the links it *refuses* are handled. Audited, then made
+permanent, because the audit found a coverage hole rather than a broken link.
+
+**Links are correct.** Every configuration tried resolves: single-file
+`#chunk-N` TOC entries, `--extract`, `--number_headings`, `--make_anchors`
+alongside the section ids, the cross-file TOC, and the prev/next pager.
+Escaping in TOC labels is right too — `&`, `<` and `"` survive, and inline
+markup inside a heading is stripped from the label but kept in the heading.
+The pager's *targets* and the TOC's *labels* were both checked against the
+pages they name, because a cross-file TOC can link to a file that exists and
+still be off by one.
+
+**But the corpus covers none of it.** All 60 cases are reference-differential,
+so none passes `--toc`, `--section` or `--chunk` — those are Phase 5 additions
+with no upstream equivalent to diff against. Running a link checker over the
+whole corpus output finds **zero** engine-generated links. The code that invents
+`href`s and the `id`s they point at was the least-differentially-covered part of
+the output, resting on six unit tests in `section.rs`.
+`tests/linkintegrity.rs` is the fix: 12 adversarial documents crossed with the
+option sets that change link structure, single-file and chunked, asserting that
+every generated internal reference resolves, that ids are unique per document
+(duplicate ids do not break a link — the browser jumps to the first match — so
+that needs its own assertion), and that each TOC entry names the heading it
+points at.
+
+Two mutations confirm the guard can actually fail, which was worth checking
+given Phase 0b: a one-character typo in the single-file TOC `href` and a
+one-page off-by-one in the cross-file TOC are both caught.
+
+**Defect found: `--section` was silently ignored under `--chunk`,** because a
+page *is* one top-level section, so there was nothing left to wrap. Two
+consequences, and the second is the one that mattered: the cross-file TOC could
+only link to the *top* of a page, never to its heading.
+
+Now each page carries `<article class="section" id="chunk-N">` and the TOC links
+`page.html#chunk-N`. The wrapper is emitted for `--toc` as well as `--section`,
+which is the important half: single-file `--toc` already implies its targets,
+since `sectionize_parts` wraps whenever either flag is set, and **a TOC that can
+emit a dangling link is worse than a redundant `<article>`**. The first cut got
+this wrong — it emitted the fragment only under `--section`, so `--toc` alone
+produced `page.html#chunk-N` with no `chunk-N` on the page, which
+`linkintegrity.rs` caught immediately. Chunk mode has no upstream equivalent and
+no golden, so nothing else would have.
+
+**Scope note, because it is the part that is easy to get wrong.** A document can
+write its own URLs through `<URL:...>` or a link dictionary, and those are the
+author's claims about the world: the converter emits `docs/readme` faithfully and
+cannot know the file exists. Holding those to a file-existence rule tests the
+input, not the output. The guard is scoped to the `<nav>` blocks the engine
+builds. External URLs are out of scope, and so are resource references — a
+`<link href>` to a stylesheet that 404s is a missing asset, not a dead link.
+
+Also fixed: three error messages in `main.rs` had a stray comma in the format
+string, so a write failure read `unable to open out.html,: ...`.
 
 ### Security meta — design (2026-10-04, boundary notes)
 

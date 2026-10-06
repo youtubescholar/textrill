@@ -22,7 +22,7 @@ What is **done**:
 
 - The conversion engine is byte-verified against the Perl original across a
   differential corpus of 60 cases and 33 upstream golden files.
-- 258 Rust tests, a fuzzer, and a 74-test native GUI suite.
+- 263 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.
@@ -172,9 +172,19 @@ collide and a link to one can never go stale. `--toc` additionally prepends a
 document with `h1` chapters, one file per chapter, with any `h2` subsections
 kept on their parent's page — instead of a single document. Files are named
 `<outfile stem>-chunk-NN.html` next to `--outfile`, which is required. Each page
-carries the same TOC (with cross-file links when `--toc` is set) and prev/next
-pager links. `--chunk` cannot be combined with `--extract`, `--instring`, or
-output to standard output.
+carries the same TOC and prev/next pager links. `--chunk` cannot be combined
+with `--extract`, `--instring`, or output to standard output.
+
+Each chunked page is itself wrapped in `<article class="section" id="chunk-N">`,
+so a cross-file TOC entry deep-links to the heading rather than to the top of the
+page: `out-chunk-02.html#chunk-3`. The wrapper is emitted for `--toc` as well as
+`--section`, because it is the anchor the TOC points at — `--toc` implies its
+own targets, so it can never emit a link to somewhere that is not there.
+
+Every internal link the engine generates is checked to resolve, in
+`tests/linkintegrity.rs`. Note the scope: a document can write its own URLs with
+`<URL:...>` or a link dictionary, and those are passed through as the author
+wrote them — the converter has no way to know whether `docs/readme` exists.
 
 `--number_headings` prefixes each heading with its hierarchical position
 (`1`, `1.1`, `1.1.1`, …) before any sectioning runs, so the numbers also appear
