@@ -22,7 +22,7 @@ What is **done**:
 
 - The conversion engine is byte-verified against the Perl original across a
   differential corpus of 60 cases and 33 upstream golden files.
-- 304 Rust tests, a fuzzer, and a 74-test native GUI suite.
+- 306 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.

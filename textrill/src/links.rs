@@ -829,10 +829,10 @@ pub const SYSTEM_DICT: &str = "\
 /&lt;URL:([-\\w\\.\\/:~_\\@]+):([a-zA-Z0-9'() ]+)&gt;/ -h-> <A HREF=\"$1\">$2</A>
 
 # Some people like to mark URLs explicitly <URL:foo>
-/&lt;URL:\\s*(\\S+?)\\s*&gt;/ -h-> <A HREF=\"$1\">$1</A>
+/&lt;URL:\\s*([^\\s\"]+?)\\s*&gt;/ -h-> <A HREF=\"$1\">$1</A>
 
 #  <http://site>
-/&lt;(http:\\S+?)\\s*&gt;/ -h-> &lt;<A HREF=\"$1\">$1</A>&gt;
+/&lt;(http:[^\\s\"]+?)\\s*&gt;/ -h-> &lt;<A HREF=\"$1\">$1</A>&gt;
 
 # Urls: <service>:<rest-of-url>
 
@@ -903,10 +903,10 @@ pub const SYSTEM_DICT: &str = "\
 |\\b([[:alpha:]][\\w])*ftp[\\w]*(\\.[\\w+\\-]+){2,}| -h-> ftp <A HREF=\"ftp://$&/\">$&</A>
 
 # ftp.foo.net/blah/
-|ftp(\\.[\\w\\@:-]+)+/\\S+| -> ftp://$&
+|ftp(\\.[\\w\\@:-]+)+/[^\\s\"]+| -> ftp://$&
 
 # www.thehouse.org/txt2html/
-|www(\\.[\\w\\@:-]+)+/\\S+| -> http://$&
+|www(\\.[\\w\\@:-]+)+/[^\\s\"]+| -> http://$&
 
 # host with \"www\" in the machine name
 |\\b([[:alpha:]][\\w])*www[\\w]*(\\.[\\w+\\-]+){2,}| -> http://$&/

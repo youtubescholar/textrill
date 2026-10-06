@@ -385,3 +385,158 @@ fn the_toc_and_pager_links_are_never_scrubbed() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ------------------------------------------- attribute injection into a tag
+//
+// The scheme scrubber above checks the *value* of an href. That is not enough on
+// its own: the href sits inside `href="..."`, so a `"` reaching it ends the
+// attribute and everything after it is parsed as further attributes on a tag the
+// engine generated. A document could then supply its own `onmouseover=`, and
+// hovering the link would run it in the origin serving the converted file.
+//
+// The engine escapes `&`, `<` and `>`, which stops tag injection but not this:
+// `"` is not escaped, because in ordinary prose it never needs to be. The four
+// built-in rules that captured `\S` therefore admitted it.
+
+/// The attribute names on every `<a …>` tag in `html`.
+fn anchor_attributes(html: &str) -> Vec<Vec<String>> {
+    let mut out = Vec::new();
+    let lower = html.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(rel) = lower[from..].find("<a ") {
+        let start = from + rel;
+        let end = match html[start..].find('>') {
+            Some(p) => start + p,
+            None => break,
+        };
+        let tag = &html[start + 3..end];
+        let mut names = Vec::new();
+        let mut rest = tag;
+        while let Some(eq) = rest.find('=') {
+            let name = rest[..eq]
+                .rsplit(|c: char| c.is_whitespace())
+                .next()
+                .unwrap_or("")
+                .to_string();
+            names.push(name);
+            rest = &rest[eq + 1..];
+            // Skip the value, quoted or not.
+            rest = match rest.strip_prefix('"') {
+                Some(v) => match v.find('"') {
+                    Some(q) => &v[q + 1..],
+                    None => "",
+                },
+                None => match rest.find(char::is_whitespace) {
+                    Some(sp) => &rest[sp..],
+                    None => "",
+                },
+            };
+        }
+        out.push(names);
+        from = end;
+    }
+    out
+}
+
+/// Payloads that try to smuggle a second attribute past the engine.
+const INJECTIONS: &[&str] = &[
+    "<URL:x\"onmouseover=\"alert(1)>",
+    "<URL:x\" onmouseover=\"alert(1)>",
+    "<URL:\"onmouseover=\"alert(1)>",
+    "<http://e.com/\"onmouseover=\"alert(1)>",
+    "<http://\"onmouseover=\"alert(1)>",
+    "www.e.com/a\"onmouseover=\"alert(1)",
+    "www.e.com/a\" target=\"_blank",
+    "ftp.e.com/a\"onmouseover=\"alert(1)",
+    "<URL:https://e.com/a\"onerror=\"alert(1)>",
+    "<URL:x\"onfocus=\"alert(1) autofocus>",
+];
+
+#[test]
+fn a_document_cannot_inject_an_attribute_into_a_generated_anchor() {
+    let opts = Options {
+        make_links: true,
+        ..Default::default()
+    };
+    for payload in INJECTIONS {
+        let html = convert(payload, opts.clone());
+        for attrs in anchor_attributes(&html) {
+            for name in &attrs {
+                let n = name.to_ascii_lowercase();
+                assert!(
+                    !n.starts_with("on"),
+                    "{payload:?} produced an event handler {name:?}:\n{html}"
+                );
+                assert_ne!(n, "target", "{payload:?} produced target=:\n{html}");
+            }
+        }
+    }
+}
+
+#[test]
+fn no_generated_anchor_carries_target_in_any_mode() {
+    // The reason `rel="noopener noreferrer"` is deliberately absent: it is only
+    // meaningful on a link that opens a new browsing context, and the engine
+    // emits none. Reverse tabnabbing needs `target`; with no `target`, there is
+    // no `window.opener` to hand over and nothing for `noopener` to protect.
+    // A document cannot add one either -- see the test above.
+    type Configure = fn(&mut Options);
+    let mut sources: Vec<(String, Options)> = Vec::new();
+    let base = "A {{textrill:cite:k}} and {{textrill:gloss:t}} link <URL:https://e.com/x> \
+                and <http://e.com/y> and www.e.com/z\n\n\
+                {{textrill:def:cite:k}}\nK.\n{{/textrill:def:cite:k}}\n\
+                {{textrill:def:gloss:t}}\nT.\n{{/textrill:def:gloss:t}}\n"
+        .to_string();
+    let mut flags: Vec<(&str, Configure)> = vec![
+        ("plain", |_| {}),
+        ("make_links", |o| o.make_links = true),
+        ("make_links+anchors", |o| {
+            o.make_links = true;
+            o.make_anchors = true;
+        }),
+        ("toc", |o| {
+            o.make_links = true;
+            o.toc = true;
+        }),
+        ("section+toc", |o| {
+            o.make_links = true;
+            o.section = true;
+            o.toc = true;
+        }),
+        ("notes", |o| {
+            o.citations = true;
+            o.glossary = true;
+        }),
+        ("html5", |o| {
+            o.citations = true;
+            o.glossary = true;
+            o.html5 = true;
+        }),
+    ];
+    flags.push(("everything", move |o: &mut Options| {
+        o.make_links = true;
+        o.citations = true;
+        o.glossary = true;
+        o.toc = true;
+        o.section = true;
+        o.make_anchors = true;
+        o.number_headings = true;
+    }));
+    for (name, f) in flags {
+        let mut o = Options::default();
+        f(&mut o);
+        sources.push((format!("{name}: {base}"), o));
+    }
+    for (label, o) in sources {
+        let html = convert(&label, o);
+        for attrs in anchor_attributes(&html) {
+            for name in &attrs {
+                assert_ne!(
+                    name.to_ascii_lowercase(),
+                    "target",
+                    "{label}: a target= appeared:\n{html}"
+                );
+            }
+        }
+    }
+}

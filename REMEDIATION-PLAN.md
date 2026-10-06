@@ -4,7 +4,7 @@ Status: **in progress**, 2026-10-03. Covers
 `textrill` (Rust engine + CLI) and `textrill-gui-rs` (native `egui` front end).
 The Python bindings and the PySide6 front end are retired to `legacy-archive/`.
 
-Gates at 2026-10-04: corpus **60/60**, goldens **33/33**, **304** engine tests,
+Gates at 2026-10-04: corpus **60/60**, goldens **33/33**, **306** engine tests,
 **74** native GUI tests, `fmt`/`clippy` clean. (At 2026-10-03: corpus 59/59,
 goldens 33/33, 16 000 fuzz cases 0 mismatches, 164 engine tests, 74 GUI tests;
 the fuzzer and corpus are unchanged since.) The dated figures elsewhere in this
@@ -2399,6 +2399,7 @@ referenced from `TOOL-SURVEY.md` and must not be renumbered.
 | A9 | unreadable input exits 0 | Low | declared deviation |
 | A10 | unbounded `re_cache` | Low | `convert.rs:160` |
 | A11 | document can write a live `javascript:`/`data:` href into its own output | **done** (was Low, corrected to High) | `urlscheme.rs`, `links.rs` `<URL:…>`, `options.rs` |
+| A12 | document can inject an attribute into an anchor the engine generated | **done** | `links.rs` built-in rules, `tests/urlschemetest.rs` |
 
 ## Addendum Phase A — the engine must not crash or leak
 
@@ -3279,6 +3280,66 @@ one `id="note-ref-a"` and one `id="note-a"`.
 - No JavaScript, and no CSS to go with it.
 - Not a bibliography processor (citeproc): inline references plus a list, nothing
   more.
+
+### A12. A document can inject an attribute into a tag the engine generated
+
+Found while auditing the decision to omit `rel="noopener noreferrer"` from the
+citation/glossary links, when the question asked was the broader one: *can a
+document subvert a generated link at all?* It can, and not through the notes
+code. Severity High, and higher than A11's, because unlike A11 it needs no
+`javascript:` URL and no cooperation from any option: the default
+`--make_links` is enough.
+
+**The gap.** The engine escapes `&`, `<` and `>` in document text. It does not
+escape `"`, which is correct for prose — a double quote is a printable character
+and never needs escaping in running text. But the autolinker writes what it
+captures into `HREF="$1"`, and four built-in rules captured `\S+`, which
+admits `"`:
+
+- `/<URL:\s*(\S+?)\s*>/` (`links.rs`)
+- `/<(http:\S+?)\s*>/`
+- `|ftp(\.[\w\@:-]+)+/\S+|`
+- `|www(\.[\w\@:-]+)+/\S+|`
+
+So a document containing
+
+```
+<URL:x"onmouseover="alert(1)>
+```
+
+converted to
+
+```html
+<a href="x"onmouseover="alert(1)">x"onmouseover="alert(1)</a>
+```
+
+A live event handler on a tag the engine emitted. Hover the link and it runs in
+the origin serving the converted document. `target="..."` works the same way,
+which is the direct answer to the `noopener` question: the reason that attribute
+is absent is not only that no link opens a new context, it is that a document
+could not add one — until this fix it could.
+
+**Why A11 did not catch it.** The scheme scrubber inspects the *value* of an
+`href`. Here the value is `x`, which is a legal relative reference and passes.
+The damage is in the attribute *syntax* around the value, which no amount of
+scheme checking looks at. The lesson recorded for the next pass: a URL policy
+must constrain what may appear in an attribute value, not only judge the value
+it finds.
+
+**Fix.** The four captures now exclude `"` (`[^\s"]+`). Chosen over escaping
+the expanded value because it changes output only in the case that was a
+vulnerability, so every legitimate URL stays byte-identical and the corpus and
+33 goldens still pass unchanged.
+
+**Not a fix, and recorded as such:** a `-h` link-dictionary rule may still emit
+whatever attributes it likes. That is operator input, not document input, so it
+is out of this threat model — but it does mean `rel="noopener noreferrer"`
+remains the operator's responsibility if they write `target=` by hand.
+
+**Guard.** `tests/urlschemetest.rs` parses every generated `<a …>` tag across
+ten injection payloads and eight option combinations, and asserts no attribute
+is an event handler and none is `target`. Reverting the `\S` fix makes it fail,
+which is the only evidence a test like that is worth anything.
 
 ### A11. A document can write a live `javascript:` href into its own output
 
