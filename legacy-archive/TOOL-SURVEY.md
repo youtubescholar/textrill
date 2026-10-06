@@ -1,8 +1,26 @@
 # txt2html — tool survey and feature-gap analysis
 
-Status: draft, 2026-09-29. Companion to `/home/vicpu/build/REMEDIATION-PLAN.md`.
-Question asked: are there features that other text-to-HTML tools have and this
-port does not, and are any of them worth implementing?
+> **ARCHIVED 2026-10-06 — do not read the matrix below as current.**
+>
+> This was a draft feature-gap survey. Its matrix is now false: it reports the
+> port as `txt2html-rs`, and lists table of contents, HTML5 output, rc/config
+> files, `charset` and a built-in stylesheet as absent. All five exist. Every
+> recommendation in §4 (P11 rc files, TOC, heading numbering, built-in stylesheet)
+> is implemented. `DOCS.md` records the current status of every document.
+>
+> What is worth keeping here, and is the reason this was archived rather than
+> deleted: the upstream TOC disclaimer (§1, quoting txt2html.sourceforge.net,
+> which disclaims TOC and points at `htmltoc`/`hypertoc` as the intended
+> workaround), and § "Option abbreviation: recommend NOT adding it", which is the
+> rationale for a deliberate divergence that is still in force. Both are cited
+> from current documents.
+>
+> Kept for provenance. Nothing here is a specification.
+
+Status: draft, 2026-09-29 (superseded). Was a companion to
+`/home/vicpu/build/REMEDIATION-PLAN.md`.
+Question asked, at the time: are there features that other text-to-HTML tools
+have and this port does not, and are any of them worth implementing?
 
 Short answer: yes, but very few. The port is already a faithful and fairly
 complete implementation of its own niche. The survey turned up **one high-value,

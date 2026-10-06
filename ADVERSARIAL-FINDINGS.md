@@ -6,8 +6,9 @@
 > `REMEDIATION-PLAN.md`, which also records that this evidence pass reached
 > **2 of 65** upstream `tfiles` and no non-ASCII case at all.
 
-Status: 2026-09-29. Result of an attack pass over `txt2html-rs` and
-`txt2html-gui`. Companion to `REMEDIATION-PLAN.md` and `TOOL-SURVEY.md`.
+Status: 2026-09-29. **Closed** — every finding A1–A12 is implemented and
+verified. Result of an attack pass over `txt2html-rs` and `txt2html-gui`.
+Companion to `REMEDIATION-PLAN.md`. See `DOCS.md` for its status.
 
 Every claim below was reproduced against the built binary or the real Qt event
 loop. Where a suspected issue turned out **not** to be a problem, that is
@@ -479,7 +480,9 @@ threads do not race. The *memory* problem is S1, not a data race.
 **`body_deco` malformed output is faithful.** `--body_deco FOO` yields
 `<bodyFOO>`; Perl 3.0 produces the same bytes. Not a port defect.
 
-**Option abbreviation absence is deliberate and safe** (see `TOOL-SURVEY.md` §3).
+**Option abbreviation absence is deliberate and safe** — rationale retained in
+`legacy-archive/TOOL-SURVEY.md`, § "Option abbreviation": unique-prefix matching
+breaks silently the day an option is added or renamed.
 
 ## 7. Recommended order
 

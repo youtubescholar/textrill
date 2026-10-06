@@ -1,7 +1,8 @@
 # legacy-archive
 
-Retired code, kept for reference. **Nothing here is built, tested, linted, or
-packaged.** It is not part of `make verify`, `make test`, or CI.
+Retired code and retired documents, kept for reference. **Nothing here is built,
+tested, linted, or packaged.** It is not part of `make verify`, `make test`, or
+CI. `DOCS.md` at the repository root is the register of what is current.
 
 ## What is here, and why
 
@@ -12,6 +13,13 @@ packaged.** It is not part of `make verify`, `make test`, or CI.
 | `python-bindings-python.rs` | The pyo3 bindings (`textrill/src/python.rs`), exposed as `textrill._native`. They existed only to cross into Python; the native GUI links the engine directly, so nothing needs them. |
 | `python-bindings-pyproject.toml` | The maturin build config for the extension (`textrill/pyproject.toml`). |
 | `python/` | The thin Python wrapper package (`textrill/python/textrill/__init__.py`). |
+| `TOOL-SURVEY.md` | The 2026-09-29 feature-gap survey. Archived 2026-10-06 because its matrix had gone stale — it still called the port `txt2html-rs` and reported TOC, HTML5 output, rc files, `charset` and a built-in stylesheet as missing, all of which now exist. A *document*, retired for the same reason as the code above: it no longer describes what exists. |
+
+Two different things are archived here, and the distinction matters. The Python
+GUI is retired **code**: it is gone from every build and test path.
+`TOOL-SURVEY.md` is a retired **document**: the code it describes is still
+running, but the document's claims about that code are no longer true. Neither
+is ever read as current.
 
 ## Why it was retired
 

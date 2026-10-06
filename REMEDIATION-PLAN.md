@@ -52,8 +52,10 @@ closed (see P6).
 input it is the defect, not the specification. Read the compatibility policy
 before starting anything that touches Unicode, encoding, or resource limits.**
 
-Companion documents: `TOOL-SURVEY.md` (feature-gap survey) and
-`ADVERSARIAL-FINDINGS.md` (attack pass).
+Companion documents: `legacy-archive/TOOL-SURVEY.md` (feature-gap survey,
+archived 2026-10-06 -- its matrix had gone stale) and
+`ADVERSARIAL-FINDINGS.md` (attack pass, closed). The register of what is
+current is `DOCS.md`.
 
 **The attack pass found ten further items, planned as A1–A10 in the addendum at
 the end of this file. Read that before starting work.** Two of them are
@@ -68,7 +70,7 @@ item — **P4's claim that `worker.py:51` catches engine panics in the GUI is
 wrong**, because pyo3's `PanicException` inherits `BaseException`, so it does
 not.
 
-The `P` numbering below is unchanged and is referenced from `TOOL-SURVEY.md`; the
+The `P` numbering below is unchanged and is referenced from `legacy-archive/TOOL-SURVEY.md`; the
 addendum deliberately uses `A` numbering so the two never collide.
 
 Everything below was verified by running it, not by reading it. Measurements
@@ -1837,7 +1839,7 @@ what CI does.
 
 ### P11. Config/rc file support was lost — **done**
 
-Found by the survey in `TOOL-SURVEY.md`, not by the original review.
+Found by the survey in `legacy-archive/TOOL-SURVEY.md`, not by the original review.
 
 The shipped upstream script reads option files. `scripts/txt2html:838-845` calls
 `Getopt::ArgvFile::argvFile(startupFilename=>".txt2htmlrc", home=>1,
@@ -1882,13 +1884,13 @@ names neither.
 
 Deferred deliberately. Nothing here is a defect; these are gaps worth
 considering once the above is solid, informed by the survey in
-`/home/vicpu/build/TOOL-SURVEY.md`.
+`/home/vicpu/build/legacy-archive/TOOL-SURVEY.md`.
 
 1. ~~**HTML5 output mode.**~~ — **done** (P5.1): an opt-in `--html5` emits the
    short `<!DOCTYPE html>`, an `<html>` element with no namespace, and a forced
    `<meta charset="utf-8">`, leaving the body markup identical. Off by default,
    so the reference goldens do not move; the default prolog is still HTML 4.01 /
-   XHTML 1.0 Strict. `TOOL-SURVEY.md` §4 found txt2tags, pandoc and Asciidoctor
+   XHTML 1.0 Strict. `legacy-archive/TOOL-SURVEY.md` §4 found txt2tags, pandoc and Asciidoctor
    all emit HTML5 and docutils moves its default in Docutils 2.0; the named
    future version at which this port's default changes is still to be chosen.
 2. ~~**Explicit encoding parameter** on the API and CLI~~ — **done**, twice: P7.3 added `--encoding auto|utf-8|cp1252` and P7.4 widened it to `iso-8859-1`, `cp1251`, `cp1253`, `koi8-r`, `utf-16le/be` and `utf-32le/be`. Single-byte charset *detection* remains open and is deferred to a separate project — see **Deferred: single-byte charset detection (Part B)** under P7.4, including why a wrong confident guess is worse than the mojibake it would replace.
@@ -2384,7 +2386,7 @@ then resume the main phases. A1 in particular is worthless to attempt before
 A4's diagnostics exist, because right now the failure is invisible in the GUI.
 
 Items are numbered `A1`–`A12` so they do not collide with `P1`–`P11`, which are
-referenced from `TOOL-SURVEY.md` and must not be renumbered.
+referenced from `legacy-archive/TOOL-SURVEY.md` and must not be renumbered.
 
 | Addendum | Finding | Severity | Touches |
 |---|---|---|---|
