@@ -25,6 +25,7 @@ A document with no status is the failure mode this file exists to end.
 | [`docs/PLAN.md`](docs/PLAN.md) | **What we do next.** Every item traces to a measurement in one of the two documents below. |
 | [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) | What textrill does, measured by running it. Defects, strengths, and the ten-clause output contract. |
 | [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) | Who else does this, and the three-part niche. Grounded in `competition-files/` and the installed pandoc. |
+| [`docs/OFFERING.md`](docs/OFFERING.md) | How the tool is offered against pandoc: the claim, its measurement (`make proof`), what must be built first, and what pandoc does better. |
 | [`docs/PACKAGING.md`](docs/PACKAGING.md) | The Flatpak manifest, its two deliberate blockers, and how to clear them. |
 | `textrill/README.md` | The user-facing contract. The only document a user reads. |
 | `textrill/tests/corpus/README.md` | How the differential harness decides pass/fail — and how to prove it can fail. |
@@ -79,6 +80,11 @@ A document with no status is the failure mode this file exists to end.
 1. `docs/LANDSCAPE.md` §3 — the gap, measured against pandoc.
 2. `docs/PLAN.md` Phase 4 — what is proposed, and why the 7-slot design stays.
 
+**"I want to explain what we offer against pandoc."**
+1. `docs/OFFERING.md` §2 — the claim, and the four things not to say.
+2. `docs/OFFERING.md` §3 — the measurement, re-run with `make proof`.
+3. `docs/OFFERING.md` §5 — what has to be built first, and in what order.
+
 **"I want to change how it is tested."**
 1. `textrill/tests/corpus/README.md`, including § "Six ways this reported
    success wrongly". Break the gate on purpose before trusting it.
@@ -111,3 +117,10 @@ both tools for the comparison; `textrill/LICENSE` for the licensing position;
 `legacy-archive/TOOL-SURVEY.md` for the category survey and the upstream TOC
 disclaimer; `legacy-archive/REMEDIATION-PLAN.md` § "Compatibility policy" for
 the three-tier rule that first recorded the reference being wrong on UTF-8.
+
+To produce `docs/OFFERING.md`, the same day: the §3 numbers re-measured and
+then pinned in `textrill/tests/positioning.py`; `pandoc --list-input-formats`
+and `--list-output-formats` for the format counts; a small indented-list
+fixture converted by both tools for the soft-wrap example; and the configuration
+inventory in §1 taken from `textrill --help`, the engine's option sources and
+`textrill-gui-rs/src/settings.rs`.

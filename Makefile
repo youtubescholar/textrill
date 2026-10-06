@@ -2,6 +2,7 @@
 #
 #   make verify      fmt-check, clippy, Rust tests (engine and GUI), the
 #                    differential corpus, fuzzer
+#   make proof       re-measure docs/OFFERING.md §3 (needs pandoc)
 #   make fix         what is safe to apply automatically: cargo fmt
 #   make test        just the Rust tests
 #   make corpus      the Perl differential corpus
@@ -46,7 +47,7 @@ FUZZ_JOBS ?= $(shell nproc 2>/dev/null || echo 8)
 # other's evidence -- see fuzz.py --fail-dir.
 FUZZ_FAILDIR ?= $(RS)/tests/corpus/fuzz-fail
 
-.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale musl corpus-musl examples clean
+.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale musl corpus-musl examples proof clean
 
 all: verify
 
@@ -347,6 +348,16 @@ scale: build
 		cmp -s /tmp/scale_mine.html /tmp/scale_ref.html \
 			&& echo "  $$f: byte-identical" || echo "  $$f: DIFFER"; \
 	done
+
+# The positioning claims in docs/OFFERING.md §3 are statements about another
+# program on this machine, which is the shape of claim that went false once
+# already (legacy-archive/TOOL-SURVEY.md). This target re-measures them all and
+# fails naming the claim that moved. It needs pandoc, so it is deliberately not
+# in `verify`: verify must stay runnable on a box with only Rust and perl, and
+# a gate that sometimes cannot run must say so loudly rather than skip quietly
+# -- positioning.py exits 2 with pandoc's name when the oracle is missing.
+proof: build
+	$(PYTHON) $(RS)/tests/positioning.py
 
 clean:
 	cd $(RS) && $(CARGO) clean

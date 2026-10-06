@@ -206,7 +206,7 @@ input, `examples/homer.txt`.
 
 |  | textrill | pandoc, forced to markdown |
 |---|---|---|
-| bytes out | 38 888 | 38 132 |
+| bytes out | 38 882 | 38 132 |
 | `<h1>`–`<h6>` | 0 | 0 |
 | `<strong>` | **39** | **0** |
 | `<br/>` | **34** | **0** |
@@ -219,6 +219,11 @@ And the finding that matters more than any number in that table:
 $ pandoc -f plain -t html examples/homer.txt
 Unknown input format plain
 ```
+
+Every figure in this table is re-measured by `make proof`
+(`docs/OFFERING.md` §3). The textrill byte count moved from 38 888 to 38 882
+when the generator line stopped naming the Perl module — six bytes of
+provenance, which is the only kind of byte-count change worth its own note.
 
 **pandoc has no plain-text reader.** Forcing it into markdown mode produces zero
 structure and merges 3 665 characters — the entire title block and contents list

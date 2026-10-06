@@ -199,32 +199,67 @@ correct and is not what needs changing.
 
 The finding that motivates all of this.
 
-`examples/homer.txt` has 37 obvious section titles — `PREFACE TO FIRST
-EDITION`, `BOOK I.` … `BOOK XXIV.` — set in capitals, on their own line,
-surrounded by blank lines. textrill finds all 39 capitalised runs and calls them
-`<strong>`. It finds no headings, `--chunk` emits a single 38 KB page, and
-nothing about the budget idea in the archived plan would change that, because
-there is no boundary to cut on. Pandoc finds none of it either, for a different
-reason.
+`examples/homer.txt` has no headings: the engine turns the 39 capitalised runs
+it can see into `<strong>`, `--toc` lists nothing, and `--chunk` writes a single
+38 882-byte file. Pandoc finds none of it either, for a different reason.
 
-**The candidate rule:** a short all-caps line alone between blank lines is a
-heading, not a `<strong>` run. This is txt2tags' inference done in reverse —
-inferring the underline instead of requiring it.
+What the file actually contains, measured 2026-10-06 rather than assumed — and
+it is not what this phase first assumed when it claimed "37 obvious section
+titles":
 
-**Why it is not obviously safe, and must be measured first:**
+- **40 all-caps lines**, of which **24 are the contents list** (lines 5–31:
+  consecutive lines inside one block, entries for sections this extract does not
+  contain). Turning those into headings would invent a section per contents
+  entry.
+- **Three genuine section starts**: `PREFACE TO FIRST EDITION`,
+  `PREFACE TO SECOND EDITION`, and the title block
+  `THE ODYSSEY` / `BOOK I` / `THE GODS IN COUNCIL—…` — three consecutive caps
+  lines, not one line alone between blanks.
+- **The false positives are in the same shape as the truth**: `S. BUTLER.`,
+  `HENRY FESTING JONES.` (signatures) and `120 MAIDA VALE, W.9.` (an address)
+  are all-caps and start a block exactly as a heading would.
+
+**The candidate rule, measured on the document that motivated it.** "A short
+all-caps line alone between blank lines" fires on **2 lines — both signatures,
+none of the three real titles**. Widened to "a block whose every line is short
+and caps" it fires on 3: the two signatures and the title block. Widened again
+to "a block that *starts* with a caps line" it fires on 6: 3 true, 3 false.
+Every simple formulation is empty or half false on the motivating document, so
+the measurement this phase already required has effectively started, and its
+first result is that the rule as written would not fix what it was written for.
+
+**The candidate rule, restated for the next pass:** the unit is probably the
+*block* rather than the line — a title block, a contents run and a signature are
+all caps runs, and what separates them is position (does a section follow?)
+rather than case. That is a hypothesis to measure over `examples/`, not a
+decision; Phase 7 grows the corpus for exactly this reason.
+
+**Why none of it is obviously safe, and must be measured first:**
 
 - Shouting in prose is real. `HE SAID NO.` at the start of a line becomes a
-  heading under this rule.
+  heading under the line rule.
 - The caps heuristic already owns this text. The two features collide, and one
   has to yield.
 - `min_caps_length`, `short_line_length` and `custom_heading_regexp` all become
   load-bearing for a decision nobody asked to be configurable.
+- `custom_heading_regexp` only fires on a line that *starts* a block, which
+  measurement found the hard way: on `homer.txt`, `-H 'PREFACE'` yields 2
+  headings, `-H 'THE ODYSSEY'` yields 1, `-H 'BOOK I'` yields 0 — the body's
+  `BOOK I` is the second line of its title block and the contents' `BOOK I.` is
+  one of 24 consecutive lines. No regexp can select a line the rule will not
+  consider, and neither `--help` nor the README says so.
 
-Before writing it: build a measurement set over `examples/` — how many candidate
-headings, how many false positives on prose that is not structured. If the false
-positive rate is not near zero on real documents, this stays a proposal. The
-archived plan's own advice applies — measure first, and prefer report-only before
-behaviour change.
+| # | item | note |
+|---|---|---|
+| 5.0 | `--report`: the inference counts on stderr | Report-only, and first. The counts exist today only in `make examples`, which greps the output itself; the CLI offers no `--report`, `--verbose` or summary (verified in `--help`). A user whose `--toc` came out empty, and this phase's own measurement harness, both need "what did you see?" before anything is allowed to change. |
+| 5.1 | Measure candidate rules over `examples/` | The table above is the first data point. Required before any behaviour change, as below. |
+| 5.2 | Decide what `-H`'s block-start condition should be | Either document it in `--help` and the README, or change it — measured, not silently. Changing it means a heading rule can consume a line from the middle of a paragraph, which is the same hazard as 5.1's false positives. |
+
+Before writing any of it: build the measurement set over `examples/` — how many
+candidate headings, how many false positives on prose that is not structured. If
+the false positive rate is not near zero on real documents, this stays a
+proposal. The archived plan's own advice applies — measure first, and prefer
+report-only before behaviour change, which is what 5.0 is for.
 
 ## Phase 6 — Packaging
 
@@ -268,6 +303,13 @@ Phase 1 first: it is small, it is uncontroversial, and it is embarrassing to shi
 anything else while it is true. Phase 2 next, with corpus cases that fail before
 each fix. Phase 4 is the largest chunk of user-visible value. Phase 5 is the
 research-shaped one and must not be rushed into a behaviour change.
+
+Relative to the *offer* rather than the engine, `docs/OFFERING.md` §5 gives the
+order a first-time reader meets things in: the positioning proof (gated by
+`make proof`), then Phase 4.1–4.2's templates, then Phase 5's measurement before
+any heading behaviour changes, then Phase 6 packaging, then Phase 7 corpus
+growth, with Phase 4.3 conditional blocks last. The two orderings agree; one is
+ordered by what is wrong, the other by what a reader notices.
 
 ## Standing rule
 
