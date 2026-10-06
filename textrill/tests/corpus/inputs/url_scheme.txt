@@ -1,0 +1,15 @@
+A heading, then prose carrying the three shapes a hostile document uses.
+
+One <URL:javascript:alert(document.domain)> reference.
+
+Two <URL:JaVaScRiPt:alert(String.fromCharCode(88))> references.
+
+Three <URL:data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==> references.
+
+Four <URL:vbscript:msgbox(document.domain)> references.
+
+And this label spelling, <URL:javascript:alert(1)>, which the first
+<URL:foo:label> rule takes instead: its href is the bare word javascript,
+a relative path, so it stays.
+
+A <URL:https://example.com/ok> and a relative <URL:docs/readme> survive.

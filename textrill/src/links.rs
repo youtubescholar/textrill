@@ -404,10 +404,12 @@ pub struct LinkParser {
     /// end can report them rather than leaving the user with output that
     /// silently lost a link. See `add_regexp`.
     pub rejected_patterns: Vec<String>,
+    /// A11. Which schemes may reach an `href`. See [`crate::urlscheme`].
+    pub policy: crate::urlscheme::UrlPolicy,
 }
 
 impl LinkParser {
-    pub fn new(lower_case_tags: bool) -> Self {
+    pub fn new(lower_case_tags: bool, policy: crate::urlscheme::UrlPolicy) -> Self {
         LinkParser {
             rules: Vec::new(),
             label_seen: std::collections::HashSet::new(),
@@ -415,6 +417,7 @@ impl LinkParser {
             once_done: Vec::new(),
             sect_once_done: Vec::new(),
             rejected_patterns: Vec::new(),
+            policy,
         }
     }
 
@@ -423,6 +426,28 @@ impl LinkParser {
             return;
         }
         self.label_seen.insert(label.to_string());
+
+        // A11. A rule whose URL is written out in full is checked here, at load,
+        // where the operator can still fix it: a diagnostic naming the
+        // dictionary is worth more than silently unwrapping every match.
+        //
+        // Two forms are not checked, and neither is a gap. A URL containing a
+        // capture reference (`$1`, `$&`) is only known at substitution time, and
+        // a `-h->` rule's URL is raw HTML rather than a URL at all; both are
+        // caught by the scrub over the finished paragraph, which
+        // `Converter::apply_links` runs.
+        if switches & LINK_HTML == 0 && !url.contains('$') && !self.policy.allows(url) {
+            let scheme = crate::urlscheme::scheme_of(url).unwrap_or_default();
+            let msg = format!(
+                "textrill: ignoring link-dictionary rule {label:?}: its URL uses the \
+                 {scheme:?} scheme, which this conversion refuses ({}). \
+                 Name it in --allowed_url_schemes to keep the rule.",
+                self.policy.describe()
+            );
+            eprintln!("{msg}");
+            self.rejected_patterns.push(msg);
+            return;
+        }
 
         // build the replacement template
         let mut repl;
@@ -918,7 +943,7 @@ pub const SYSTEM_DICT: &str = "\
 /// Build the link rule set for a given set of options (which may include
 /// user dictionaries) plus the system dictionary.
 pub fn load_links(opts: &Options) -> LinkParser {
-    let mut parser = LinkParser::new(opts.lower_case_tags);
+    let mut parser = LinkParser::new(opts.lower_case_tags, opts.url_policy());
     // Mirror do_init_call: the system dictionary (and everything else) is only
     // loaded when make_links is set; the default link dictionary is appended
     // to the user dictionaries when it exists.
@@ -948,7 +973,7 @@ pub fn load_links(opts: &Options) -> LinkParser {
 /// link-dictionary text directly) and return the parsed rules.
 #[allow(dead_code)]
 pub fn load_links_from_text(opts: &Options, dict_text: &str) -> LinkParser {
-    let mut parser = LinkParser::new(opts.lower_case_tags);
+    let mut parser = LinkParser::new(opts.lower_case_tags, opts.url_policy());
     let filtered = parser.filter_dict(dict_text);
     parser.parse_dict("user", &filtered);
     parser

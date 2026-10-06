@@ -17,7 +17,7 @@
 //! newline, `"0"` being false, one-byte placeholders in the table space maps, and
 //! option tables that keep their state between calls.
 //!
-//! Five deliberate deviations, none of which the upstream test suite
+//! Six deliberate deviations, none of which the upstream test suite
 //! exercises:
 //!
 //! * An explicit `--title` and `--style_url` are escaped on their way into the
@@ -29,6 +29,24 @@
 //!   with `--titlefirst` is *not* covered by this: it comes from the document's
 //!   own first line, so it is document text and `escape_html_chars` governs it
 //!   exactly as the reference does.
+//! * A `href` whose URL names a script-bearing scheme — `javascript`, `data`,
+//!   `vbscript`, `file` — is unwrapped rather than emitted; the visible words
+//!   stay. See [`urlscheme`] for why the check is a scan over finished markup and
+//!   why the default refuses a small named set rather than allowlisting one.
+//!
+//!   The document chooses these URLs. Perl never looked at them, so
+//!   `<URL:javascript:alert(document.domain)>` in an otherwise ordinary file
+//!   came out of the reference as a live link, and a link dictionary can name
+//!   any URL at all. `--allowed_url_schemes` sets a strict allowlist instead,
+//!   which is the stronger property, and is the right choice for a site that
+//!   does not use custom schemes. **The two implementations therefore cannot
+//!   agree** on a document containing one of these, so the `url_scheme` corpus
+//!   case is declared with `differential must fail:` — the divergence is the
+//!   fix, and a byte comparison is not the oracle.
+//!
+//!   Two related things are *not* deviations, because the reference cannot be
+//!   compared to them: the refused scheme's diagnostic, and the diagnostic for
+//!   a dictionary rule dropped at load. Both are new output on stderr.
 //! * `Options::instring` holds literal input strings, as documented. The Perl
 //!   module reads `$_` instead of the current source in its string branch, so
 //!   `instring` there always converts an empty paragraph.
@@ -106,6 +124,7 @@ pub mod prefilter;
 pub mod rcfile;
 pub mod section;
 pub mod template;
+pub mod urlscheme;
 
 pub use convert::Converter;
 pub use options::Options;

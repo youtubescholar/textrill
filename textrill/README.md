@@ -21,8 +21,8 @@ of correctness fixes on top of the existing port — see
 What is **done**:
 
 - The conversion engine is byte-verified against the Perl original across a
-  differential corpus of 59 cases and 33 upstream golden files.
-- 222 Rust tests, a fuzzer, and a 74-test native GUI suite.
+  differential corpus of 60 cases and 33 upstream golden files.
+- 258 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.
@@ -126,6 +126,7 @@ either tool are directly comparable. A few are worth calling out:
 | `--make_tables` | off | Detect tab-separated or column-aligned text as tables |
 | `--make_links` | off | Turn labelled URLs in the text into links |
 | `--default_link_dict` | none | Load a link dictionary, as the original does |
+| `--allowed_url_schemes` | none | Allow only these URL schemes in `href`s, instead of refusing the script-bearing ones |
 | `--extract` | off | Output only the body, without the surrounding document |
 | `--meta_charset` | off | Emit `<meta charset="utf-8">` |
 | `--html5` | off | Emit HTML5: `<!DOCTYPE html>`, no namespace, charset meta |

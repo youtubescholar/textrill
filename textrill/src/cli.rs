@@ -37,6 +37,7 @@ macro_rules! specs {
 }
 
 pub const SPECS: &[Spec] = specs![
+    Str "Allow only these URL schemes in href values; a stricter policy than the default, which refuses script-bearing schemes (A11)." ["allowed_url_schemes", "url_schemes"],
     Str "File whose contents are appended to the output." ["append_file", "append_body", "ab"],
     Str "File whose contents are inserted inside <head>." ["append_head", "ah"],
     Str "Text inserted between <body> and the first paragraph." ["body_deco"],
@@ -171,6 +172,13 @@ pub fn set_value(opts: &mut Options, name: &str, value: &str) -> Result<(), Stri
 pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
     let spec = lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?;
     let v = match spec.names[0] {
+        // A11. Comma separated, matching what `set_str` splits on. `Options`
+        // carries the standard list rather than "unset", so this round trips to
+        // the same policy and not to an empty one.
+        // `None` and `[]` both round-trip as "", and `set_value("")` resolves
+        // to the default tier, so a front end can persist the unset state
+        // without having to know what "unset" means.
+        "allowed_url_schemes" => opts.allowed_url_schemes.as_deref().unwrap_or(&[]).join(","),
         "append_file" => opts.append_file.clone(),
         "append_head" => opts.append_head.clone(),
         "body_deco" => opts.body_deco.clone(),
@@ -535,6 +543,15 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
 
 pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
     match spec.names[0] {
+        // A11. **Replaces** rather than accumulates, unlike the repeatable
+        // options (`--infile`, `--links_dictionaries`). A comma-separated list
+        // is one value, and a front end must be able to write the whole thing
+        // back; accumulating would double the list on every round trip through
+        // `get_value`. Layering still overrides in the usual way, since the
+        // command line is applied after the rc files.
+        "allowed_url_schemes" => {
+            opts.allowed_url_schemes = Some(v.split(',').map(|s| s.trim().to_string()).collect());
+        }
         "append_file" => opts.append_file = v.to_string(),
         "append_head" => opts.append_head = v.to_string(),
         "body_deco" => opts.body_deco = v.to_string(),

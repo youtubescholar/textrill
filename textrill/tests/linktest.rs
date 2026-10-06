@@ -296,7 +296,7 @@ fn once_only_rules_still_accept_empty_matching_patterns() {
 /// The pipe-delimited form is the documented workaround and must keep working.
 #[test]
 fn the_pipe_delimited_form_still_links() {
-    let mut parser = links::LinkParser::new(false);
+    let mut parser = links::LinkParser::new(false, textrill::urlscheme::UrlPolicy::default());
     let dict = "|Perl\\b| -> http://example.invalid/perl\n";
     let filtered = parser.filter_dict(dict);
     parser.parse_dict("test", &filtered);
@@ -385,7 +385,7 @@ fn prefilter_never_loses_a_match_on_the_real_dictionary() {
     let Ok(dict) = std::fs::read_to_string(path) else {
         return; // dictionary absent in this checkout
     };
-    let mut parser = links::LinkParser::new(false);
+    let mut parser = links::LinkParser::new(false, textrill::urlscheme::UrlPolicy::default());
     let filtered = parser.filter_dict(&dict);
     parser.parse_dict(path, &filtered);
     assert!(parser.rules.len() > 20, "dictionary did not load");
@@ -469,7 +469,7 @@ fn prefilter_keeps_mail_header_links() {
 /// filter reads the tail, it stops early and drops the remaining matches.
 #[test]
 fn prefilter_tracks_text_moved_into_the_output() {
-    let mut parser = links::LinkParser::new(false);
+    let mut parser = links::LinkParser::new(false, textrill::urlscheme::UrlPolicy::default());
     // `needle` matches once, then the paragraph becomes `needle rest needle
     // rest ...`. After the first substitution the fold computed from the tail
     // alone would no longer see any `needle`, so the loop must not use it.
@@ -487,7 +487,7 @@ fn prefilter_tracks_text_moved_into_the_output() {
 /// later rule.
 #[test]
 fn prefilter_sees_literals_introduced_by_earlier_rules() {
-    let mut parser = links::LinkParser::new(false);
+    let mut parser = links::LinkParser::new(false, textrill::urlscheme::UrlPolicy::default());
     // Rule 1 rewrites `PLACEHOLDER`; the replacement text contains `later`,
     // which is the only literal rule 2 can match on.
     parser.parse_dict(

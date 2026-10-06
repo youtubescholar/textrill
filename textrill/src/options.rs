@@ -226,6 +226,33 @@ pub fn numeric_range(name: &str) -> Option<(usize, usize)> {
 /// All conversion options, with the same defaults as HTML::TextToHTML v3.0.
 #[derive(Debug, Clone)]
 pub struct Options {
+    /// A11. Schemes permitted in a generated `href`, comma separated.
+    ///
+    /// The default is [`urlscheme::DEFAULT_ALLOWED_SCHEMES`] spelled out rather
+    /// than "unset", and that is deliberate. A front end reads the defaults with
+    /// `cli::get_value` and writes them back, and it persists them to its own
+    /// settings file. With an "unset means the default" encoding, the empty
+    /// string that `get_value` returns for unset would be written back as an
+    /// *explicitly empty* list, and an empty list means "refuse nothing" -- so
+    /// saving the settings once would quietly turn the policy off. Carrying the
+    /// list makes the round trip lossless in meaning as well as in text.
+    ///
+    /// An anchor using any other scheme is unwrapped -- the tags go, the text
+    /// stays -- and the scheme is reported once on standard error.
+    ///
+    /// Setting this **replaces** the list rather than adding to it, so
+    /// `https` alone also stops `http`, `ftp` and `mailto` from being linked.
+    /// That is the useful direction: the option's job is to be able to make the
+    /// policy stricter, and an additive option could not. The diagnostics say so
+    /// on every rule they drop, because forgetting the other schemes is the
+    /// obvious mistake.
+    ///
+    /// This exists because two of the engine's inputs are not the operator's
+    /// text: the document being converted, and a link dictionary. `<URL:…>`
+    /// in ordinary prose became a live `javascript:` link in the reference, so
+    /// the default refuses every script-bearing scheme. See
+    /// [`crate::urlscheme`] for why the check is a scan over the finished markup.
+    pub allowed_url_schemes: Option<Vec<String>>,
     pub append_file: String,
     pub append_head: String,
     pub body_deco: String,
@@ -356,6 +383,10 @@ impl Default for Options {
     fn default() -> Self {
         let home = std::env::var("HOME").unwrap_or_default();
         Options {
+            // A11. `None` is the default tier, not "allow everything" -- see
+            // the field's doc comment. An empty list resolves to the same tier,
+            // which is what makes a front end that persists this value safe.
+            allowed_url_schemes: None,
             append_file: String::new(),
             append_head: String::new(),
             body_deco: String::new(),
@@ -475,8 +506,46 @@ impl Options {
             crate::links::try_compile_pattern(pattern, false)
                 .map_err(|e| format!("{name}: invalid regular expression {pattern:?}: {e}"))?;
         }
+        self.validate_style_url()?;
         self.validate_template_options()?;
         Ok(())
+    }
+
+    /// The scheme policy a conversion runs under.
+    ///
+    /// Read once per conversion and handed to both the dictionary loader and the
+    /// scrub pass, so the two cannot disagree about what is allowed.
+    pub fn url_policy(&self) -> crate::urlscheme::UrlPolicy {
+        match &self.allowed_url_schemes {
+            // An empty or blank list is the default tier too, so a value that
+            // has been persisted and read back unchanged cannot turn a
+            // front end's "unset" into something weaker.
+            Some(list) => crate::urlscheme::UrlPolicy::strict(list),
+            None => crate::urlscheme::UrlPolicy::default(),
+        }
+    }
+
+    /// A11. `--style_url` is the one `href` that is pure operator input, so it
+    /// is refused outright rather than scrubbed: there is no document text to
+    /// preserve and a silent drop would leave the operator wondering why their
+    /// stylesheet is not applied.
+    ///
+    /// A relative `--style_url` (what most callers want, and what the templates
+    /// in `tests/` use) has no scheme and always passes.
+    fn validate_style_url(&self) -> Result<(), String> {
+        if self.style_url.is_empty() {
+            return Ok(());
+        }
+        let policy = self.url_policy();
+        if policy.allows(&self.style_url) {
+            return Ok(());
+        }
+        Err(format!(
+            "--style_url {:?} uses a scheme this conversion refuses ({}). \
+             Name it in --allowed_url_schemes to keep the stylesheet.",
+            self.style_url,
+            policy.describe()
+        ))
     }
 
     /// P5.5. Check the template options and, when one is set, load it and check

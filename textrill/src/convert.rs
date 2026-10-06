@@ -679,6 +679,13 @@ pub struct Converter {
     /// P5.5. True when `template_text` is a whole-document template rather than
     /// a wrapper fragment.
     document_template: bool,
+    /// A11. The scheme policy, built once in [`Converter::new`] so the scrub
+    /// does not rebuild it per paragraph. Kept beside `links` because the two
+    /// must agree; `links::load_links` is given this same value.
+    url_policy: crate::urlscheme::UrlPolicy,
+    /// A11. Schemes already reported on standard error, so a document with two
+    /// hundred `javascript:` links says so once instead of two hundred times.
+    dropped_schemes: Vec<String>,
 }
 
 impl Converter {
@@ -714,6 +721,9 @@ impl Converter {
             (String::new(), false)
         };
 
+        // A11. One policy, shared with the dictionary loader, so a rule kept at
+        // load and a paragraph scrubbed later can never disagree.
+        let url_policy = opts.url_policy();
         let links = links::load_links(&opts);
         let number_match_default = if opts.bullets_ordered.is_empty() {
             r"(\d+|[A-Za-z_])".to_string()
@@ -745,6 +755,8 @@ impl Converter {
             head_inner: String::new(),
             title_text: String::new(),
             template_text,
+            url_policy,
+            dropped_schemes: Vec::new(),
             document_template,
         }
     }
@@ -2416,6 +2428,31 @@ impl Converter {
     fn apply_links(&mut self, para_ref: &mut String, para_action: &mut u32) {
         if self.opts.make_links && !self.links.rules.is_empty() {
             self.links.check_dictionary_links(para_ref);
+            // A11. The single point where document text and dictionary URLs
+            // become an `href`, so it is also the single point that decides
+            // whether the scheme is one a browser will act on. Placed here
+            // rather than at each construction site so that `links.rs` stays a
+            // faithful port and so a producer added later is covered without
+            // remembering this rule.
+            //
+            // Runs over the finished paragraph rather than per substitution, so
+            // it costs one scan per paragraph and not one per match -- the same
+            // reasoning as the P6 prefilter.
+            let mut dropped = Vec::new();
+            if let Some(scrubbed) =
+                crate::urlscheme::scrub_hrefs(para_ref, &self.url_policy, &mut dropped)
+            {
+                *para_ref = scrubbed;
+                for scheme in dropped {
+                    if !self.dropped_schemes.contains(&scheme) {
+                        eprintln!(
+                            "textrill: dropped a link with the {scheme:?} URL scheme; \
+                             the text is kept. Pass --allowed_url_schemes {scheme} to allow it."
+                        );
+                        self.dropped_schemes.push(scheme);
+                    }
+                }
+            }
         }
         let ls = self.opts.lower_case_tags;
         if !self.opts.bold_delimiter.is_empty() {

@@ -283,6 +283,33 @@ CLI[opt_injection]='--title "plain" --style_url "plain.css"'
 INPUT[opt_injection]="$HERE/inputs/pre_explicit_blank.txt"
 NOGOLDEN[opt_injection]='differential must fail: deliberate Tier 2 divergence: the reference interpolates --title and --style_url into the document unescaped, which is a live XSS. The port escapes them, so a byte comparison against the reference must fail and cannot be the oracle; the oracle is the XML well-formedness check in proptest.py'
 
+# --- A11: the URL scheme policy on generated hrefs ---
+#
+# A document can write a live `javascript:` or `data:` URL into its own output
+# with a <URL:...> tag, and the reference does exactly that: the port's
+# pre-A11 output for this input contained href="javascript:alert(document.domain)".
+# The engine now refuses those schemes, unwraps the anchor and keeps the text.
+#
+# So this is the same shape as opt_injection above and for the same reason -- a
+# deliberate Tier 2 divergence from a reference defect, which means the
+# differential comparison CANNOT be the oracle. Saying so explicitly is the
+# point of the "differential must fail:" prefix.
+#
+# The payload characters matter and are not arbitrary. The system dictionary has
+# two <URL:...> rules; the first, <URL:foo:label>, only matches a label built
+# from [a-zA-Z0-9'() ], and it splits the scheme off as the href. Put a '.', '/'
+# or ';' in the label and that rule stops matching, the second rule takes the
+# whole string as the href, and the scheme reaches the output. Every payload
+# below carries one, so the case exercises the hole rather than the near miss.
+# The last reference, <URL:javascript:alert(1)>, is the near miss and is in the
+# input on purpose: the first rule matches it, the href is the relative word
+# "javascript", and it must be left alone. Refusing it would be the policy
+# pattern-matching a substring rather than reading a URL.
+EXTRA[url_scheme]='extract=>1,make_links=>1'
+CLI[url_scheme]='--extract --make_links'
+INPUT[url_scheme]="$HERE/inputs/url_scheme.txt"
+NOGOLDEN[url_scheme]='differential must fail: A11, a deliberate Tier 2 divergence where the port is unambiguously better. The reference emits whatever scheme a <URL:...> tag names, so this input came out of it with a live href="javascript:alert(document.domain)" and a live data: URL. The port refuses every scheme outside --allowed_url_schemes, unwraps the anchor and keeps the text, so a byte comparison against the reference must fail and cannot be the oracle. The oracle is tests/urlschemetest.rs, which asserts no refused scheme survives, that the words are kept, and that the relative href the label spelling produces is left alone'
+
 # --- P7.1: the 0x80-0x9F range, where the fallback decode used to be wrong ---
 #
 # read_any_file falls back to a single-byte decode when the bytes are not valid
