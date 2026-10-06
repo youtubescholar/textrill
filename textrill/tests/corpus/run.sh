@@ -23,6 +23,12 @@ MINE="${MINE:-$ROOT/target/debug/textrill}"
 # Scratch directory for the two output sets. Derived from TMPDIR rather than
 # hardcoded, so it works on a machine that keeps its temporary files elsewhere.
 RUNDIR="${RUNDIR:-${TMPDIR:-/tmp}/txt2html-corpus}"
+
+# P1.1. Counts generator meta lines canonicalised by normalize.py, so the one
+# declared divergence is visible in the run's output instead of being an
+# invisible edit to both sides of every comparison. See normalize.py for why
+# this is one line and why the expected value is asserted elsewhere.
+NORMALISED=0
 # Both halves of PERL5LIB live under ref/ in the repo.  An earlier version kept
 # the reference module tree and the YAML::Syck stub in /tmp, and a machine
 # reboot wiped them mid-run: every case still "passed" because both converters
@@ -31,7 +37,7 @@ _refdir_lib="$REFDIR/lib"
 # Clear the run directories: a stale output from an earlier run would otherwise
 # be compared by cmp.py and could report PASS for a case that just crashed.
 rm -rf "$RUNDIR/ref" "$RUNDIR/mine"
-mkdir -p "$RUNDIR"/ref "$RUNDIR"/mine
+mkdir -p "$RUNDIR"/ref "$RUNDIR"/mine "$RUNDIR"/golden
 export PERL5LIB="${PERL5LIB:-$STUBS:$_refdir_lib}"
 
 # The reference is a Perl checkout that has to be built from the tracked archive
@@ -190,6 +196,24 @@ run_case() {
   if [ "$mine_rc" -ne 0 ]; then
     CASE_ERR+="port exited $mine_rc: $(head -c 200 "$RUNDIR/mine/$stem.err" | tr '\n' ' ')"
   fi
+
+  # P1.1. Each converter names itself in the generator meta, and since the port
+  # stopped claiming the Perl module produced it, those two strings differ:
+  #
+  #     reference: <meta name="generator" content="HTML::TextToHTML v3.0"/>
+  #     textrill:  <meta name="generator" content="textrill v0.1.0"/>
+  #
+  # Canonicalise that one line on both sides so the byte comparison stays about
+  # content. This excludes the line from comparison; it does not bless any
+  # value. Which name is correct is asserted positively by tests/provenance.rs,
+  # so the pair is still a complete gate.
+  #
+  # Done here rather than inside cmp.py and golden_check separately so there is
+  # exactly one place the divergence is declared, and one place to audit.
+  local _norm_n
+  _norm_n=$(python3 "$HERE/normalize.py" \
+    "$RUNDIR/ref/$stem.html" "$RUNDIR/mine/$stem.html" 2>/dev/null | head -1)
+  NORMALISED=$(( NORMALISED + ${_norm_n:-0} ))
 }
 
 # Second, independent check: compare the port's output against the golden the
@@ -224,11 +248,22 @@ golden_check() {
     echo "  GOLDEN not compared (the converter errored)"
     return
   fi
-  if LC_ALL=C cmp -s "$g" "$RUNDIR/mine/$stem.html"; then
+  # P1.1. The upstream golden names itself as the generator, for the same
+  # reason the reference output does, so it needs the same canonicalisation as
+  # $RUNDIR/mine/$stem.html -- which run_case already did. The golden itself
+  # lives in ref/tfiles/ and must not be rewritten: ref/ is derived by `make
+  # ref` from the tracked tarball, and mutating it would make the next run
+  # disagree with the tarball for no visible reason. Normalise a copy.
+  local gn="$RUNDIR/golden/$stem.html"
+  cp "$g" "$gn"
+  local _gn_n
+  _gn_n=$(python3 "$HERE/normalize.py" "$gn" 2>/dev/null | head -1)
+  NORMALISED=$(( NORMALISED + ${_gn_n:-0} ))
+  if LC_ALL=C cmp -s "$gn" "$RUNDIR/mine/$stem.html"; then
     echo "  GOLDEN pass"
   else
     echo "  GOLDEN FAIL (differs from tfiles/good_$stem.html)"
-    diff "$g" "$RUNDIR/mine/$stem.html" | head -6 | sed 's/^/    /'
+    diff "$gn" "$RUNDIR/mine/$stem.html" | head -6 | sed 's/^/    /'
     GOLDEN_FAILS+=("$stem")
   fi
   GOLDEN_N=$((GOLDEN_N + 1))
@@ -459,6 +494,12 @@ else
   if [ "${#GOLDEN_FAILS[@]}" -gt 0 ]; then
     printf '  differing: %s\n' "${GOLDEN_FAILS[*]}"
   fi
+  # P1.1. Printed on every run, not only when it is non-zero. A normalisation
+  # that silently stopped applying would still leave the corpus green, so the
+  # count is part of the output the gate produces rather than a debug aid.
+  # Expected value is stable for this corpus; a change in it means a change in
+  # which documents emit a generator meta, which is worth seeing.
+  echo "NORMALISED: $NORMALISED generator meta line(s) (P1.1 declared divergence; value asserted by tests/provenance.rs)"
   # The counters above are for humans. Without this the script ends on a
   # successful `echo` and reports success to `make corpus` and `make verify`
   # even when every case failed: demonstrated with a stub converter that exits

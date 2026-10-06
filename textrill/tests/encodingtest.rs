@@ -281,10 +281,17 @@ fn meta_charset_emits_one_per_line_when_on() {
     conv.opts.instring = vec!["hi".to_string()];
     let out = conv.convert();
     assert!(out.contains("<meta charset=\"utf-8\"/>"), "{out:?}");
-    assert!(
-        out.contains("content=\"HTML::TextToHTML v3.0\"/>\n<meta charset"),
-        "each meta needs its own line: {out:?}"
+    // Each meta needs its own line. The generator string is spelled from the
+    // crate version rather than written out: this test is about the newline
+    // between the two metas, not about which generator is named, and a literal
+    // here went stale the moment P1.1 renamed it -- which is how the test
+    // started failing for a reason that had nothing to do with encodings. The
+    // value itself is asserted in tests/provenance.rs.
+    let gen = format!(
+        "content=\"textrill v{}\"/>\n<meta charset",
+        env!("CARGO_PKG_VERSION")
     );
+    assert!(out.contains(&gen), "each meta needs its own line: {out:?}");
 }
 
 #[test]

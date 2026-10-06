@@ -149,10 +149,12 @@ Two sibling lists separated by a blank line come out as one nested list. **Also
 inherited, byte-for-byte.** This one costs real readability: the bullets now
 render as if they belonged to the ordered list.
 
-### 4.3 Every document claims Perl made it
+### 4.3 Every document claimed Perl made it — fixed
+
+This one is resolved. It was:
 
 ```rust
-// textrill/src/convert.rs:617
+// textrill/src/convert.rs
 const PROG: &str = "HTML::TextToHTML";
 const VERSION: &str = "3.0";
 ```
@@ -161,11 +163,17 @@ const VERSION: &str = "3.0";
 <meta name="generator" content="HTML::TextToHTML v3.0"/>
 ```
 
-Every file textrill writes states in its own metadata that the Perl module
+Every file textrill wrote stated in its own metadata that the Perl module
 produced it. That is a false provenance claim, distinct from licensing — the
 GPLv3 credit to Seth Golub, Kathryn Andersen and Joao Eriberto Mota Filho in
 `textrill/LICENSE` is correct and stays exactly as it is. The problem is the
 `generator` field, which is a statement about what ran.
+
+Now `<meta name="generator" content="textrill v0.1.0"/>`, with the version taken
+from `CARGO_PKG_VERSION` so a bump cannot leave it stale. Cost: 18 differential
+and 13 golden comparisons, resolved by `tests/corpus/normalize.py` plus
+`tests/provenance.rs`. Rationale and the sabotage runs that verified both halves
+are in `docs/PLAN.md` § "Item 1.1, resolved".
 
 ### 4.4 `--template` vs `--document_template`
 

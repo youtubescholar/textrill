@@ -614,8 +614,21 @@ const TAG_START: u8 = 1;
 const TAG_END: u8 = 2;
 const TAG_EMPTY: u8 = 3;
 
-const PROG: &str = "HTML::TextToHTML";
-const VERSION: &str = "3.0";
+// P1.1. The generator meta is provenance: it names what produced this file.
+// textrill produced it, and stating otherwise is a false claim in every
+// document the tool writes -- including the ones a reader may inspect years
+// later to work out what made them.
+//
+// This is deliberately NOT the Perl module's name. It is also deliberately not
+// an attribution mechanism: the credit for HTML::TextToHTML belongs in
+// LICENSE, where it is, permanently and correctly. Provenance and attribution
+// are different claims, and conflating them is what put "HTML::TextToHTML" in a
+// place it does not belong.
+//
+// The version comes from the crate rather than being written out, so bumping
+// Cargo.toml cannot leave a stale string in every generated document.
+const PROG: &str = "textrill";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn subtract_modes(v: u32, mask: u32) -> u32 {
     (v | mask) - mask

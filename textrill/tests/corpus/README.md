@@ -150,6 +150,47 @@ never found them.
 > equivalent for `make fuzz` is a fuzzer stub that exits 3. See
 > `legacy-archive/REMEDIATION-PLAN.md` Phase 0b.
 
+## The one thing this harness deliberately ignores
+
+`normalize.py` canonicalises a single line — a `meta` start tag whose `name`
+attribute is `generator` — to a fixed sentinel, on both sides, before any
+comparison. Every corpus run prints the count:
+
+```
+NORMALISED: 67 generator meta line(s) (P1.1 declared divergence; value asserted by tests/provenance.rs)
+```
+
+The reason is P1.1. The port used to emit
+`<meta name="generator" content="HTML::TextToHTML v3.0"/>` because that made it
+byte-identical to the reference. It is its own tool, so it now emits
+`content="textrill v0.1.0"`, and a fresh Perl run still names itself — which
+made 18 differential cases and 13 goldens fail.
+
+Suppressing those 13 with `NOGOLDEN[]` was the cheaper edit and the wrong one.
+`NOGOLDEN` means *skipped*, so those stems would stop being compared at all, and
+five of them are list cases — the family holding two known inherited defects.
+Losing golden coverage there to avoid touching one string trades a visible
+divergence for an invisible hole.
+
+So the line is excluded and the value is asserted elsewhere:
+`tests/provenance.rs` requires the exact expected string and fails if
+`TextToHTML` reappears in any spelling. Together: this harness proves content
+parity with the reference, that test proves correct provenance.
+
+This is the one place the harness normalises anything, and it is deliberately
+not a general normaliser — it matches one line shape and will not touch a body
+paragraph that happens to contain the word "generator". Verified by breaking
+each half on purpose:
+
+- `PROG` reverted to `HTML::TextToHTML` → 5/5 provenance tests fail, corpus
+  stays 60/60 and 33/33. The corpus genuinely does not judge this value.
+- Every heading level shifted `+1` → corpus exits 1 with 11 differential and 11
+  golden failures, `NORMALISED` unchanged at 67. A real content regression
+  2 000 lines from the generator is still caught.
+
+The count is printed unconditionally, including when it is zero, because a
+normalisation that quietly stopped applying would leave the corpus green.
+
 ## Fuzzer
 
 `fuzz.py` is a seeded differential fuzzer over the same pair of converters. It

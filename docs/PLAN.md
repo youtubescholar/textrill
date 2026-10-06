@@ -50,37 +50,55 @@ the `generator` metadata.
 
 | # | item | why |
 |---|---|---|
-| 1.1 | `generator` meta says `textrill`, not `HTML::TextToHTML v3.0` | `convert.rs:617` hard-codes the Perl module. Every file the tool writes claims Perl made it. Attribution belongs in `LICENSE`, not in provenance. |
+| 1.1 | ~~`generator` meta says `textrill`, not `HTML::TextToHTML v3.0`~~ **done** | `convert.rs` hard-coded the Perl module. Every file the tool writes claimed Perl made it. Attribution belongs in `LICENSE`, not in provenance. See "Item 1.1, resolved" below. |
 | 1.2 | Read `~/.textrillrc` and `./.textrillrc`; keep `.txt2htmlrc` working | Same precedence order, new preferred names. |
 | 1.3 | Read `~/.textrill.dict` / `.textrill.dict`; keep the old names | Same. |
 | 1.4 | `--help` line 1 describes textrill | Currently: *"A reimplementation of txt2html 3.0"*. |
 
-Item 1.1 is the one that matters. 1.2–1.4 are compatibility-preserving, so the
-parity tier should stay green.
+Items 1.2–1.4 are compatibility-preserving, so the parity tier should stay green.
 
-**1.1 is not the freebie it looks like.** `golden_check` compares with a
-byte-exact `cmp` against the upstream Perl `tfiles/good_*.html`, and **13 of the
-32 goldens contain** `<meta name="generator" content="HTML::TextToHTML v3.0"/>`.
-Correcting the provenance breaks 13 golden comparisons on the spot, and there
-are only three defensible ways to handle that:
+### Item 1.1, resolved
 
-| option | cost |
-|---|---|
-| Normalise the one line out before `cmp` | Keeps golden coverage on all 32 stems, but the harness now has a normalisation step, which is the shape of thing this project has been burned by before. |
-| Exempt the 13 stems via `NOGOLDEN[]` | No harness change, but those stems lose golden coverage entirely — and `NOGOLDEN` means *skipped*, so a real regression in them goes unseen. |
-| Keep the Perl string | Zero cost, and the tool keeps lying about its own provenance in every file it writes. |
+**textrill names itself.** The port produces these documents, and every one of
+them said otherwise. Measured cost of the fix: 18 differential cases and 13
+golden comparisons fail, which is the real number and not the 13 originally
+estimated — the differential path was affected too, since a fresh Perl run
+names itself as well.
 
-This is a decision about what the parity tier is *for*. It is not a
-mechanical consequence of fixing a string, and it is deliberately left
-unresolved here rather than picked quietly. Whichever way it goes, the
-13 affected stems must be enumerated by name in the corpus README — a silent
-reduction in golden coverage is exactly the failure mode recorded in that
-file's § "Six ways this reported success wrongly". They are:
+The three options were normalize / suppress / keep. **Normalize** was chosen,
+via `tests/corpus/normalize.py`: it canonicalises the one `meta name="generator"`
+line to a sentinel on both sides before comparison. The alternatives were
+rejected for recorded reasons:
 
-```
-heading1  links3  list-4  list-5  list-advanced  list-custom  list-styles
-mixed  news  robo  sample  umlauttest  xhtml_sample
-```
+- `NOGOLDEN[]` on the 13 stems suppresses the comparison entirely, so a real
+  regression in them goes unseen. Five are list cases — the family holding two
+  known inherited defects. Losing golden coverage there to save editing one
+  string is a bad trade.
+- Keeping the Perl string costs nothing and leaves the tool misattributing
+  itself in every file it writes.
+
+Normalising excludes the line from comparison, so it cannot on its own assert
+the value. `tests/provenance.rs` is the other half: it requires the exact
+expected string, fails if `TextToHTML` reappears in any form, pins both
+tag-case branches and HTML5 mode, checks the version against `CARGO_PKG_VERSION`
+so a Cargo.toml bump cannot leave a stale string, and runs once through the
+spawned binary. The pair is a complete gate — the corpus proves content parity
+with the reference, the test proves correct provenance.
+
+Both halves were verified by breaking them on purpose, per § Standing rule:
+
+| sabotage | expected | observed |
+|---|---|---|
+| `PROG` back to `HTML::TextToHTML` | provenance test red, corpus green | 5/5 failed, corpus 60/60 and 33/33 |
+| every heading level `+1` (`h1`→`h2`) | corpus red | exit 1, 11 differential and 11 golden failures, `NORMALISED` unchanged at 67 |
+
+The second row is the one that matters for `normalize.py`: a genuine content
+regression 2 000 lines away from the generator still produced 11 golden
+failures, so the normaliser is not a general one that swallows differences.
+
+`NORMALISED: 67` is printed on every corpus run, including when it is zero. A
+normalisation that quietly stopped applying would still leave the corpus green,
+so the count is part of the gate's output rather than a debug aid.
 
 ## Phase 2 — Fix what is wrong
 
