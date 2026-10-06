@@ -676,6 +676,14 @@ pub struct Converter {
     /// P5.5. The template file's contents, read once in [`Converter::new`].
     /// Empty means no template is active.
     template_text: String,
+    /// Set when a note or glossary set is unusable, so the caller can report it
+    /// and write nothing.
+    ///
+    /// Conversion cannot return this as an error without changing the signature
+    /// the reference and the Python bindings use, and it must not be reported by
+    /// printing and carrying on: a document whose citations lost a definition
+    /// would otherwise reach disk with a dangling `[1]`.
+    pub notes_error: Option<String>,
     /// P5.5. True when `template_text` is a whole-document template rather than
     /// a wrapper fragment.
     document_template: bool,
@@ -732,6 +740,7 @@ impl Converter {
         };
 
         Converter {
+            notes_error: None,
             number_match: number_match_default,
             term_match: r"(\w\w+)".to_string(),
             tags: Vec::new(),
@@ -3112,6 +3121,7 @@ impl Converter {
     }
 
     fn convert_sources(&mut self, sources: Vec<String>, string_mode: bool) -> String {
+        self.notes_error = None;
         let (start, body, tail) = self.convert_to_parts(sources, string_mode);
         // P5.3. Number before sectioning so the TOC labels carry the numbers.
         let body = if self.opts.number_headings {
@@ -3127,18 +3137,55 @@ impl Converter {
         } else {
             (String::new(), body)
         };
+        // Collect the note sets over the finished body, so definition content
+        // is rendered markup rather than source text. On failure the body is
+        // left exactly as it was and the error is recorded: the caller writes
+        // nothing, so a refused document produces no output at all.
+        let (stripped, citations, glossary) = match self.collect_notes(&body) {
+            Ok(n) => n,
+            Err(e) => {
+                self.notes_error = Some(e);
+                (String::new(), String::new(), String::new())
+            }
+        };
+        let body = if stripped.is_empty() { body } else { stripped };
         // P5.5. A template replaces the default arrangement. `--template`
         // wraps the body inside the engine's own prolog and epilog; a
         // `--document_template` owns the whole page, so neither is emitted.
         if !self.template_text.is_empty() {
-            return self.apply_template(&start, &body, &toc, &tail);
+            return self.apply_template(&start, &body, &toc, &tail, &citations, &glossary);
         }
+        let mut body = body;
+        // Without a template there is nowhere to put the lists, so they go at
+        // the end of the body -- after the prose, where a reader expects an
+        // endnotes section, and inside `--extract`'s output too.
+        body.push_str(&citations);
+        body.push_str(&glossary);
         let mut out = String::with_capacity(start.len() + toc.len() + body.len() + tail.len());
         out.push_str(&start);
         out.push_str(&toc);
         out.push_str(&body);
         out.push_str(&tail);
         out
+    }
+
+    /// Collect and validate the note sets, returning the finished lists.
+    ///
+    /// Returns `(stripped body, citations HTML, glossary HTML)`. All three are
+    /// empty when both modes are off, which is the default and must leave the
+    /// body untouched.
+    fn collect_notes(&self, body: &str) -> Result<(String, String, String), String> {
+        if !self.opts.citations && !self.opts.glossary {
+            return Ok((String::new(), String::new(), String::new()));
+        }
+        let (stripped, notes) =
+            crate::notes::collect(body, (self.opts.citations, self.opts.glossary));
+        crate::notes::validate(&notes)?;
+        Ok((
+            stripped,
+            notes.render_one(crate::notes::Kind::Citation),
+            notes.render_one(crate::notes::Kind::Glossary),
+        ))
     }
 
     /// P5.5. Fill the active template's slots and assemble the page.
@@ -3148,13 +3195,38 @@ impl Converter {
     /// `{{textrill:title}}` and `{{textrill:head}}` the escaped title and the
     /// `<head>` contents the engine produced, and `{{textrill:pager}}` empty
     /// (pagers belong to `--chunk`, which is refused with a template).
-    fn apply_template(&self, start: &str, body: &str, toc: &str, tail: &str) -> String {
+    fn apply_template(
+        &self,
+        start: &str,
+        body: &str,
+        toc: &str,
+        tail: &str,
+        citations: &str,
+        glossary: &str,
+    ) -> String {
+        // A template that names neither slot would silently drop the notes, so
+        // the fallback is the same end-of-body placement the untemplated path
+        // uses. Falling back keeps a template working without change when the
+        // author has no notes; requiring the slots would not.
+        let has_slot = |name: &str| {
+            self.template_text
+                .contains(&format!("{{{{textrill:{name}}}}}"))
+        };
+        let mut body = body.to_string();
+        if !citations.is_empty() && !has_slot("citations") {
+            body.push_str(citations);
+        }
+        if !glossary.is_empty() && !has_slot("glossary") {
+            body.push_str(glossary);
+        }
         let slots = [
-            ("content", body),
+            ("content", body.as_str()),
             ("toc", toc),
             ("title", self.title_text.as_str()),
             ("head", self.head_inner.as_str()),
             ("pager", ""),
+            ("citations", citations),
+            ("glossary", glossary),
         ];
         let filled = crate::template::apply(&self.template_text, &slots);
         if self.document_template {

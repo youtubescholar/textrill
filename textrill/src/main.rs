@@ -139,6 +139,15 @@ fn main() -> ExitCode {
         Err(e) => (e.out, e.unreadable),
     };
 
+    // A note set that cannot be rendered is a failure, and it is checked before
+    // the output is opened. Writing the body anyway would leave `[1]` in the
+    // prose pointing at nothing, which is exactly the failure the mode exists
+    // to prevent -- and a half-converted document on disk is worse than none.
+    if let Some(e) = &conv.notes_error {
+        eprintln!("{PROG}: {e}");
+        return ExitCode::from(1);
+    }
+
     let result = if opts.outfile.is_empty() || opts.outfile == "-" {
         // Write through a locked handle so that a closed pipe (as in
         // `txt2html file.txt | head`) is reported as an ordinary error instead

@@ -22,7 +22,15 @@
 //! hand-write — anchor ids, TOC targets, pager links — and renders them here.
 
 /// The slots a template may use, in a stable order for diagnostics.
-pub const SLOTS: &[&str] = &["content", "toc", "title", "head", "pager"];
+pub const SLOTS: &[&str] = &[
+    "content",
+    "toc",
+    "title",
+    "head",
+    "pager",
+    "citations",
+    "glossary",
+];
 
 /// Substitute every known `{{textrill:name}}` in `template` with its value.
 ///

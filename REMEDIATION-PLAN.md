@@ -4,7 +4,7 @@ Status: **in progress**, 2026-10-03. Covers
 `textrill` (Rust engine + CLI) and `textrill-gui-rs` (native `egui` front end).
 The Python bindings and the PySide6 front end are retired to `legacy-archive/`.
 
-Gates at 2026-10-04: corpus **60/60**, goldens **33/33**, **263** engine tests,
+Gates at 2026-10-04: corpus **60/60**, goldens **33/33**, **304** engine tests,
 **74** native GUI tests, `fmt`/`clippy` clean. (At 2026-10-03: corpus 59/59,
 goldens 33/33, 16 000 fuzz cases 0 mismatches, 164 engine tests, 74 GUI tests;
 the fuzzer and corpus are unchanged since.) The dated figures elsewhere in this
@@ -1940,18 +1940,20 @@ considering once the above is solid, informed by the survey in
    is now returned separately from the sectioned body so a template can place
    it. Distinct from the citation/glossary work, which stays deferred (see the
    notes policy in FINDINGS.md §2).
-   **Citations and glossary (design decision, 2026-10-04):** deferred by default.
-   If built, these will be **opt-in only**, behind a new flag (or flags), and
-   triggered exclusively by a **collision-proof, namespaced sigil** (not `^1`,
-   not `[^1]`). Reveal must be **CSS-only** (checkbox/label) with no JavaScript.
-   Definitions/citations are collected in their own pass and any
-   dangling/duplicate/empty/ambiguous reference is a **hard error** when the
-   mode is active; when off and unused, output must remain byte-identical to
-   current behaviour. They will not reuse the `{{...}}` forms in a way that
-   conflicts with templates except by a distinct sub-namespace under
-   `textrill:`; autolinking safety (scheme allowlisting + `rel="noopener
-   noreferrer"`) remains a boundary condition if hrefs are produced. This is
-   design-only; no code change yet.
+   **Citations and glossary (2026-10-04):** now **implemented**, as
+   `--citations` and `--glossary`, both **opt-in and default-off**, triggered
+   exclusively by **collision-proof, namespaced** markers (not `^1`, not `[^1]`).
+   Collected in their own pass over the finished body; any
+   dangling/duplicate/empty/ambiguous reference is a **hard error** when the mode
+   is active, reported before the output file is opened. When off and unused,
+   output is byte-identical, which the corpus and 33 goldens check. They do not
+   reuse the `{{...}}` forms in a way that conflicts with templates, only a
+   distinct sub-namespace under `textrill:`. Generated links are same-document
+   fragments, so no scheme is chosen from document text and `rel="noopener
+   noreferrer"` is not applicable; the key charset is restricted because keys
+   land in `id` attributes. The list is a definition list rather than the
+   CSS-only checkbox sketch — see its own section for why duplication made that
+   shape wrong.
 
 ### Sectioning and TOC — design (2026-10-04)
 
@@ -3155,6 +3157,129 @@ P3 seed corpus should be extended with the new fixtures as seeds.
   whose defect is invisible to byte-comparison, so it is verified by P12's
   allocation budget instead, and its current figures are unverified.
 
+### Citations and glossary (2026-10-04; implemented)
+
+**Status: implemented.** `--citations` and `--glossary`, both default-off. With
+both off the output is byte-identical to the behaviour before this section, which
+the corpus and the 33 goldens confirm rather than assume.
+
+#### Principles (from FINDINGS.md §2)
+- **No inference.** Ordinary prose is never read as a citation or a term. Only
+  an explicit, namespaced marker family is interpreted. `[^1]`, `^2`, `(3)`,
+  `[4]`, `@five`, `{6}` and `~x~` are all text, and `tests/notest.rs` asserts a
+  document built from them converts identically with the modes on and off.
+- **Zero JavaScript.** Satisfied more strongly than the original sketch
+  required: there is no CSS to reveal either, because the note body is emitted
+  once as a real list rather than once per reference.
+- **Fail closed.** A dangling reference, an orphan definition, a duplicate
+  definition, an empty definition, an unbalanced or mismatched block, an invalid
+  key, or any well-formed `textrill:` token we cannot read is an error, and
+  `main.rs` reports it and exits non-zero **before the output file is opened**.
+  A refused document therefore produces no output at all.
+- **No collision with existing features.** The pass runs over the finished body,
+  after numbering and sectioning, and touches nothing else. It composes with
+  `--number_headings`, `--section`, `--toc`, `--extract`, `--html5`,
+  `--lower_case_tags` and templates; `tests/notest.rs` runs the same document
+  through each combination and checks the note links still resolve.
+- **Security boundary respected.** Definitions produce only same-document
+  fragments (`#note-…`), so no scheme is ever chosen from document text and
+  `javascript:` is not reachable by construction. The keys land in `id`
+  attributes, so the key charset is an injection boundary and is restricted to
+  ASCII letters, digits, `-`, `_` and `.`.
+
+#### Flags
+- `--citations` (alias `--notes`): collect citations into a numbered endnotes list.
+- `--glossary`: collect terms into a definition list.
+
+The two are independent. A marker whose mode is off stays literal text, so
+turning one on never draws the other in and never refuses a document over
+markers the user did not ask to be interpreted.
+
+Refused combinations, reported up front by `Options::validate` before any byte is
+written: `--chunk` and `--stream`. Numbering follows first reference, so a
+citation in the last paragraph can insert `[1]` in the first; both modes write as
+they go, and neither can afford the document-wide pass the feature needs.
+`--extract` is **supported**, not refused — the lists append to the body, which
+for `--extract` is the whole output, so nothing is lost.
+
+#### Syntax (namespaced, balanced)
+- Citation reference: `{{textrill:cite:key}}`
+- Citation definition: `{{textrill:def:cite:key}}` … `{{/textrill:def:cite:key}}`
+- Glossary reference: `{{textrill:gloss:key}}`
+- Glossary definition: `{{textrill:def:gloss:key}}` … `{{/textrill:def:gloss:key}}`
+
+Balanced tokens rather than the single-token or checkbox shapes sketched here,
+and the reason is a correctness one rather than a taste one: a closing tag is
+checked against the block it closes, so a typo cannot end the wrong block and
+nest the next one inside it.
+
+A `{{textrill:` with no `}}` is **not** a token — it is text, and stays text.
+That is the one deliberate exception to "unknown marker → error", because such a
+string renders exactly as written and refusing a document over it would be
+strictly worse than leaving it alone.
+
+#### Collection and pass model
+1. Convert as today to body HTML, then number headings and section.
+2. If both modes are off: stop here. The body is untouched.
+3. Otherwise scan the body for the four tokens. The scan is a byte walk, not a
+   line walk, because a marker in running prose is the normal case.
+4. Collect references and definitions separately. Tracked as two independent
+   flags on each entry, because the two failure directions are different
+   mistakes with different fixes: a reference with no definition is a lost
+   citation, and a definition nothing references is usually a key typo that will
+   *become* a lost citation. Collapsing them into one flag loses whichever half.
+5. Validate, and on any error record the diagnostic and emit nothing.
+6. Render and place.
+
+The pass runs over the **rendered** body, so definition content is already-
+converted markup: a definition may use textrill's own delimiters (`*italic*`
+becomes `<em>`), and raw HTML a type `<em>` in the source is escaped, exactly as
+it would be anywhere else in the document.
+
+Known limitation: because the pass runs over the body rather than the source,
+`{{` inside `<pre>`/`<code>` can be collected. Authors keep the modes off for
+such a file, or the marker is simply not present.
+
+#### Output structure (and why not the CSS reveal)
+- Citations: `<a class="note-ref" href="#note-key">[n]</a>` inline, then one
+  `<section class="notes"><ol class="notes-list">` with `<li id="note-key">`.
+  `<ol>` because the visible label is a number, which is what an ordered list
+  renders by default.
+- Glossary: `<a class="gloss-ref" href="#gloss-key">key</a>` inline, then
+  `<section class="glossary"><dl class="glossary-list">` with
+  `<dt id="gloss-key">key</dt><dd>`. `<dl>` because the term is authored text,
+  not a number, and a generated marker in a `<dt>` would misdescribe the source.
+- Each note ends with a "back" link to the first reference.
+
+The CSS-only reveal sketched above would have to emit the definition body **once
+per reference** to make a later one revealable, so a citation cited five times
+would appear five times in the DOM — which then means the wrong copy for
+printing, for `--extract`, and for a reader who never expands anything. The
+definition list keeps one copy, works with CSS off, prints correctly, and needs
+no JavaScript. That is why the original sketch was dropped.
+
+Only the **first** reference to a key carries an `id`. Repeating the id on every
+mention would be invalid HTML and would leave the "back" link with several
+possible targets; suffixing each would leave every mention but the first
+unaddressable. `tests/notest.rs` asserts 50 references to one key produce exactly
+one `id="note-ref-a"` and one `id="note-a"`.
+
+#### Interactions & constraints
+- **Templates:** `{{textrill:citations}}` and `{{textrill:glossary}}` place the
+  two lists independently. A template naming neither slot falls back to the same
+  end-of-body placement, so a template written before this feature keeps working
+  and never loses a note list. Unknown `textrill:` slots remain hard errors.
+- **Section/TOC:** unaffected; `tests/notest.rs` checks the `chunk-N` ids and the
+  note ids coexist without collision.
+- **Encoding:** markers are ASCII; keys are restricted to ASCII, so a key can
+  never split a UTF-8 sequence.
+
+#### Non-goals
+- No markdown-style implicit footnotes; no heuristic inference.
+- No JavaScript, and no CSS to go with it.
+- Not a bibliography processor (citeproc): inline references plus a list, nothing
+  more.
+
 ### A11. A document can write a live `javascript:` href into its own output
 
 Found while writing the security-meta design note below, rather than by the
@@ -3290,8 +3415,17 @@ string, so a write failure read `unable to open out.html,: ...`.
 - **Template slots do not create hrefs:** slots inject pre-rendered blocks
   (engine-generated), not raw URLs from arbitrary user text. The namespace model
   (`{{textrill:*}}`) does not change this.
-- **Citations/notes:** if they produce hrefs, same rules apply. CSS-only reveal
-  means no script-based navigation.
+- **Citations/notes:** implemented, and the rule holds by construction — they
+  emit same-document fragments (`#note-…`), never a URL, so no scheme is ever
+  chosen from document text. Their keys land in `id` attributes, so the key
+  charset is an injection boundary and is restricted to ASCII letters, digits,
+  `-`, `_` and `.`.
+- **Attribute injection is the sharper boundary, not the scheme.** A document
+  that cannot name a dangerous scheme can still end the `href="…"` attribute and
+  supply its own `onmouseover=`. That was live in four built-in autolink rules
+  and is now fixed and guarded — see the section above. Any future URL-emitting
+  feature needs the same check, because `rel="noopener noreferrer"` and the
+  scheme policy both do nothing about it.
 - **CSP compatibility:** adding a CSP `meta` is opt-in (never hardcoded). A
   hardcoded CSP would block `--style_url`/external styles/images; must remain
   configurable (template-controlled or a future opt-in flag) per design notes.

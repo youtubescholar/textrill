@@ -119,6 +119,7 @@ pub mod cli;
 pub mod convert;
 pub mod encode;
 pub mod links;
+pub mod notes;
 pub mod options;
 pub mod prefilter;
 pub mod rcfile;

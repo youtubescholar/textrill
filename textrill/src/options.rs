@@ -259,6 +259,19 @@ pub struct Options {
     pub bullets: String,
     pub bullets_ordered: String,
     pub bold_delimiter: String,
+    /// Collect `{{textrill:cite:key}}` references into a numbered endnotes list.
+    ///
+    /// The source syntax, the rendering and the reasons each mistake is refused
+    /// rather than guessed at are in [`crate::notes`]. Default **off**: with the
+    /// mode off every marker is left in the output as literal text, so a document
+    /// that does not use notes converts byte for byte as before.
+    ///
+    /// Refused with `--chunk` and `--stream`. `--chunk` would have to collect
+    /// across the whole input to number references before splitting it, and
+    /// `--stream` has already written bytes by the time the list is complete.
+    /// Both would need a document-wide pass, which is the one thing those modes
+    /// exist to avoid.
+    pub citations: bool,
     pub caps_tag: String,
     pub custom_heading_regexp: Vec<String>,
     pub default_link_dict: String,
@@ -282,6 +295,14 @@ pub struct Options {
     pub escape_html_chars: bool,
     pub explicit_headings: bool,
     pub extract: bool,
+    /// Collect `{{textrill:gloss:term}}` references into a definition list.
+    ///
+    /// Independent of [`Options::citations`]: either mode, both or neither may
+    /// be on. Markers of a mode that is off stay literal text, so enabling
+    /// `--citations` never draws the glossary markers into it. Default **off**.
+    /// Refused with `--chunk` and `--stream`, for the reasons given on
+    /// [`Options::citations`].
+    pub glossary: bool,
     /// Phase 5. Wrap each heading-delimited section of the body in an
     /// `<article class="section" id="chunk-N">` element.
     ///
@@ -411,10 +432,12 @@ impl Default for Options {
             extract: false,
             section: false,
             toc: false,
+            citations: false,
             chunk: false,
             number_headings: false,
             stream: false,
             hrule_min: 4,
+            glossary: false,
             html5: false,
             indent_width: 2,
             indent_par_break: false,
@@ -508,6 +531,7 @@ impl Options {
         }
         self.validate_style_url()?;
         self.validate_template_options()?;
+        self.validate_notes_options()?;
         Ok(())
     }
 
@@ -546,6 +570,31 @@ impl Options {
             self.style_url,
             policy.describe()
         ))
+    }
+
+    /// Refuse the note modes with the two that stream.
+    ///
+    /// Both write output as they go, and a note list is only known once the
+    /// whole document has been read: numbering follows first reference, so a
+    /// citation in the last paragraph can insert `[1]` in the first. Refusing
+    /// here, before any byte is written, is the only way to keep the promise
+    /// that a broken note set produces no output at all.
+    fn validate_notes_options(&self) -> Result<(), String> {
+        for (flag, on) in [
+            ("--citations", self.citations),
+            ("--glossary", self.glossary),
+        ] {
+            if !on {
+                continue;
+            }
+            if self.chunk {
+                return Err(format!("{flag} is not valid with --chunk"));
+            }
+            if self.stream {
+                return Err(format!("{flag} is not valid with --stream"));
+            }
+        }
+        Ok(())
     }
 
     /// P5.5. Check the template options and, when one is set, load it and check

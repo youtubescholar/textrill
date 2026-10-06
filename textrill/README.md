@@ -22,12 +22,17 @@ What is **done**:
 
 - The conversion engine is byte-verified against the Perl original across a
   differential corpus of 60 cases and 33 upstream golden files.
-- 263 Rust tests, a fuzzer, and a 74-test native GUI suite.
+- 304 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.
 - Encoding detection was reworked: BOM → UTF-16 evidence → UTF-8 → CP1252, with
   explicit overrides for the encodings that cannot be detected.
+- Opt-in `--citations` and `--glossary` collect namespaced markers into an
+  endnotes list and a definition list, with no JavaScript and no inference — see
+  [Citations and glossary](#citations-and-glossary). Generated `href`s and their
+  target ids are checked by a permanent test, as are the `href`s built by
+  `--toc`, `--section` and `--chunk`.
 
 What is **not** done yet:
 
@@ -112,7 +117,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **62 options** with **116 accepted spellings** including short
+There are **65 options** with **121 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The options are the Perl originals, unchanged, so that documents converted by
@@ -266,6 +271,64 @@ line reports a missing or malformed one before writing anything.
 
 Because a template is an `Options` value, it can be set once in
 `./.txt2htmlrc`, so a project commits its template and points at it there.
+
+### Citations and glossary
+
+Two opt-in, default-off modes collect explicit references into a list at the end
+of the body. Both are triggered only by a namespaced marker; ordinary prose is
+never interpreted, so `[^1]`, `^2`, `(3)`, `[4]` and `@five` stay text.
+
+| Marker | Meaning |
+| --- | --- |
+| `{{textrill:cite:key}}` | Cite `key` |
+| `{{textrill:def:cite:key}}` … `{{/textrill:def:cite:key}}` | The text of that citation |
+| `{{textrill:gloss:key}}` | Refer to the term `key` |
+| `{{textrill:def:gloss:key}}` … `{{/textrill:def:gloss:key}}` | The definition of that term |
+
+```sh
+textrill --citations <<'EOF'
+See the study {{textrill:cite:knuth}} and again {{textrill:cite:knuth}}.
+
+{{textrill:def:cite:knuth}}
+Knuth, *Literate Programming*.
+{{/textrill:def:cite:knuth}}
+EOF
+```
+
+Citations become `[1]`, `[2]`, … numbered by first reference, with the list
+appended as an endnotes `<ol>`; terms become a `<dl>` whose `<dt>` is the key.
+Both link to their entry and each entry links back to its first reference. Only
+the first reference to a key carries an `id`, so fifty mentions of one citation
+still produce one target.
+
+A definition may use textrill's own delimiters (`*italic*`, `` `code` ``), since
+it is collected from the converted document.
+
+With both modes off the markers are left alone and the output is byte-identical
+to a run without them. A marker belonging to a mode that is *off* is also left
+alone, so `--citations` never turns a glossary marker into an error.
+
+Anything ambiguous is refused, and the message goes to standard error with a
+non-zero exit **before the output file is opened** — a document with a broken
+note set produces no output rather than a `[1]` pointing at nothing:
+
+- a reference with no definition, or a definition nothing references
+- a definition given twice, or given empty
+- an unbalanced block, or a closing tag that does not match the block it closes
+- a key that is empty or uses anything but ASCII letters, digits, `-`, `_`, `.`
+  (keys land in `id` attributes)
+- a `{{textrill:…}}` token that is not one of the four above
+
+`--chunk` and `--stream` are refused with either mode: numbering depends on the
+whole document, and both write output as they go. `--extract` works, since the
+lists simply append to the body.
+
+With `--template`, `{{textrill:citations}}` and `{{textrill:glossary}}` place
+the two lists wherever the template wants them. A template that names neither
+slot still gets them appended, so an existing template never loses a list.
+
+No JavaScript is involved, and no CSS either: the note body is emitted once, as a
+real list, rather than once per reference.
 
 ### Encodings
 

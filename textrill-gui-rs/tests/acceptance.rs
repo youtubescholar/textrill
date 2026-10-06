@@ -68,7 +68,7 @@ fn option_help_strings_are_unique() {
     // A11 added --allowed_url_schemes, and with it the panel gained a widget.
     // The count is here to make an addition a deliberate act rather than
     // something that happens when the engine grows an option.
-    assert_eq!(seen.len(), 63, "the engine's option count changed");
+    assert_eq!(seen.len(), 65, "the engine's option count changed");
 }
 
 /// Every option in `cli::SPECS` is reachable as a labelled widget.
