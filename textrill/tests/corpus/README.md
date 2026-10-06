@@ -148,7 +148,7 @@ never found them.
 > exits non-zero. `MINE=/path/to/stub-that-writes-garbage tests/corpus/run.sh`
 > is the test, and it should print `PASS=0 FAIL=59` *and* exit non-zero. The
 > equivalent for `make fuzz` is a fuzzer stub that exits 3. See
-> `REMEDIATION-PLAN.md` Phase 0b.
+> `legacy-archive/REMEDIATION-PLAN.md` Phase 0b.
 
 ## Fuzzer
 
@@ -329,7 +329,7 @@ the default and once with `--encoding`, and only the flagged half is declared
   KOI8-R disagree about nearly every byte above `0x80` and both are valid
   CP1252, so a wrong guess between them is not a small error — which is the
   argument for the user naming the encoding rather than for the tool guessing
-  harder. See `REMEDIATION-PLAN.md` for why the guessing is a separate project.
+  harder. See `legacy-archive/REMEDIATION-PLAN.md` for why the guessing is a separate project.
 
   Declaring these `NOGOLDEN` was the first attempt and the corpus runner
   rejected it: it asserts that a declared divergence actually diverges, and
@@ -394,7 +394,7 @@ knowing before trusting a green run:
 - **It generates no non-ASCII.** `fuzz.py`'s `sanitise()` rewrites every
   character `>= 0x80` to `?`, so all fuzz cases are ASCII by construction.
 
-The tiers and the reasoning are in `REMEDIATION-PLAN.md`, "Compatibility policy".
+The tiers and the reasoning are in `legacy-archive/REMEDIATION-PLAN.md`, "Compatibility policy".
 The non-Tier-1 oracles — the author's goldens, the property suite
 (`tests/proptest.py`) and the allocation-budget suite (`tests/alloctest.rs`) that
 do not reference Perl at all — are P12 and are implemented (`make proptest`,

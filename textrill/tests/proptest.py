@@ -8,7 +8,7 @@ cannot answer two questions this file can:
   * Is any of the *non-ASCII* behaviour correct? The reference is broken on
     genuine UTF-8 input (it decodes bytes as Latin-1), so a byte diff there
     reports a Perl bug, not a port bug. See "Compatibility policy" in
-    REMEDIATION-PLAN.md.
+    the retired remediation plan's "Compatibility policy" section.
   * Does any output satisfy the guarantees a standalone tool owes its user,
     regardless of what the reference does? Content preservation and
     well-formedness are such guarantees.
@@ -177,7 +177,7 @@ XML_ARGS = [
 #
 # A8: --title and --style_url are interpolated into the document unescaped, so
 # an `&` in a stylesheet URL produces XML no parser will accept. Recorded in
-# REMEDIATION-PLAN.md as A8; delete these two lines when it is fixed.
+# the retired remediation plan's addendum as A8; kept for provenance.
 KNOWN_OPEN_XML_ARGS = {
     # A8 is fixed: --title and --style_url are escaped on the way into the
     # document (`chars::escape_attr`), so `& < > "` cannot produce a document

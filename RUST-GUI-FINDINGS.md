@@ -1,10 +1,10 @@
 # Rust GUI toolkit findings and development sequencing
 
 Status: findings recorded 2026-10-02; status reviewed 2026-10-06. Background
-document — see `DOCS.md` for the register and what is authoritative.
-Companion to `/home/vicpu/build/REMEDIATION-PLAN.md`. The feature-gap survey it
-used to name as a companion is now archived at
-`legacy-archive/TOOL-SURVEY.md`; its feature matrix had gone stale.
+document for the native GUI — see `DOCS.md` for the register and what is
+authoritative. The remediation plan this used to name as a companion is retired
+and lives at `legacy-archive/REMEDIATION-PLAN.md`; the feature-gap survey is
+also archived, its matrix having gone stale.
 
 This document exists because the Phase 6 native GUI rewrite stalled on a
 toolkit choice that looked settled. The cost was not the code — it was the

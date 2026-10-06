@@ -44,7 +44,7 @@ FUZZ_JOBS ?= 8
 # other's evidence -- see fuzz.py --fail-dir.
 FUZZ_FAILDIR ?= $(RS)/tests/corpus/fuzz-fail
 
-.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale musl corpus-musl clean
+.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale musl corpus-musl examples clean
 
 all: verify
 
@@ -141,6 +141,42 @@ alloctest: build
 
 corpus: build
 	cd $(RS) && ./tests/corpus/run.sh
+
+# --- real-document smoke run -------------------------------------------------
+# The corpus and fuzzer both use short synthetic inputs, because a differential
+# harness needs inputs whose expected output is known. That leaves the opposite
+# question unanswered: does the tool hold up on a document a person actually
+# wrote? `examples/` holds such documents -- plain prose, no markup language,
+# nothing that announces its structure.
+#
+# examples/homer.txt is the Project Gutenberg Odyssey: 37 KB of running prose
+# whose section titles ("PREFACE TO FIRST EDITION", "BOOK I." .. "BOOK XXIV.")
+# are set in capitals with no underline and no markup at all. Nothing in the
+# file tells a converter the structure is there. This target reports what the
+# engine recovered, so a regression in layout inference shows up as a changed
+# count rather than as a shrug.
+#
+# This target does not compare against anything. There is no oracle for "did you
+# read this document the way a person would"; the counts below are the record.
+EXAMPLES_DIR ?= examples
+
+examples: build
+	@rc=0; \
+	for f in $(EXAMPLES_DIR)/*.txt; do \
+	  [ -e "$$f" ] || { echo "no examples in $(EXAMPLES_DIR)/"; exit 1; }; \
+	  out=$$(mktemp); \
+	  $(RELEASE_BIN) --infile "$$f" --outfile "$$out" || { \
+	    echo "FAIL  $$(basename $$f): converter exited non-zero"; rc=1; rm -f "$$out"; continue; }; \
+	  bytes=$$(wc -c < "$$out"); \
+	  h=$$(grep -coE '<h[1-6]' "$$out" || true); \
+	  p=$$(grep -coE '<p>' "$$out" || true); \
+	  st=$$(grep -coE '<strong>' "$$out" || true); \
+	  br=$$(grep -coE '<br' "$$out" || true); \
+	  printf '%-22s %8s B  h=%-4s p=%-4s strong=%-4s br=%s\n' \
+	    "$$(basename "$$f")" "$$bytes" "$$h" "$$p" "$$st" "$$br"; \
+	  rm -f "$$out"; \
+	done; \
+	exit $$rc
 
 # Each seed's exit status must reach make. This target used to end the fuzz.py
 # invocation in `| tail -1` to print just the summary line, and a pipeline
@@ -273,7 +309,7 @@ ref-large:
 # Remove the derived reference. `make clean` leaves it alone on purpose: it is
 # 1 MB of extracted Perl, it takes one `make ref` to rebuild, and deleting it on
 # every clean is a good way to make the gate mysteriously unavailable.
-# --- Flatpak packaging (draft; see REMEDIATION-PLAN.md) ------------------------
+# --- Flatpak packaging (draft; see docs/PACKAGING.md) ---------------------------
 
 # Generates packaging/cargo-sources.json from Cargo.lock, which the Flatpak
 # manifest's two modules both consume. The file is generated rather than

@@ -41,7 +41,7 @@ What is **not** done yet:
 The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`; the
 earlier Python/PySide6 front end is retired and archived under `legacy-archive/`.
 Performance is no longer a gap: the P6 link-pass fix puts the port ahead of the
-Perl original on the link-dense benchmark (see `../REMEDIATION-PLAN.md`, P6).
+Perl original on the link-dense benchmark (see `../legacy-archive/REMEDIATION-PLAN.md`, P6).
 
 
 ## Option files
@@ -417,7 +417,7 @@ Known differences:
   output are handled correctly here. These are marked in the corpus README.
 
 The full audit trail of what was found and fixed is in
-`../REMEDIATION-PLAN.md`.
+`../legacy-archive/REMEDIATION-PLAN.md`.
 
 ## Licence
 
