@@ -13,7 +13,7 @@ are the state at the date they were written and are kept as that record, not
 corrected in place.
 
 **Progress is recorded in §0.1 below. Done: P1–P6, P7, P8–P11, P12, P13,
-P14–P19, P21–P23, P5.1–P5.5, E1–E3, A1, A1b, A2–A11. P6's gap was not the two
+P14–P19, P21–P23, P5.1–P5.5, E1–E3, A1, A1b, A2–A12. P6's gap was not the two
 prescribed fixes (worth ~0%): it
 was a prefilter that silently did nothing for every `\b`-wrapped dictionary
 rule, because the translated pattern carries look-around that `regex-syntax`
@@ -1938,7 +1938,7 @@ considering once the above is solid, informed by the survey in
    `--prepend_file`. `{{textrill:head}}` split the `<head>` contents out of
    `do_file_start` into `build_head` with no byte change, and the generated TOC
    is now returned separately from the sectioned body so a template can place
-   it. Distinct from the citation/glossary work, which stays deferred (see the
+   it. Distinct from the citation/glossary work, which is separate work (see the
    notes policy in FINDINGS.md §2).
    **Citations and glossary (2026-10-04):** now **implemented**, as
    `--citations` and `--glossary`, both **opt-in and default-off**, triggered
@@ -2383,7 +2383,7 @@ fixture result mean anything. So: land P1 and P2, then this addendum's Phase A,
 then resume the main phases. A1 in particular is worthless to attempt before
 A4's diagnostics exist, because right now the failure is invisible in the GUI.
 
-Items are numbered `A1`–`A11` so they do not collide with `P1`–`P11`, which are
+Items are numbered `A1`–`A12` so they do not collide with `P1`–`P11`, which are
 referenced from `TOOL-SURVEY.md` and must not be renumbered.
 
 | Addendum | Finding | Severity | Touches |
@@ -3281,67 +3281,7 @@ one `id="note-ref-a"` and one `id="note-a"`.
 - Not a bibliography processor (citeproc): inline references plus a list, nothing
   more.
 
-### A12. A document can inject an attribute into a tag the engine generated
-
-Found while auditing the decision to omit `rel="noopener noreferrer"` from the
-citation/glossary links, when the question asked was the broader one: *can a
-document subvert a generated link at all?* It can, and not through the notes
-code. Severity High, and higher than A11's, because unlike A11 it needs no
-`javascript:` URL and no cooperation from any option: the default
-`--make_links` is enough.
-
-**The gap.** The engine escapes `&`, `<` and `>` in document text. It does not
-escape `"`, which is correct for prose — a double quote is a printable character
-and never needs escaping in running text. But the autolinker writes what it
-captures into `HREF="$1"`, and four built-in rules captured `\S+`, which
-admits `"`:
-
-- `/<URL:\s*(\S+?)\s*>/` (`links.rs`)
-- `/<(http:\S+?)\s*>/`
-- `|ftp(\.[\w\@:-]+)+/\S+|`
-- `|www(\.[\w\@:-]+)+/\S+|`
-
-So a document containing
-
-```
-<URL:x"onmouseover="alert(1)>
-```
-
-converted to
-
-```html
-<a href="x"onmouseover="alert(1)">x"onmouseover="alert(1)</a>
-```
-
-A live event handler on a tag the engine emitted. Hover the link and it runs in
-the origin serving the converted document. `target="..."` works the same way,
-which is the direct answer to the `noopener` question: the reason that attribute
-is absent is not only that no link opens a new context, it is that a document
-could not add one — until this fix it could.
-
-**Why A11 did not catch it.** The scheme scrubber inspects the *value* of an
-`href`. Here the value is `x`, which is a legal relative reference and passes.
-The damage is in the attribute *syntax* around the value, which no amount of
-scheme checking looks at. The lesson recorded for the next pass: a URL policy
-must constrain what may appear in an attribute value, not only judge the value
-it finds.
-
-**Fix.** The four captures now exclude `"` (`[^\s"]+`). Chosen over escaping
-the expanded value because it changes output only in the case that was a
-vulnerability, so every legitimate URL stays byte-identical and the corpus and
-33 goldens still pass unchanged.
-
-**Not a fix, and recorded as such:** a `-h` link-dictionary rule may still emit
-whatever attributes it likes. That is operator input, not document input, so it
-is out of this threat model — but it does mean `rel="noopener noreferrer"`
-remains the operator's responsibility if they write `target=` by hand.
-
-**Guard.** `tests/urlschemetest.rs` parses every generated `<a …>` tag across
-ten injection payloads and eight option combinations, and asserts no attribute
-is an event handler and none is `target`. Reverting the `\S` fix makes it fail,
-which is the only evidence a test like that is worth anything.
-
-### A11. A document can write a live `javascript:` href into its own output
+### A11. A document can write a live `javascript:`/`data:` href into its own output
 
 Found while writing the security-meta design note below, rather than by the
 attack pass — the plan said "a boundary condition to enforce *if/when expanding
@@ -3400,8 +3340,70 @@ Three decisions that were not obvious:
 `url_scheme` is declared `differential must fail:` for the same reason
 `opt_injection` is under A8 — the reference is the defect, so the port *must*
 diverge and the comparison cannot be the oracle. The real oracle is
-`tests/urlschemetest.rs` (20 cases). Worth recording that `ci_dict` broke on the
+`tests/urlschemetest.rs` (22 cases). Worth recording that `ci_dict` broke on the
 first cut of this, which is what forced the denylist decision above.
+
+### A12. A document can inject an attribute into an anchor the engine generated
+
+Found while auditing the decision to omit `rel="noopener noreferrer"` from the
+citation/glossary links, when the question asked was the broader one: *can a
+document subvert a generated link at all?* It can, and not through the notes
+code. Severity High, and higher than A11's, because unlike A11 it needs no
+`javascript:` URL and no cooperation from any option: the default
+`--make_links` is enough.
+
+**The gap.** The engine escapes `&`, `<` and `>` in document text. It does not
+escape `"`, which is correct for prose — a double quote is a printable character
+and never needs escaping in running text. But the autolinker writes what it
+captures into `HREF="$1"`, and four built-in rules captured `\S+`, which
+admits `"`:
+
+- `/<URL:\s*(\S+?)\s*>/` (`links.rs`)
+- `/<(http:\S+?)\s*>/`
+- `|ftp(\.[\w\@:-]+)+/\S+|`
+- `|www(\.[\w\@:-]+)+/\S+|`
+
+So a document containing
+
+```
+<URL:x"onmouseover="alert(1)>
+```
+
+converted to
+
+```html
+<a href="x"onmouseover="alert(1)">x"onmouseover="alert(1)</a>
+```
+
+A live event handler on a tag the engine emitted. Hover the link and it runs in
+the origin serving the converted document. `target="..."` works the same way,
+which is the direct answer to the `noopener` question: the reason that attribute
+is absent is not only that no link opens a new context, it is that a document
+could not add one — until this fix it could.
+
+**Why A11 did not catch it.** The scheme scrubber inspects the *value* of an
+`href`. Here the value is `x`, which is a legal relative reference and passes.
+The damage is in the attribute *syntax* around the value, which no amount of
+scheme checking looks at. The lesson recorded for the next pass: a URL policy
+must constrain what may appear in an attribute value, not only judge the value
+it finds.
+
+**Fix.** The four captures now exclude `"` (`[^\s"]+`). Chosen over escaping
+the expanded value because it changes output only in the case that was a
+vulnerability, so every legitimate URL stays byte-identical and the corpus and
+33 goldens still pass unchanged.
+
+**Not a fix, and recorded as such:** a `-h` link-dictionary rule may still emit
+whatever attributes it likes. That is operator input, not document input, so it
+is out of this threat model — but it does mean `rel="noopener noreferrer"`
+remains the operator's responsibility if they write `target=` by hand.
+
+**Guard.** `tests/urlschemetest.rs` parses the attributes of every generated
+`<a …>` tag and asserts that none is an event handler and none is `target`.
+The ten injection payloads are converted with the default `--make_links`; the
+no-`target` half is then checked again across eight option combinations, one of
+them turning on every flag at once. Reverting the `\S` fix makes the first fail,
+which is the only evidence a test like that is worth anything.
 
 ### Link integrity — investigated 2026-10-04, one defect found and fixed
 
@@ -3423,8 +3425,8 @@ so none passes `--toc`, `--section` or `--chunk` — those are Phase 5 additions
 with no upstream equivalent to diff against. Running a link checker over the
 whole corpus output finds **zero** engine-generated links. The code that invents
 `href`s and the `id`s they point at was the least-differentially-covered part of
-the output, resting on six unit tests in `section.rs`.
-`tests/linkintegrity.rs` is the fix: 12 adversarial documents crossed with the
+the output, resting on ten unit tests in `section.rs`.
+`tests/linkintegrity.rs` is the fix: 10 adversarial documents crossed with the
 option sets that change link structure, single-file and chunked, asserting that
 every generated internal reference resolves, that ids are unique per document
 (duplicate ids do not break a link — the browser jumps to the first match — so
@@ -3463,9 +3465,11 @@ string, so a write failure read `unable to open out.html,: ...`.
 
 ### Security meta — design (2026-10-04, boundary notes)
 
-**Status:** design-only. No code change yet.
+**Status:** design notes, kept current. The autolinking boundary below is
+enforced as A11; the remaining boundaries are recorded here as they are
+settled.
 
-- **Autolinking boundary: now enforced, as A11.** The note below originally said
+- **Autolinking boundary: now enforced, as A11.** This note originally said
   this was "a boundary condition to enforce if/when expanding autolinking", but
   the existing `--make_links` already met the condition and a document could
   already write a live `javascript:` href into its own output. `src/urlscheme.rs`

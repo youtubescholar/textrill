@@ -510,5 +510,5 @@ accounts for 50 of them). No source file was modified.
 For current numbers see `REMEDIATION-PLAN.md` §0, which had reached 45/45 Rust
 tests and 45/45 GUI tests by 2026-10-01.
 
-The remediation plan for all of the above is the A1–A10 addendum at the end of
+The remediation plan for all of the above is the A1–A12 addendum at the end of
 `REMEDIATION-PLAN.md`.
