@@ -3504,6 +3504,39 @@ differential oracle, and it treated "never passed on the command line" as
 is the only category that actually means nothing was checked. The number that
 survives checking is 2, not 34.
 
+### Flatpak packaging — manifest drafted 2026-10-06
+
+`packaging/io.github.example.Textrill.yml` now exists, with `packaging/
+rust-stable.sh` and a `make cargo-sources` target. It parses, and the module
+order is right — the engine builds first because `textrill-gui-rs` depends on
+`../textrill` by path — but **it is not buildable as committed**, for two reasons
+that are owed decisions rather than defects:
+
+* **The app-id is a placeholder.** `io.github.example.Textrill`. `example` is
+  deliberately not a real owner so that it cannot be shipped by accident. The
+  real id is `io.github.<owner>.Textrill`, and `<owner>` is exactly the account in
+  the `repository = "https://github.com/<you>/textrill"` TODO carried in both
+  `textrill/Cargo.toml` and `textrill-gui-rs/Cargo.toml`. Substituting it means
+  changing three places at once — both Cargo.toml files and the manifest filename.
+* **`cargo-sources.json` does not exist.** Both modules consume it. It is
+  generated rather than committed because it is vendored crate metadata that only
+  has to agree with one lockfile, and a stale copy of it is a build failure nobody
+  can read. `make cargo-sources` produces it, and refuses to pretend otherwise
+  when `flatpak-cargo-generator` is missing — which it is on this host, where
+  `flatpak` and `flatpak-builder` are both present.
+
+The vendoring alternative is still undecided. The Flatpak design note above
+prefers offline/vendored dependencies, and `cargo vendor` removes the generator
+dependency entirely at the cost of a large vendored tree. One or the other has to
+be chosen before the first real build.
+
+**Two figures in the Phase 6 tables are historical, not current**, and are left
+that way deliberately because they were accurate at the toolkit decision: the
+five "kept" engine files were 5,644 lines then and are 7,701 now, and the retired
+Python shell was 1,365 lines and is 1,558. A reader comparing them against
+`wc -l` today will think the tables are wrong; they are dated numbers without a
+date. The dated gate figures at the head of this file are the pattern that works.
+
 ### Link integrity — investigated 2026-10-04, one defect found and fixed
 
 Asked whether the links textrill *generates* actually work, given that A11 had

@@ -1,0 +1,100 @@
+# Flatpak manifest for textrill — DRAFT, not buildable as committed.
+#
+# The app-id below is a PLACEHOLDER, not a decision. `example` is deliberately
+# not a real owner: the real id follows from the GitHub account named in the
+# `repository = "https://github.com/<you>/textrill"` TODO in `textrill/Cargo.toml`
+# and `textrill-gui-rs/Cargo.toml`, so the id is `io.github.<owner>.Textrill`.
+# Substitute the owner in all three places at once (both Cargo.toml files and this
+# filename) or the manifest builds something nobody can install.
+#
+# Two things are unresolved and both are recorded in REMEDIATION-PLAN.md under
+# "Flatpak packaging — design":
+#
+#   1. The app-id, above. Blocked on the GitHub owner.
+#   2. `cargo-sources.json`, referenced by both modules below. It is generated,
+#      not committed, and generating it needs `flatpak-cargo-generator` (pip),
+#      which is not installed on this host. `make cargo-sources` does it.
+#
+# The plan prefers offline/vendored dependencies for reproducibility, and
+# `cargo vendor` would avoid the generator entirely at the cost of a large
+# vendored tree. That trade is not made here; pick one before the first build.
+#
+# The CLI stays independently distributable — this manifest installs it as well as
+# the GUI so the single artifact carries both, per the refined delivery goal.
+
+app-id: io.github.example.Textrill
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: textrill-gui
+
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=home
+  - --talk-name=org.freedesktop.portal.OpenURI
+
+modules:
+  # The rust-stable SDK extension is not in the 24.08 runtime's default SDK, and
+  # building egui against the SDK's own toolchain would pin a rustc the project
+  # does not otherwise require.
+  - name: rust-stable
+    buildsystem: simple
+    build-commands:
+      - install -d /usr/lib/sdk/rust-stable/bin
+      - ln -s rustc /usr/lib/sdk/rust-stable/bin/rustc
+      - ln -s cargo /usr/lib/sdk/rust-stable/bin/cargo
+    sources:
+      - type: file
+        path: rust-stable.sh
+        dest-filename: rust-stable.sh
+
+  # Engine first: textrill-gui-rs depends on it by path, so the CLI has to exist
+  # before the GUI module configures. Installed to /app/bin so the single artifact
+  # ships both, as P13's delivery goal requires.
+  - name: textrill
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --locked
+      - install -Dm755 target/release/textrill /app/bin/textrill
+    sources:
+      - type: dir
+        path: ..
+        skip:
+          - target
+          - ref
+          - legacy-archive
+          - template-research1
+          - tests
+          - packaging
+          - .git
+      - type: file
+        path: cargo-sources.json
+
+  - name: textrill-gui
+    buildsystem: simple
+    build-commands:
+      - cd textrill-gui-rs
+      - cargo build --release --locked
+      # The bundled fonts are loaded from a path relative to the executable, so
+      # they travel with the binary.
+      - install -Dm755 target/release/textrill-gui /app/bin/textrill-gui
+      - install -d /app/share/textrill/fonts
+      - cp -r assets/fonts/. /app/share/textrill/fonts/
+    sources:
+      # The repo root, not the crate directory: textrill-gui-rs depends on
+      # ../textrill by path, so the sibling has to be inside the module.
+      - type: dir
+        path: ..
+        skip:
+          - target
+          - ref
+          - legacy-archive
+          - template-research1
+          - tests
+          - packaging
+          - .git
+      - type: file
+        path: cargo-sources.json

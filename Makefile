@@ -273,6 +273,29 @@ ref-large:
 # Remove the derived reference. `make clean` leaves it alone on purpose: it is
 # 1 MB of extracted Perl, it takes one `make ref` to rebuild, and deleting it on
 # every clean is a good way to make the gate mysteriously unavailable.
+# --- Flatpak packaging (draft; see REMEDIATION-PLAN.md) ------------------------
+
+# Generates packaging/cargo-sources.json from Cargo.lock, which the Flatpak
+# manifest's two modules both consume. The file is generated rather than
+# committed because it is a few thousand lines of vendored crate metadata that
+# only has to agree with one lockfile, and a stale copy of it is a build failure
+# nobody can read. Requires flatpak-cargo-generator (pip), which is NOT installed
+# on this host; the app-id is also still a placeholder. Both are recorded in the
+# plan rather than papered over here.
+CARGO_SOURCES := packaging/cargo-sources.json
+
+.PHONY: cargo-sources
+cargo-sources:
+	@command -v flatpak-cargo-generator >/dev/null 2>&1 || \
+	  { echo "ERROR: flatpak-cargo-generator is not installed."; \
+	    echo "       pip install flatpak-cargo-generator"; \
+	    echo "       Or vendor instead: cargo vendor (see the plan's preference"; \
+	    echo "       note on offline dependencies)."; exit 1; }
+	@for crate in textrill textrill-gui-rs; do \
+	  flatpak-cargo-generator -o $(CARGO_SOURCES) $$crate/Cargo.lock; \
+	done
+	@echo "wrote $(CARGO_SOURCES)"
+
 distclean: clean
 	rm -rf "$(ROOT)/ref"
 
