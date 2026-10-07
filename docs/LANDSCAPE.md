@@ -76,9 +76,9 @@ Three capabilities, and the competition on each:
 
 | capability | textrill | nearest thing | gap |
 |---|---|---|---|
-| read unmarked text | yes, 65 options of layout inference | nothing active | **clear** |
+| read unmarked text | yes, 66 options of layout inference | nothing active | **clear** |
 | infer structure | setext, capitals, short lines, lists, rules, pre, tables, mail | txt2tags, needs underlining | real |
-| user templates | 7 slots, `{{textrill:name}}`, no variables | pandoc: 20+ writers, `-V` variables, `$if`, `$for`, partials | **large** |
+| user templates | 7 slots, `{{textrill:name}}`, `--var` parameters (4.1) | pandoc: 20+ writers, `-V` variables, `$if`, `$for`, partials | **medium** |
 
 The third row is where textrill is behind, and it is the row the user named.
 Measured directly:

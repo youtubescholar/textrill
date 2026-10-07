@@ -291,6 +291,9 @@ pub struct Options {
     /// (doctype, head and body included), so none of the engine prolog is
     /// emitted. Mutually exclusive with [`Options::template`]. Empty by default.
     pub document_template: String,
+    /// P5.5. Template parameters, in `--var` order, substituted verbatim for
+    /// `{{textrill:var:name}}` in the active template. Empty by default.
+    pub vars: Vec<(String, String)>,
     pub eight_bit_clean: bool,
     pub escape_html_chars: bool,
     pub explicit_headings: bool,
@@ -422,6 +425,7 @@ impl Default for Options {
                 .to_string(),
             template: String::new(),
             document_template: String::new(),
+            vars: Vec::new(),
             eight_bit_clean: false,
             escape_html_chars: true,
             explicit_headings: false,
@@ -664,7 +668,12 @@ impl Options {
             &self.document_template
         };
         let body = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-        crate::template::validate(&body)
+        let declared = self
+            .vars
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect::<Vec<_>>();
+        crate::template::validate(&body, &declared)
     }
 
     /// The options whose value is a regular expression supplied by the caller,

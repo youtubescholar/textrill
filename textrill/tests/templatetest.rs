@@ -305,3 +305,209 @@ fn the_legacy_template_alias_still_works_and_warns() {
         out.stderr
     );
 }
+
+// ---- 4.1: `--var name=value` -> `{{textrill:var:name}}` ----
+
+/// A declared var is substituted verbatim, in both template models, and the
+/// engine's own slots survive around it (nothing is squished by the insertion).
+#[test]
+fn var_slots_substitute_in_both_template_models() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let vars = [
+        "--var",
+        "title=A &amp; B",
+        "--var",
+        "year=2026",
+        "--var",
+        "by=A & One",
+    ];
+
+    let wrap = write_file(
+        &dir,
+        "wrap.html",
+        "<main class=\"page\">\n<h1 class=\"t\">{{textrill:var:title}}</h1>\n{{textrill:content}}<footer>\
+         {{textrill:var:by}}, {{textrill:var:year}}</footer>\n</main>",
+    );
+    let mut args: Vec<&str> = vec!["--body_template", &wrap];
+    args.extend(vars);
+    args.push(&input);
+    let out = run(&args);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("<h1 class=\"t\">A &amp; B</h1>"),
+        "value must be inserted verbatim, not re-escaped: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("<footer>A & One, 2026</footer>"),
+        "multiple vars, in template order: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("<body>"),
+        "engine prolog intact around a var frame:",
+    );
+
+    let doc = write_file(
+        &dir,
+        "doc.html",
+        "<!DOCTYPE html>\n<html>\n<head><title>{{textrill:var:title}}</title></head>\n\
+         <body>{{textrill:content}}</body>\n</html>",
+    );
+    let out = run(&["--document_template", &doc]
+        .into_iter()
+        .chain(vars)
+        .collect::<Vec<_>>());
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("<title>A &amp; B</title>"),
+        "document template var: {}",
+        out.stdout
+    );
+    assert_eq!(
+        out.stdout.lines().next().unwrap(),
+        "<!DOCTYPE html>",
+        "the document template is the whole page, var or not"
+    );
+}
+
+/// A var value that is (or contains) a block element is inserted literally,
+/// newlines and all: the engine does not reflow or re-indent it.
+#[test]
+fn var_value_is_inserted_literally_not_squished() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let block = "<aside class=\"note\">\n  <p>first line</p>\n  <p>second line</p>\n</aside>";
+    let template = write_file(
+        &dir,
+        "wrap.html",
+        "{{textrill:var:extra}}{{textrill:content}}",
+    );
+    let out = run(&[
+        "--body_template",
+        &template,
+        "--var",
+        &format!("extra={block}"),
+        &input,
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let expect = format!("{block}<p>Intro paragraph.");
+    assert!(
+        out.stdout.contains(&expect),
+        "the block must survive byte for byte, directly before the content: {}",
+        out.stdout
+    );
+}
+
+/// A value that itself looks like a slot token is not reinterpreted: the
+/// substitution is one pass, so a var cannot smuggle the engine's own slots in
+/// (no failure cascade), and a later real slot still substitutes.
+#[test]
+fn var_value_is_never_reinterpreted() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let template = write_file(
+        &dir,
+        "wrap.html",
+        "<p>{{textrill:var:payload}}</p>{{textrill:content}}",
+    );
+    let out = run(&[
+        "--body_template",
+        &template,
+        "--var",
+        "payload={{textrill:toc}}",
+        &input,
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("<p>{{textrill:toc}}</p>"),
+        "the inserted token must stay literal, not become a TOC: {}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("<h1>"),
+        "the real content slot after it must still substitute: {}",
+        out.stdout
+    );
+}
+
+/// An undeclared `{{textrill:var:name}}` is the same class of defect as an
+/// unknown slot: a hard error before any output, naming what is missing.
+#[test]
+fn undeclared_var_slot_is_a_hard_error() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+
+    let template = write_file(
+        &dir,
+        "wrap.html",
+        "{{textrill:var:nope}}{{textrill:content}}",
+    );
+    let out = run(&["--body_template", &template, &input]);
+    assert_eq!(out.code, 1);
+    assert!(out.stderr.contains("nope"), "{}", out.stderr);
+    assert!(out.stderr.contains("no --var"), "{}", out.stderr);
+    assert!(out.stdout.is_empty(), "no half-built page: {}", out.stdout);
+
+    let template = write_file(
+        &dir,
+        "wrap2.html",
+        "{{textrill:var:nope}}{{textrill:content}}",
+    );
+    let out = run(&["--body_template", &template, "--var", "author=x", &input]);
+    assert_eq!(out.code, 1);
+    assert!(out.stderr.contains("nope"), "{}", out.stderr);
+    assert!(
+        out.stderr.contains("author"),
+        "the message must list what *was* declared: {}",
+        out.stderr
+    );
+}
+
+/// The unknown-slot guard still stands for the wide family: `var` and `varx`
+/// are not slots and stay hard errors even when vars are declared.
+#[test]
+fn the_unknown_slot_guard_is_extended_not_loosened() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    for token in ["var", "varx", "vary"] {
+        let template = write_file(
+            &dir,
+            &format!("wrap-{token}.html"),
+            &format!("{{{{textrill:{token}}}}}{{{{textrill:content}}}}"),
+        );
+        let out = run(&["--body_template", &template, "--var", "author=x", &input]);
+        assert_eq!(out.code, 1, "{}: {token} must be refused", out.stderr);
+        assert!(
+            out.stderr.contains("unknown template slot"),
+            "{token}: {}",
+            out.stderr
+        );
+    }
+}
+
+/// `--var` is parsed eagerly: a missing `=` or an invalid name is a CLI error,
+/// not something discovered when a template later fails to load.
+#[test]
+fn malformed_var_arguments_are_rejected_up_front() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let template = write_file(&dir, "wrap.html", "{{textrill:content}}");
+
+    let out = run(&["--body_template", &template, "--var", "author", &input]);
+    assert_eq!(out.code, 1, "missing `=` must be refused");
+    assert!(
+        out.stderr.contains("name=value"),
+        "missing `=`: {}",
+        out.stderr
+    );
+
+    let out = run(&["--body_template", &template, "--var", "a b=x", &input]);
+    assert_eq!(out.code, 1, "name with a space must be refused");
+    assert!(out.stderr.contains("invalid name"), "{}", out.stderr);
+
+    let out = run(&["--body_template", &template, "--var", "=x", &input]);
+    assert_eq!(out.code, 1, "empty name must be refused");
+    assert!(out.stderr.contains("non-empty"), "{}", out.stderr);
+}

@@ -23,8 +23,8 @@ Early. `0.1.0` is the first release of the fork.
 What is **done**:
 
 - The conversion engine is byte-verified against the upstream reference across a
-  differential corpus of 60 cases and 33 upstream golden files.
-- 324 Rust tests, a fuzzer, and a 74-test native GUI suite.
+  differential corpus of 61 cases and 33 upstream golden files.
+- 338 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.
@@ -126,7 +126,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **65 options** with **122 accepted spellings** including short
+There are **66 options** with **123 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names and defaults are the upstream ones, unchanged, so a document
@@ -151,6 +151,7 @@ converts the same way under either tool. A few are worth calling out:
 | `--stream` | off | Read and write a paragraph at a time (UTF-8 input only) |
 | `--body_template` | none | Wrap the body in a template file (slots, see below); the legacy `--template` name still works |
 | `--document_template` | none | Use a whole-document template file |
+| `--var` | none | Template parameter `name=value`, filled into `{{textrill:var:name}}` (see below); repeat for several |
 | `--encoding` | `auto` | How to decode the input (see below) |
 
 The delimiter names are inherited from the Perl original and are not intuitive:
@@ -310,6 +311,44 @@ line reports a missing or malformed one before writing anything.
 
 Because a template is an `Options` value, it can be set once in
 `./.textrillrc`, so a project commits its template and points at it there.
+
+#### Parameters (`--var`)
+
+`--var name=value` (repeatable) binds `{{textrill:var:name}}` in the active
+template — the settings a page or a site build varies per run:
+
+```sh
+textrill --body_template wrap.html \
+  --var date="2026-10-07" \
+  --var author="A &amp; One" \
+  --var strapline="<span class=\"strapline\">draft</span>" \
+  chapter.txt
+```
+
+The rules are the strict end of the scale, on purpose:
+
+- **Verbatim, not re-escaped.** The value is inserted exactly as given, `&`
+  stays `&` and markup stays markup; you own any escaping. A value may carry
+  whole blocks (`<aside>…</aside>`) and they survive byte for byte, without
+  being reflowed or squished against the engine's own blocks.
+- **Declared only.** An undeclared `{{textrill:var:name}}` is a hard error that
+  names the missing variable and lists the declared ones, raised while the
+  template is validated — before any output bytes exist. There is no silent
+  empty, unlike Mustache's missing-var behaviour.
+- **Optional by choice.** An empty value (`--var name=`) is legal where a
+  parameter is genuinely blank: the slot contributes nothing and the
+  surrounding markup stands. Nothing invisible is emitted behind your back —
+  the token you wrote is where the value shows.
+- **No re-scan.** Substitution is one pass: a value that happens to contain
+  `{{textrill:toc}}` stays literal, so a parameter cannot smuggle the engine's
+  own slots in or cascade into them; a real slot after it still fills.
+- **Names** are letters, digits, `_` or `-`. The first `=` splits `name` from
+  `value`, so `--var k=a=b` binds `k` to `a=b`. A malformed `--var` (missing
+  `=`, empty name, bad name) is itself a command-line error.
+
+This is single-insertion templating, not a template language: no loops,
+conditionals or includes, and declared-variable errors surface at validation
+time rather than as blank output.
 
 ### Citations and glossary
 

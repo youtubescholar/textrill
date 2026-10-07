@@ -24,7 +24,7 @@ Structure is *inferred from layout*.
 That is the whole product, and it is a narrower thing than pandoc. It is also a
 thing pandoc does not do at all, which is measured in §5.
 
-The tool is 65 options (`textrill --help`), a dependency-free engine, a static
+The tool is 66 options (`textrill --help`), a dependency-free engine, a static
 `x86_64-unknown-linux-musl` binary, and a native GUI crate.
 
 ---
@@ -77,6 +77,7 @@ output.
 | `--stream` | constant memory: one paragraph in, one out |
 | `--body_template` | wraps the **body** in a fragment |
 | `--document_template` | wraps the **whole document** |
+| `--var name=value` | fills `{{textrill:var:name}}` in the active template |
 | `--link_only` | convert URLs and nothing else |
 | `--mailmode` | mail headers and quoted replies |
 
@@ -104,6 +105,17 @@ The namespace exists so a template can also carry another engine's tokens:
 
 survives byte for byte, verified. An unknown `textrill` slot is a hard error;
 every other `{{…}}` is passed through.
+
+`--var name=value` (repeatable) binds `{{textrill:var:name}}` in the active
+template — single-insertion parameterisation. Values are inserted verbatim
+(the author owns escaping, and whole blocks survive unsquished), an undeclared
+`{{textrill:var:name}}` is a hard validation error naming the missing variable
+(stricter than Mustache's silent empty, and surfaced before any output
+exists), an empty value is legal where a field is genuinely blank, and
+substitution is one pass so a value can never rescan into the engine's own
+slots. This is not a template language — no loops, conditionals, or includes —
+and the var family joins the fixed slot family without loosening the
+unknown-slot guard.
 
 **This is the part that matches the niche** — see §5.
 
@@ -314,7 +326,7 @@ but it must be visible.
 
 ```sh
 make examples                                  # the smoke run over examples/
-textrill --help                                # the 65-option surface
-cargo test --manifest-path textrill/Cargo.toml # 324 tests
-bash textrill/tests/corpus/run.sh              # 60 differential cases, 33 goldens
+textrill --help                                # the 66-option surface
+cargo test --manifest-path textrill/Cargo.toml # 338 tests
+bash textrill/tests/corpus/run.sh              # 61 differential cases, 33 goldens
 ```

@@ -3232,7 +3232,7 @@ impl Converter {
         if !glossary.is_empty() && !has_slot("glossary") {
             body.push_str(glossary);
         }
-        let slots = [
+        let mut slots = vec![
             ("content", body.as_str()),
             ("toc", toc),
             ("title", self.title_text.as_str()),
@@ -3241,6 +3241,18 @@ impl Converter {
             ("citations", citations),
             ("glossary", glossary),
         ];
+        // P5.5. User parameters extend the fixed set with `var:name` keys, owned by
+        // this frame so the borrows stay live through `apply`. The values go in
+        // verbatim, exactly as `--var` bound them.
+        let var_keys: Vec<String> = self
+            .opts
+            .vars
+            .iter()
+            .map(|(name, _)| format!("var:{name}"))
+            .collect();
+        for (i, (_, value)) in self.opts.vars.iter().enumerate() {
+            slots.push((var_keys[i].as_str(), value.as_str()));
+        }
         let filled = crate::template::apply(&self.template_text, &slots);
         if self.document_template {
             return filled;

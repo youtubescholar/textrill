@@ -100,7 +100,8 @@ pub const SPECS: &[Spec] = specs![
     Flag "Join words split across lines by a hyphen." ["unhyphenation", "unhyphenate"],
     Flag "Accepted for compatibility; the input is decoded as UTF-8 when possible." ["utf8"],
     Flag "Recognise Mosaic-style headers." ["use_mosaic_header", "mosaic", "mh"],
-    Flag "Honour the preformat start and end markers." ["use_preformat_marker", "preformat_marker", "pm"],
+Flag "Honour the preformat start and end markers." ["use_preformat_marker", "preformat_marker", "pm"],
+    StrArray "Template parameter `name=value`, substituted for {{textrill:var:name}} in the active template (P5.5); repeat for several." ["var"],
     Flag "Produce XHTML: lower-case tags, closed empty tags, XHTML doctype." ["xhtml"],
 ];
 
@@ -164,7 +165,7 @@ pub fn set_value(opts: &mut Options, name: &str, value: &str) -> Result<(), Stri
                 .map_err(|_| format!("Option {name} requires a number, got `{value}`"))?;
             set_int(opts, spec, n);
         }
-        Kind::StrArray => push_array(opts, spec, value),
+        Kind::StrArray => push_array(opts, spec, value)?,
         Kind::TableType => set_table_type(opts, value)?,
     }
     Ok(())
@@ -251,6 +252,12 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
         "use_preformat_marker" => opts.use_preformat_marker.to_string(),
         "xhtml" => opts.xhtml.to_string(),
         "custom_heading_regexp" => opts.custom_heading_regexp.join("\n"),
+        "var" => opts
+            .vars
+            .iter()
+            .map(|(n, v)| format!("{n}={v}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
         other => return Err(format!("Option `{other}` cannot be read back")),
     };
     Ok(v)
@@ -346,7 +353,7 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
                     Some(v) => v,
                     None => take_value(&mut it, name).map_err(&at)?,
                 };
-                push_array(opts, spec, &v);
+                push_array(opts, spec, &v).map_err(&at)?;
             }
             Kind::TableType => {
                 let v = match inline.take() {
@@ -630,16 +637,43 @@ pub fn set_int(opts: &mut Options, spec: &Spec, v: i64) {
     }
 }
 
-pub fn push_array(opts: &mut Options, spec: &Spec, v: &str) {
+pub fn push_array(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
     match spec.names[0] {
         "custom_heading_regexp" => opts.custom_heading_regexp.push(v.to_string()),
         "infile" => opts.infile.push(v.to_string()),
         "instring" => opts.instring.push(v.to_string()),
         "links_dictionaries" => opts.links_dictionaries.push(v.to_string()),
+        // P5.5. Eagerly parsed, like `--encoding`: a malformed `name=value` is a
+        // user error worth reporting on the spot, not a string to be discovered
+        // when a template is loaded. The value is taken verbatim, `=` and
+        // newlines included (a value may carry a block of markup), so
+        // `--var k=a=b` binds k to `a=b`. Like [`--infile`], one entry per
+        // occurrence; `get_value`/`set_value` round-trip the joined form.
+        "var" => {
+            if v.is_empty() {
+                return Ok(());
+            }
+            let (name, value) = v
+                .split_once('=')
+                .ok_or_else(|| format!("Option var requires name=value, got {v:?}"))?;
+            if name.is_empty() {
+                return Err("Option var requires a non-empty name before `=`".to_string());
+            }
+            if !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return Err(format!(
+                    "invalid name {name:?} for --var; use letters, digits, _ and -"
+                ));
+            }
+            opts.vars.push((name.to_string(), value.to_string()));
+        }
         other => {
             let _ = other;
         }
     }
+    Ok(())
 }
 
 /// Set one or more table types from their `TYPE=0/1` spelling.

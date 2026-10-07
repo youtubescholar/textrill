@@ -232,6 +232,44 @@ Gates: the `definitions` corpus case pins the emitted `<dl>` bytes and the
 sabotage was observed: with the term trigger disabled, the case fails with
 `ref : '<dl>'` / `mine: '<p>dpi:'`. `make verify` is green.
 
+### Item 4.1, resolved
+
+**`--var name=value` turns a fixed frame into something parameterisable.**
+Repeatable, it binds `{{textrill:var:name}}` in the active template: the
+settings a page or site build varies per run, as the homer.txt byline/date
+example in `OFFERING.md` §5.1 needs. The value is inserted **verbatim** — the
+author owns escaping, and a value that carries whole blocks (`<aside>…`)
+survives byte for byte, not reflowed or squished against the engine's own
+blocks. An **undeclared** `{{textrill:var:name}}` is a **hard error at
+validation**, naming the missing variable and listing the declared ones, before
+any output bytes exist — stricter than Mustache's silent empty, and the 4.4
+unknown-slot guard is extended, not loosened (`var`, `varx`, `vary` stay
+errors). An **empty value is legal** where a field is genuinely blank: the slot
+contributes nothing and the surrounding markup stands — nothing invisible is
+emitted behind the user's back; the token they wrote is where the value shows.
+Substitution is **one pass**: a value containing `{{textrill:toc}}` stays
+literal, so a parameter cannot smuggle the engine's own slots in or cascade
+into them.
+
+The name is letters, digits, `_` or `-`; the first `=` splits name from value
+(`--var k=a=b` binds `k` to `a=b`). `--var` is parsed eagerly like `--encoding`
+— a malformed one is a command-line error on the spot, not something a template
+loads as an afterthought. `get_value`/`set_value` round-trip the joined form on
+the `--infile` precedent, and setting the empty string is a no-op, so a front
+end can persist the unset state.
+
+Gates: `templatetest` asserts substitution in both template models, literal
+insertion of a multi-line block, no re-scan of an inserted value, the
+undeclared-name hard error (both with and without any `--var` declared), the
+4.4 guard surviving, and eager CLI rejection of malformed `--var`; `optionstest`
+asserts the `--var` round-trip and moves the counts 65 → 66 options and
+122 → 123 spellings. Two sabotages were observed: (1) with the var slots not
+pushed into `apply`, the substituted value test fails — `{{textrill:var:title}}`
+is emitted literal; (2) with `validate` accepting any `var:` prefix, the
+undeclared-name unit test and the `undeclared_var_slot_is_a_hard_error`
+integration test both fail — the run exits 0 with a literal token in the
+output. 4.4 stays green and `make verify` is green.
+
 ## Phase 3 — HTML5 by default
 
 XHTML 1.0 Strict is the Perl default and is wrong for a new tool in 2026. Emit
@@ -248,7 +286,7 @@ correct and is not what needs changing.
 
 | # | item | note |
 |---|---|---|
-| 4.1 | `--var name=value` → `{{textrill:var:name}}` | The single highest-value addition. Turns a fixed frame into something parameterisable. |
+| 4.1 | ~~`--var name=value` → `{{textrill:var:name}}`~~ **done (S3)** | The single highest-value addition. Turns a fixed frame into something parameterisable. |
 | 4.2 | Ship actual templates: article, book, manpage, slide, bare | Content, not machinery. This is the "templates people could use" the niche is named for. |
 | 4.3 | `{{textrill:if:name}}…{{textrill:end}}` | One template serving documents with and without a TOC. |
 | 4.4 | Unknown `textrill` slot stays an error; other engines' tokens still pass through | Existing behaviour. Do not regress it. |
@@ -379,7 +417,7 @@ original does it too".>
 |---|---|---|---|
 | S1 | ~~Phase 2.3 — `--template` vs `--document_template`~~ **done** | The surviving "fix what is wrong" items; still correct to do next | renamed: `--body_template` is the body wrap, the legacy `--template` warns; `optionstest` + `templatetest` assert it; verify green |
 | S2 | ~~Phase 2.4 — definition-list trigger~~ **done** | Same | documented, and pinned: the `definitions` corpus case (term trigger + `<p>` boundary) fails against the reference when the trigger breaks; verify green |
-| S3 | Phase 4.1 — `--var` | Highest user-visible value; OFFERING §5 row 2 | template tests extended for `{{textrill:var:name}}`; the 4.4 unknown-slot guard stays green |
+| S3 | ~~Phase 4.1 — `--var`~~ **done** | Highest user-visible value; OFFERING §5 row 2 | substitution + undeclared-name gate broken once (see "Item 4.1, resolved"); the 4.4 unknown-slot guard stays green |
 | S4 | Phase 4.2 — shipped templates | "templates people could use" | a conversion test per shipped template; 4.4 guard green |
 | S5 | Phase 3 — HTML5 default | A deliberate *option-default* divergence; the doctype interacts with the differential | precondition first: corpus and fuzz differentials pin the doctype explicitly on both sides (fuzz's `--xhtml`/`--no-xhtml` pair is optional per case — make it mandatory), and the HTML4 corpus asserts are exempted, not deleted; then flip the default; provenance asserts the HTML5 charset meta; sabotage — a default that reverts to XHTML must fail a gate |
 | S6 | Phase 5.0 — `--report` | Report-only instrument; prerequisite to any heading change | CLI test asserts the counts on stderr; they match what `make examples` reports |

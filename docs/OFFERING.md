@@ -18,15 +18,15 @@ Measured 2026-10-06, not described. This is the inventory the offer rests on.
 
 | Surface | State |
 |---|---|
-| CLI | 65 options (`textrill --help`), long spellings plus the reference's short aliases, `@file` groups |
+| CLI | 66 options (`textrill --help`), long spellings plus the reference's short aliases, `@file` groups |
 | Option files | `@file` < `~/.textrillrc` < `./.textrillrc` < command line; legacy `.txt2htmlrc`/`.txt2html.dict` read only when the textrill name is absent in the same directory |
 | Link dictionary | `--default_link_dict`, `links_dictionaries`, `.textrill.dict` |
-| Templates | `--body_template` (body wrap) and `--document_template` (whole document); 7 namespaced slots; an unknown `textrill:` slot is a hard error, every other `{{…}}` passes through untouched |
+| Templates | `--body_template` (body wrap) and `--document_template` (whole document); 7 namespaced slots; `--var name=value` fills `{{textrill:var:name}}` in the active template; an unknown `textrill:` slot is a hard error, every other `{{…}}` passes through untouched |
 | Output modes | one file, `--extract` (body only), `--section`, `--chunk`, `--toc`, `--number_headings`, `--citations`, `--glossary` |
 | Encoding | BOM → UTF-16 evidence → UTF-8 → CP1252, with explicit overrides for what cannot be detected |
 | GUI | `textrill-gui-rs`, native `egui`; an options panel over the engine's own options; settings at `$XDG_CONFIG_HOME/textrill-gui/textrill.conf` (QSettings-compatible, hand-editable) |
 | Binary | static `x86_64-unknown-linux-musl`, no runtime dependencies |
-| Checks | `make verify`: fmt, clippy, 324 engine tests, 74 GUI tests, proptest, alloctest, 60 differential cases, 33 goldens, 16 000 fuzz cases |
+| Checks | `make verify`: fmt, clippy, 338 engine tests, 74 GUI tests, proptest, alloctest, 61 differential cases, 33 goldens, 16 000 fuzz cases |
 | Packaging | Flatpak manifest drafted, deliberately unbuildable: the app-id needs a GitHub owner that does not exist yet |
 | Docs | the register in `DOCS.md`, `CAPABILITIES.md` (measured), `LANDSCAPE.md` (measured), `PLAN.md` (what is next) |
 
@@ -83,7 +83,7 @@ Everything in this table is re-measured by `make proof` and pinned in
 checked by hand:
 
 ```sh
-textrill --help | grep -cE '^    '                       # 65 options
+textrill --help | grep -cE '^    '                       # 66 options
 pandoc --list-input-formats                              # no plain, 43 total
 pandoc -f plain -t html examples/homer.txt               # rejected
 textrill --infile examples/homer.txt --outfile -         # 38 882 B, 64 p, 3 029 max
@@ -105,7 +105,7 @@ textrill --title "The Odyssey" --infile examples/homer.txt --outfile - \
 | P4–P8 | textrill on `examples/homer.txt` | 39 `<strong>`, 34 `<br/>`, 0 headings, 64 paragraphs, largest 3 029 chars, 38 882 B |
 | P9–P12 | pandoc, forced to markdown, same file | 0 `<strong>`, 0 `<br/>`, 62 paragraphs, largest 3 665 chars, 38 132 B |
 | P13–P15 | mechanism, small input | textrill keeps indented lines apart; pandoc joins them into one paragraph |
-| P16 | our own surface | 65 options |
+| P16 | our own surface | 66 options |
 | P17–P18 | our HTML into `pandoc -t epub` | exits 0; the result carries `application/epub+zip` |
 | P19 | our HTML into `pandoc -t docx` | 113 bold runs, 34 line breaks — the inference reached the far format |
 | P20 | our HTML into `pandoc -t markdown` | `**PREFACE TO FIRST EDITION**` — a heading nobody wrote survives |
@@ -150,12 +150,13 @@ item; this document's contribution is the order and the reason.
 | Order | Item | Why here |
 |---|---|---|
 | 1 | the proof (§3) | Positioning claims rot silently; this is now gated. |
-| 2 | `PLAN.md` Phase 4.1–4.2 — `--var` and a shipped template library | `LANDSCAPE.md` §3: a user's first impression of a converter is its templates, and we have seven fixed slots. The offer says "the user's own template governs the page"; today there are not enough templates for that to be true for someone who has none. |
-| 3 | `PLAN.md` Phase 5.0 — `--report`, the counts on stderr | The report-only instrument the plan already asks for, and the first thing a user whose `--toc` came out empty needs: *what did you see?* The counts exist only in `make examples` today; the CLI prints none. |
-| 4 | `PLAN.md` Phase 5 — headings in documents that have none | `homer.txt` yields no headings at all: 39 capitalised runs become `<strong>`, `--toc` lists nothing, `--chunk` writes one 38 882-byte file. This is the capability claim a reader will test first ("it found my chapter headings, or it did not"), and the plan's first measurement already landed: its candidate rule fires on 2 lines of that document, both signatures (Phase 5). Research before behaviour, as the plan requires. |
-| 5 | `PLAN.md` Phase 6 — packaging, blocked on the GitHub owner | A static binary is already buildable; an installable app is not. The owner decision is the same one that blocks `Cargo.toml` `repository` and the app-id, so it is one decision, not three. |
-| 6 | `PLAN.md` Phase 7 — grow `examples/` | One document is not evidence of trustworthiness on *your* document. The growth list is already written. |
-| 7 | Phase 4.3 — `{{textrill:if:…}}` | One template serving documents with and without a TOC. Valuable, and after the library exists rather than before it. |
+| 2 | `PLAN.md` Phase 4.1 — `--var name=value` | **Built (S3).** The single highest-value addition is delivered: a fixed frame is now parameterisable, `{{textrill:var:name}}` filled verbatim and strict on undeclared names. |
+| 3 | `PLAN.md` Phase 4.2 — a shipped template library | `LANDSCAPE.md` §3: a user's first impression of a converter is its templates, and we have seven fixed slots. The offer says "the user's own template governs the page"; today there are not enough templates for that to be true for someone who has none. |
+| 4 | `PLAN.md` Phase 5.0 — `--report`, the counts on stderr | The report-only instrument the plan already asks for, and the first thing a user whose `--toc` came out empty needs: *what did you see?* The counts exist only in `make examples` today; the CLI prints none. |
+| 5 | `PLAN.md` Phase 5 — headings in documents that have none | `homer.txt` yields no headings at all: 39 capitalised runs become `<strong>`, `--toc` lists nothing, `--chunk` writes one 38 882-byte file. This is the capability claim a reader will test first ("it found my chapter headings, or it did not"), and the plan's first measurement already landed: its candidate rule fires on 2 lines of that document, both signatures (Phase 5). Research before behaviour, as the plan requires. |
+| 6 | `PLAN.md` Phase 6 — packaging, blocked on the GitHub owner | A static binary is already buildable; an installable app is not. The owner decision is the same one that blocks `Cargo.toml` `repository` and the app-id, so it is one decision, not three. |
+| 7 | `PLAN.md` Phase 7 — grow `examples/` | One document is not evidence of trustworthiness on *your* document. The growth list is already written. |
+| 8 | Phase 4.3 — `{{textrill:if:…}}` | One template serving documents with and without a TOC. Valuable, and after the library exists rather than before it. |
 
 A reader meets the work in this order; it is not a second authority. The build
 order — which additionally schedules Phase 2.3–2.4 and Phase 3, and which runs
@@ -171,28 +172,27 @@ raw text. Measured 2026-10-06:
 
 **Works today.** `--document_template page.html --title "The Odyssey" --infile
 examples/homer.txt` fills both `{{textrill:title}}` and `{{textrill:content}}`
-with the converted body. `--extract` gives the body alone for dropping into an
-existing page. `-H <regexp>` takes the user's own heading convention, and
-`{{textrill:pager}}` renders the previous/next links.
+with the converted body. `--var byline=… --var date=… translation=…` now fills
+any further `{{textrill:var:name}}` slots the same way. `--extract` gives the
+body alone for dropping into an existing page. `-H <regexp>` takes the user's
+own heading convention, and `{{textrill:pager}}` renders the previous/next
+links.
 
 **Does not work yet, in the order a user meets it:**
 
-1. *Only `--title` feeds a slot.* Their byline, date, subtitle and edition have
-   nowhere to come from — that is `--var` (Phase 4.1), and it is why item 2 is
-   where it is.
-2. *`--toc` emits zero items and `--chunk` emits one 38 882-byte file*, because
+1. *`--toc` emits zero items and `--chunk` emits one 38 882-byte file*, because
    no line in the document becomes a heading. And nothing says so: the CLI
    prints no inference counts at all, so an empty table of contents looks like
-   a working feature rather than a report of what was seen. That is item 3,
-   and it has to arrive before item 4 changes any behaviour.
-3. *`-H` only fires on a line that starts a paragraph.* Measured: `-H 'PREFACE'`
+   a working feature rather than a report of what was seen. That is item 2,
+   and it has to arrive before item 3 changes any behaviour.
+2. *`-H` only fires on a line that starts a paragraph.* Measured: `-H 'PREFACE'`
    → 2 headings, `-H 'THE ODYSSEY'` → 1, `-H 'BOOK I'` → 0, because in the body
    `BOOK I` is the second line of a three-line title block and in the contents
    list it is one line of twenty-four consecutive ones. No regexp can pick out
    a line the rule will not consider. The help text does not say this, and it
    is the first thing a user will hit when they try to teach the engine their
    document's convention.
-4. *Phase 5's candidate rule would not fire here either.* "A short all-caps
+3. *Phase 5's candidate rule would not fire here either.* "A short all-caps
    line alone between blank lines" matches exactly 2 lines of this document —
    `S. BUTLER.` and `HENRY FESTING JONES.`, both signatures — and none of the
    three real section starts, because the title block is three consecutive
@@ -203,7 +203,7 @@ existing page. `-H <regexp>` takes the user's own heading convention, and
 So the honest answer for a `homer.txt` today is: the template path works, the
 TOC and chunking do not, `-H` covers documents whose section titles start a
 paragraph, and everything else waits on the measurement the plan already
-requires. Items 1–3 above are what close it.
+requires. Items 1–2 above are what close it.
 
 Nothing else is missing for the offer to be honest. Multi-format output is
 excluded by `PLAN.md` § Not doing, and §7 says why that is a position rather
@@ -240,7 +240,7 @@ stop. The honest list:
 | pandoc | textrill |
 |---|---|
 | 64 output formats: docx, epub, pdf, LaTeX, man, … | HTML only |
-| a real template language: `-V` variables, `$if`, `$for`, partials | 7 slots, no variables (Phase 4.1–4.3 closes part of this) |
+| a real template language: `-V` variables, `$if`, `$for`, partials | 7 slots + `--var` parameters, no loops or conditionals (4.2–4.3 closes part of this) |
 | bibliography and citation processing (CSL, biblatex) | `--citations` collects markers into endnotes; no bibliography engine |
 | filters (Lua, JSON) and a documented AST | no AST surface at all |
 | dozens of contributors, a decade of releases | one maintainer |
