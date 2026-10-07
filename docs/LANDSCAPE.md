@@ -76,9 +76,9 @@ Three capabilities, and the competition on each:
 
 | capability | textrill | nearest thing | gap |
 |---|---|---|---|
-| read unmarked text | yes, 66 options of layout inference | nothing active | **clear** |
+| read unmarked text | yes, 67 options of layout inference | nothing active | **clear** |
 | infer structure | setext, capitals, short lines, lists, rules, pre, tables, mail | txt2tags, needs underlining | real |
-| user templates | 7 slots, `{{textrill:name}}`, `--var` parameters (4.1) | pandoc: 20+ writers, `-V` variables, `$if`, `$for`, partials | **medium** |
+| user templates | 7 slots, `--var` parameters (4.1), 5 shipped templates incl. `--template_library` (4.2) | pandoc: 20+ writers, `-V` variables, `$if`, `$for`, partials | **medium** |
 
 The third row is where textrill is behind, and it is the row the user named.
 Measured directly:
@@ -89,7 +89,8 @@ $ pandoc --template=ptpl.html -V author="S. Butler" -V title="The Odyssey" p.md
 ```
 
 pandoc injects arbitrary user variables into the template and can branch on
-them. textrill has seven fixed slots and no way to pass a value in:
+them. The founding measurement of textrill was seven fixed slots and no way to
+pass a value in:
 
 ```
 {{textrill:content}} {{textrill:toc}} {{textrill:title}} {{textrill:head}}
@@ -97,9 +98,11 @@ them. textrill has seven fixed slots and no way to pass a value in:
 ```
 
 So the honest position is: textrill is **ahead** on the thing that is hard and
-unusual (reading prose), and **behind** on the thing that is common and
-expected (configurable output). A user's first impression of any converter is
-its templates, so the second row is the one that will be judged first.
+unusual (reading prose). On configurable output it started **behind**, and 4.1
+(`--var name=value`, filled into `{{textrill:var:name}}`) and 4.2 (the five
+shipped templates) closed the shipping gap — a user's first impression of any
+converter is its templates, and there are now actual ones to start from. What
+remains is the row's non-fixed part, the conditional (see §4 item 3).
 
 ## 4. What this implies
 
@@ -109,12 +112,14 @@ which is what lets a template carry Vue or Jinja syntax for a later pass.
 
 What is missing is narrower and more valuable:
 
-1. **User variables.** `--var name=value`, surfaced as `{{textrill:var:name}}`.
-   That alone turns the template from a fixed frame into something a person can
-   parameterise, at a fraction of the complexity of a template language.
-2. **A shipped template library.** Not a language — actual templates: article,
-   book, manpage, slide, plain. This is the "templates people could use" the
-   niche is named for, and it is content, not machinery.
+1. ~~**User variables.**~~ **Shipped (S3).** `--var name=value`, surfaced as
+   `{{textrill:var:name}}`. That alone turns the template from a fixed frame
+   into something a person can parameterise, at a fraction of the complexity
+   of a template language.
+2. ~~**A shipped template library.**~~ **Shipped (S4).** Not a language —
+   actual templates: article, book, manpage, slide, bare. This is the
+   "templates people could use" the niche is named for, and it is content,
+   not machinery.
 3. **Conditional blocks** — `{{textrill:if:toc}}…{{textrill:end}}` — so one
    template serves documents with and without a TOC.
 

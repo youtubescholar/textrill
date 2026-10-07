@@ -24,7 +24,7 @@ What is **done**:
 
 - The conversion engine is byte-verified against the upstream reference across a
   differential corpus of 61 cases and 33 upstream golden files.
-- 338 Rust tests, a fuzzer, and a 74-test native GUI suite.
+- 346 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.
@@ -126,7 +126,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **66 options** with **123 accepted spellings** including short
+There are **67 options** with **124 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names and defaults are the upstream ones, unchanged, so a document
@@ -151,6 +151,7 @@ converts the same way under either tool. A few are worth calling out:
 | `--stream` | off | Read and write a paragraph at a time (UTF-8 input only) |
 | `--body_template` | none | Wrap the body in a template file (slots, see below); the legacy `--template` name still works |
 | `--document_template` | none | Use a whole-document template file |
+| `--template_library` | none | Use a shipped template by name: `article`, `book`, `manpage`, `slide` or `bare` |
 | `--var` | none | Template parameter `name=value`, filled into `{{textrill:var:name}}` (see below); repeat for several |
 | `--encoding` | `auto` | How to decode the input (see below) |
 
@@ -311,6 +312,32 @@ line reports a missing or malformed one before writing anything.
 
 Because a template is an `Options` value, it can be set once in
 `./.textrillrc`, so a project commits its template and points at it there.
+
+#### Shipped templates (`--template_library`)
+
+Five templates ship with the tool, embedded in the binary and present as plain
+files under `templates/` in the source tree, so you can use one as-is or copy
+it and make it your own:
+
+| Name | Model | What it is |
+| --- | --- | --- |
+| `article` | whole document | A single-document page: header with title, TOC, body, notes |
+| `book` | whole document | Front matter with title, TOC, then the body as chapters |
+| `manpage` | whole document | A man-style page: title, body, glossaries |
+| `slide` | whole document | A deck skeleton: title, TOC, body as slides (`--section` gives one slide per heading) |
+| `bare` | body wrapper | Just `{{textrill:content}}`: converts byte-identically to no template at all |
+
+```sh
+textrill --template_library article --title "T. H. White" chapter.txt
+```
+
+Each shipped template uses **only the fixed slots** — never a
+`{{textrill:var:...}}` slot — so it converts with zero required arguments and
+produces no silent-empty frames. A template that needs a byline, date or the
+like is meant to be copied and given `{{textrill:var:name}}` slots of its own
+(that is what `--var` is for). `--template_library` is mutually exclusive with
+`--body_template` and `--document_template`, and an unknown name is an error
+that lists the library.
 
 #### Parameters (`--var`)
 

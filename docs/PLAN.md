@@ -270,6 +270,47 @@ undeclared-name unit test and the `undeclared_var_slot_is_a_hard_error`
 integration test both fail — the run exits 0 with a literal token in the
 output. 4.4 stays green and `make verify` is green.
 
+### Item 4.2, resolved
+
+**Five actual templates ship with the tool, embedded in the binary.** `article`,
+`book`, `manpage`, `slide` and `bare` are plain HTML files under
+`textrill/templates/`, compiled into the static binary with `include_str!`, so
+the library works from any directory with no install step and a user can still
+read or copy any of them. `--template_library NAME` selects one; each name has
+an intrinsic model — `article`, `book`, `manpage` and `slide` own the whole
+document, `bare` wraps only the body and converts byte-identically to no
+template at all — and the engine routes it exactly as the matching
+`--body_template`/`--document_template` file would, so validation, the model
+refusals, and the 4.4 guard are inherited, not re-implemented.
+
+Two decisions recorded, because both look like compromises and neither is:
+
+- **Fixed slots only, never `{{textrill:var:...}}`.** A shipped template with a
+  var slot would force the user to `--var` it or see the S3 hard error on a
+  first run; a var that silently emptied would be exactly the invisible frame
+  S3 refuses to ship. Each template converts with zero required arguments and
+  shows only what the document produces. The intended path to a byline or date
+  is to copy the template and add `{{textrill:var:name}}` slots of your own —
+  the library is a starting point, not a finish line.
+- **`bare` is byte-identical to no template.** It documents the wrapper model
+  and pins a real floor, rather than adding a cosmetic wrapper that would make
+  "templated" and "untemplated" diverge for no structural reason.
+
+Gates: the library's own unit tests validate every shipped template against
+the engine (`template::validate` passes with zero declared vars — so no unknown
+slot, `content` present, and any var slot would fail here) and assert the
+documented five-with-models; `templatetest` converts a document through every
+shipped template (document templates start with a doctype and carry the
+converted body; `bare` matches the untemplated bytes), rejects an unknown name
+as a hard error naming the library, checks the mutual exclusion with
+`--body_template`/`--document_template`/the legacy `--template`, and checks the
+model refusals (`--extract`/`--chunk`/`--stream` for both models,
+`--prepend_file` only for the document model). Two sabotages were observed:
+(1) `book.html` without its `{{textrill:content}}` fails the validate-every-
+template unit test and the book conversion test; (2) an unknown name that
+silently resolved to a template fails both the unknown-name unit test and the
+hard-error integration test. 4.4 stays green and `make verify` is green.
+
 ## Phase 3 — HTML5 by default
 
 XHTML 1.0 Strict is the Perl default and is wrong for a new tool in 2026. Emit
@@ -287,7 +328,7 @@ correct and is not what needs changing.
 | # | item | note |
 |---|---|---|
 | 4.1 | ~~`--var name=value` → `{{textrill:var:name}}`~~ **done (S3)** | The single highest-value addition. Turns a fixed frame into something parameterisable. |
-| 4.2 | Ship actual templates: article, book, manpage, slide, bare | Content, not machinery. This is the "templates people could use" the niche is named for. |
+| 4.2 | ~~Ship actual templates: article, book, manpage, slide, bare~~ **done (S4)** | Content, not machinery. This is the "templates people could use" the niche is named for. |
 | 4.3 | `{{textrill:if:name}}…{{textrill:end}}` | One template serving documents with and without a TOC. |
 | 4.4 | Unknown `textrill` slot stays an error; other engines' tokens still pass through | Existing behaviour. Do not regress it. |
 
@@ -411,14 +452,14 @@ or explained in textrill's own terms, with its own justification, and the
 reference is cited only where it constrains the bytes (as it did for 2.4's
 one-line boundary). Behaviour that diverges still has to clear the differential
 gates on the reference's terms, but the rationale is textrill's, never "the
-original does it too".>
+original does it too".
 
 | step | item | why here | check (beyond the baseline) |
 |---|---|---|---|
 | S1 | ~~Phase 2.3 — `--template` vs `--document_template`~~ **done** | The surviving "fix what is wrong" items; still correct to do next | renamed: `--body_template` is the body wrap, the legacy `--template` warns; `optionstest` + `templatetest` assert it; verify green |
 | S2 | ~~Phase 2.4 — definition-list trigger~~ **done** | Same | documented, and pinned: the `definitions` corpus case (term trigger + `<p>` boundary) fails against the reference when the trigger breaks; verify green |
 | S3 | ~~Phase 4.1 — `--var`~~ **done** | Highest user-visible value; OFFERING §5 row 2 | substitution + undeclared-name gate broken once (see "Item 4.1, resolved"); the 4.4 unknown-slot guard stays green |
-| S4 | Phase 4.2 — shipped templates | "templates people could use" | a conversion test per shipped template; 4.4 guard green |
+| S4 | ~~Phase 4.2 — shipped templates~~ **done** | "templates people could use" | a conversion test per shipped template; 4.4 guard green; the Item 4.2 gates |
 | S5 | Phase 3 — HTML5 default | A deliberate *option-default* divergence; the doctype interacts with the differential | precondition first: corpus and fuzz differentials pin the doctype explicitly on both sides (fuzz's `--xhtml`/`--no-xhtml` pair is optional per case — make it mandatory), and the HTML4 corpus asserts are exempted, not deleted; then flip the default; provenance asserts the HTML5 charset meta; sabotage — a default that reverts to XHTML must fail a gate |
 | S6 | Phase 5.0 — `--report` | Report-only instrument; prerequisite to any heading change | CLI test asserts the counts on stderr; they match what `make examples` reports |
 | S7 | Phase 7 — grow `examples/` | 5.1 measures over real documents; one document cannot support a false-positive rate | each added document's recovered-structure counts are recorded in `make examples`; verify green |

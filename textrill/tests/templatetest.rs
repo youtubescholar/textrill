@@ -511,3 +511,137 @@ fn malformed_var_arguments_are_rejected_up_front() {
     assert_eq!(out.code, 1, "empty name must be refused");
     assert!(out.stderr.contains("non-empty"), "{}", out.stderr);
 }
+
+// ---- 4.2: the shipped template library ----
+
+/// Every shipped template converts a document out of the box. The four
+/// whole-document templates own the page and start with a doctype; `bare`
+/// wraps only the body and is byte-identical to no template at all. Nothing
+/// leaves a literal slot in the output.
+#[test]
+fn every_shipped_template_converts_a_document() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let plain = run(&[&input]);
+
+    let document = [
+        ("article", "id=\"article-body\""),
+        ("book", "id=\"book-body\""),
+        ("manpage", "id=\"manpage-body\""),
+        ("slide", "id=\"deck-body\""),
+    ];
+    for (name, marker) in document {
+        let out = run(&["--template_library", name, &input]);
+        assert_eq!(out.code, 0, "{name}: stderr: {}", out.stderr);
+        assert!(
+            out.stdout.starts_with("<!DOCTYPE html>"),
+            "{name}: a document template must own the page: {}",
+            out.stdout
+        );
+        assert!(
+            !out.stdout.contains("{{textrill:"),
+            "{name}: a slot must not survive as literal text: {}",
+            out.stdout
+        );
+        assert!(
+            out.stdout
+                .contains("<h1><a name=\"section_1\">One</a></h1>"),
+            "{name}: the converted body must be inside the frame: {}",
+            out.stdout
+        );
+        assert!(
+            out.stdout.contains(marker),
+            "{name}: the template's own structure must be present: {}",
+            out.stdout
+        );
+    }
+
+    let out = run(&["--template_library", "bare", &input]);
+    assert_eq!(out.code, 0, "bare: stderr: {}", out.stderr);
+    assert_eq!(
+        out.stdout, plain.stdout,
+        "bare must wrap the body with no change: byte-identical to no template"
+    );
+}
+
+/// A name that is not in the library is a hard error that names the library,
+/// so a typo reads as a message, not as an unexpectly bare conversion.
+#[test]
+fn an_unknown_shipped_template_is_a_hard_error() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let out = run(&["--template_library", "nope", &input]);
+    assert_eq!(out.code, 1);
+    assert!(out.stderr.contains("nope"), "{}", out.stderr);
+    assert!(out.stderr.contains("article"), "{}", out.stderr);
+    assert!(out.stdout.is_empty(), "no half-built page: {}", out.stdout);
+}
+
+/// `--template_library` is the third member of a mutually exclusive family:
+/// combined with the file templates (the legacy `--template` alias included)
+/// it is refused up front.
+#[test]
+fn the_library_mutually_excludes_the_file_templates() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let file = write_file(&dir, "t.html", "{{textrill:content}}");
+    for other in ["--body_template", "--document_template", "--template"] {
+        let out = run(&["--template_library", "article", other, &file, &input]);
+        assert_eq!(out.code, 1, "{other} must be refused beside the library");
+        assert!(
+            out.stderr.contains("cannot be combined"),
+            "{other}: {}",
+            out.stderr
+        );
+    }
+}
+
+/// The refusals follow the library template's model: a whole-document
+/// template is refused with the modes that own the surrounding document
+/// (`--extract`, `--chunk`, `--stream`) and with `--prepend_file`; the body
+/// wrapper `bare` is refused with the first three but composes with
+/// `--prepend_file` like any body template.
+#[test]
+fn the_library_refusals_follow_the_model() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let other = write_file(&dir, "other", "");
+
+    for mode in ["--extract", "--chunk", "--stream"] {
+        let out = run(&["--template_library", "article", mode, &input]);
+        assert_eq!(out.code, 1, "{mode} must be refused for article");
+    }
+    let out = run(&[
+        "--template_library",
+        "article",
+        "--prepend_file",
+        &other,
+        &input,
+    ]);
+    assert_eq!(
+        out.code, 1,
+        "--prepend_file must be refused with a whole-document template"
+    );
+    assert!(
+        out.stderr.contains("not valid with --prepend_file"),
+        "{}",
+        out.stderr
+    );
+
+    for mode in ["--extract", "--chunk", "--stream"] {
+        let out = run(&["--template_library", "bare", mode, &input]);
+        assert_eq!(out.code, 1, "{mode} must be refused for bare");
+    }
+    let out = run(&[
+        "--template_library",
+        "bare",
+        "--prepend_file",
+        &other,
+        &input,
+    ]);
+    assert_eq!(
+        out.code, 0,
+        "a body template composes with --prepend_file: stderr: {}",
+        out.stderr
+    );
+}

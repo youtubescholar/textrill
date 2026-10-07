@@ -24,7 +24,7 @@ Structure is *inferred from layout*.
 That is the whole product, and it is a narrower thing than pandoc. It is also a
 thing pandoc does not do at all, which is measured in §5.
 
-The tool is 66 options (`textrill --help`), a dependency-free engine, a static
+The tool is 67 options (`textrill --help`), a dependency-free engine, a static
 `x86_64-unknown-linux-musl` binary, and a native GUI crate.
 
 ---
@@ -78,6 +78,7 @@ output.
 | `--body_template` | wraps the **body** in a fragment |
 | `--document_template` | wraps the **whole document** |
 | `--var name=value` | fills `{{textrill:var:name}}` in the active template |
+| `--template_library` | uses a shipped template by name: `article`, `book`, `manpage`, `slide`, `bare` |
 | `--link_only` | convert URLs and nothing else |
 | `--mailmode` | mail headers and quoted replies |
 
@@ -116,6 +117,16 @@ substitution is one pass so a value can never rescan into the engine's own
 slots. This is not a template language — no loops, conditionals, or includes —
 and the var family joins the fixed slot family without loosening the
 unknown-slot guard.
+
+**Five templates ship with the tool** (`--template_library NAME`), embedded in
+the binary and present as files under `textrill/templates/`: `article`, `book`
+and `manpage` and `slide` own the whole document, `bare` wraps only the body —
+and converts byte-identically to no template at all. Each uses only the fixed
+slots and no var slot, so all five work with zero required arguments and no
+silent-empty frames; copying one and adding `{{textrill:var:name}}` slots is
+the intended way to make it yours. `--template_library` is mutually exclusive
+with the two file-template options, and an unknown name is a hard error naming
+the library.
 
 **This is the part that matches the niche** — see §5.
 
@@ -326,7 +337,7 @@ but it must be visible.
 
 ```sh
 make examples                                  # the smoke run over examples/
-textrill --help                                # the 66-option surface
-cargo test --manifest-path textrill/Cargo.toml # 338 tests
+textrill --help                                # the 67-option surface
+cargo test --manifest-path textrill/Cargo.toml # 346 tests
 bash textrill/tests/corpus/run.sh              # 61 differential cases, 33 goldens
 ```

@@ -723,23 +723,16 @@ impl Converter {
             }
         }
 
-        // P5.5. Read the template once, at construction, so conversion cannot
-        // fail on IO. `Options::validate` has already reported a missing or
-        // malformed template on the command-line path; a library caller that
-        // skips validation simply gets no templating when the file is
-        // unreadable, rather than an error part-way through output.
-        let (template_text, document_template) = if !opts.template.is_empty() {
-            (
-                std::fs::read_to_string(&opts.template).unwrap_or_default(),
-                false,
-            )
-        } else if !opts.document_template.is_empty() {
-            (
-                std::fs::read_to_string(&opts.document_template).unwrap_or_default(),
-                true,
-            )
-        } else {
-            (String::new(), false)
+        // P5.5/S4. Resolve the template once, at construction, so conversion
+        // cannot fail on IO. `Options::validate` has already reported a missing
+        // or malformed template, or an unknown shipped template, on the
+        // command-line path; a library caller that skips validation simply gets
+        // no templating when the template is unresolvable, rather than an error
+        // part-way through output.
+        let (template_text, document_template) = match opts.template_source() {
+            Ok((2, _, _)) => (String::new(), false),
+            Ok((whole, body, _)) => (body, whole == 1),
+            Err(_) => (String::new(), false),
         };
 
         // A11. One policy, shared with the dictionary loader, so a rule kept at

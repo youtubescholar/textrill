@@ -124,6 +124,7 @@ pub mod chars;
 pub mod cli;
 pub mod convert;
 pub mod encode;
+pub mod library;
 pub mod links;
 pub mod notes;
 pub mod options;

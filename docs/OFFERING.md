@@ -18,20 +18,20 @@ Measured 2026-10-06, not described. This is the inventory the offer rests on.
 
 | Surface | State |
 |---|---|
-| CLI | 66 options (`textrill --help`), long spellings plus the reference's short aliases, `@file` groups |
+| CLI | 67 options (`textrill --help`), long spellings plus the reference's short aliases, `@file` groups |
 | Option files | `@file` < `~/.textrillrc` < `./.textrillrc` < command line; legacy `.txt2htmlrc`/`.txt2html.dict` read only when the textrill name is absent in the same directory |
 | Link dictionary | `--default_link_dict`, `links_dictionaries`, `.textrill.dict` |
-| Templates | `--body_template` (body wrap) and `--document_template` (whole document); 7 namespaced slots; `--var name=value` fills `{{textrill:var:name}}` in the active template; an unknown `textrill:` slot is a hard error, every other `{{…}}` passes through untouched |
+| Templates | `--body_template` (body wrap), `--document_template` (whole document), `--template_library` (five shipped templates, embedded) and `--var name=value` filling `{{textrill:var:name}}`; 7 namespaced slots; an unknown `textrill:` slot is a hard error, every other `{{…}}` passes through untouched |
 | Output modes | one file, `--extract` (body only), `--section`, `--chunk`, `--toc`, `--number_headings`, `--citations`, `--glossary` |
 | Encoding | BOM → UTF-16 evidence → UTF-8 → CP1252, with explicit overrides for what cannot be detected |
 | GUI | `textrill-gui-rs`, native `egui`; an options panel over the engine's own options; settings at `$XDG_CONFIG_HOME/textrill-gui/textrill.conf` (QSettings-compatible, hand-editable) |
 | Binary | static `x86_64-unknown-linux-musl`, no runtime dependencies |
-| Checks | `make verify`: fmt, clippy, 338 engine tests, 74 GUI tests, proptest, alloctest, 61 differential cases, 33 goldens, 16 000 fuzz cases |
+| Checks | `make verify`: fmt, clippy, 346 engine tests, 74 GUI tests, proptest, alloctest, 61 differential cases, 33 goldens, 16 000 fuzz cases |
 | Packaging | Flatpak manifest drafted, deliberately unbuildable: the app-id needs a GitHub owner that does not exist yet |
 | Docs | the register in `DOCS.md`, `CAPABILITIES.md` (measured), `LANDSCAPE.md` (measured), `PLAN.md` (what is next) |
 
-Two things are missing from that table and are the whole of §5: `--var`, and any
-shipped template other than the one the tool writes by default.
+`--var` shipped (S3) and a five-template library shipped embedded in the
+binary (S4); the remaining rows of §5 are what is still missing.
 
 ## 2. The claim
 
@@ -83,7 +83,7 @@ Everything in this table is re-measured by `make proof` and pinned in
 checked by hand:
 
 ```sh
-textrill --help | grep -cE '^    '                       # 66 options
+textrill --help | grep -cE '^    '                       # 67 options
 pandoc --list-input-formats                              # no plain, 43 total
 pandoc -f plain -t html examples/homer.txt               # rejected
 textrill --infile examples/homer.txt --outfile -         # 38 882 B, 64 p, 3 029 max
@@ -105,7 +105,7 @@ textrill --title "The Odyssey" --infile examples/homer.txt --outfile - \
 | P4–P8 | textrill on `examples/homer.txt` | 39 `<strong>`, 34 `<br/>`, 0 headings, 64 paragraphs, largest 3 029 chars, 38 882 B |
 | P9–P12 | pandoc, forced to markdown, same file | 0 `<strong>`, 0 `<br/>`, 62 paragraphs, largest 3 665 chars, 38 132 B |
 | P13–P15 | mechanism, small input | textrill keeps indented lines apart; pandoc joins them into one paragraph |
-| P16 | our own surface | 66 options |
+| P16 | our own surface | 67 options |
 | P17–P18 | our HTML into `pandoc -t epub` | exits 0; the result carries `application/epub+zip` |
 | P19 | our HTML into `pandoc -t docx` | 113 bold runs, 34 line breaks — the inference reached the far format |
 | P20 | our HTML into `pandoc -t markdown` | `**PREFACE TO FIRST EDITION**` — a heading nobody wrote survives |
@@ -151,7 +151,7 @@ item; this document's contribution is the order and the reason.
 |---|---|---|
 | 1 | the proof (§3) | Positioning claims rot silently; this is now gated. |
 | 2 | `PLAN.md` Phase 4.1 — `--var name=value` | **Built (S3).** The single highest-value addition is delivered: a fixed frame is now parameterisable, `{{textrill:var:name}}` filled verbatim and strict on undeclared names. |
-| 3 | `PLAN.md` Phase 4.2 — a shipped template library | `LANDSCAPE.md` §3: a user's first impression of a converter is its templates, and we have seven fixed slots. The offer says "the user's own template governs the page"; today there are not enough templates for that to be true for someone who has none. |
+| 3 | `PLAN.md` Phase 4.2 — a shipped template library | **Built (S4).** Five templates ship embedded in the binary and as files under `textrill/templates/` (`article`, `book`, `manpage`, `slide`, `bare`), selected with `--template_library NAME`. All use only the fixed slots, so each works with zero required arguments and produces no silent-empty frames; someone with no template now has actual ones to start from. |
 | 4 | `PLAN.md` Phase 5.0 — `--report`, the counts on stderr | The report-only instrument the plan already asks for, and the first thing a user whose `--toc` came out empty needs: *what did you see?* The counts exist only in `make examples` today; the CLI prints none. |
 | 5 | `PLAN.md` Phase 5 — headings in documents that have none | `homer.txt` yields no headings at all: 39 capitalised runs become `<strong>`, `--toc` lists nothing, `--chunk` writes one 38 882-byte file. This is the capability claim a reader will test first ("it found my chapter headings, or it did not"), and the plan's first measurement already landed: its candidate rule fires on 2 lines of that document, both signatures (Phase 5). Research before behaviour, as the plan requires. |
 | 6 | `PLAN.md` Phase 6 — packaging, blocked on the GitHub owner | A static binary is already buildable; an installable app is not. The owner decision is the same one that blocks `Cargo.toml` `repository` and the app-id, so it is one decision, not three. |

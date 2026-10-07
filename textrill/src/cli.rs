@@ -91,6 +91,7 @@ pub const SPECS: &[Spec] = specs![
     Int "Width of a tab character." ["tab_width", "tabwidth", "tw"],
     TableType "Enable one table type, e.g. ALIGN=0." ["table_type"],
     Str "Wrap the body in a template file (P5.5); the whole-document counterpart is --document_template. The old name --template still works but is deprecated." ["body_template", "template"],
+    Str "Use a shipped template by name: article, book, manpage, slide, bare (S4)." ["template_library"],
     Str "Document title." ["title", "t"],
     Flag "Use the first line of the text as the title." ["titlefirst", "tf"],
     Flag "Prepend a generated table of contents (P5.2)." ["toc"],
@@ -240,6 +241,7 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
             opts.table_type.delim as u8
         ),
         "body_template" => opts.template.clone(),
+        "template_library" => opts.template_library.clone(),
         "title" => opts.title.clone(),
         "titlefirst" => opts.titlefirst.to_string(),
         "toc" => opts.toc.to_string(),
@@ -598,6 +600,7 @@ pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
         "prepend_file" => opts.prepend_file = v.to_string(),
         "style_url" => opts.style_url = v.to_string(),
         "body_template" => opts.template = v.to_string(),
+        "template_library" => opts.template_library = v.to_string(),
         "title" => opts.title = v.to_string(),
         "underline_delimiter" => opts.underline_delimiter = v.to_string(),
         other => {

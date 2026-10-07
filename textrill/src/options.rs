@@ -291,6 +291,16 @@ pub struct Options {
     /// (doctype, head and body included), so none of the engine prolog is
     /// emitted. Mutually exclusive with [`Options::template`]. Empty by default.
     pub document_template: String,
+    /// S4. A shipped template's name (`article`, `book`, `manpage`, `slide`,
+    /// `bare`), from the embedded library in [`crate::library`].
+    ///
+    /// Exactly one of [`Options::template`], [`Options::document_template`] and
+    /// this is allowed at a time. Each library template has an intrinsic model
+    /// (`article`, `book`, `manpage` and `slide` own the whole document; `bare`
+    /// wraps only the body), so the engine routes it exactly as the matching
+    /// file-level option would. Uses only the fixed slots, never a var slot, so
+    /// it converts without any `--var`. Empty by default.
+    pub template_library: String,
     /// P5.5. Template parameters, in `--var` order, substituted verbatim for
     /// `{{textrill:var:name}}` in the active template. Empty by default.
     pub vars: Vec<(String, String)>,
@@ -425,6 +435,7 @@ impl Default for Options {
                 .to_string(),
             template: String::new(),
             document_template: String::new(),
+            template_library: String::new(),
             vars: Vec::new(),
             eight_bit_clean: false,
             escape_html_chars: true,
@@ -627,29 +638,22 @@ impl Options {
         Ok(())
     }
 
-    /// P5.5. Check the template options and, when one is set, load it and check
-    /// its slots. Doing this before conversion means a bad template is reported
-    /// as a message and a non-zero exit rather than part-way through output.
+    /// P5.5/S4. Check the template options and, when one is set, load it and
+    /// check its slots. Doing this before conversion means a bad template is
+    /// reported as a message and a non-zero exit rather than part-way through
+    /// output.
     ///
-    /// The two template options are mutually exclusive and each is refused with
-    /// the modes that own the surrounding document (`--extract`, `--chunk`,
-    /// `--stream`); `--document_template` is additionally refused with
-    /// `--prepend_file`, whose content has no slot in a template and would
-    /// otherwise be dropped silently.
+    /// The three template sources — `--body_template`, `--document_template`
+    /// and `--template_library` (whose model comes from the shipped library) —
+    /// are mutually exclusive, and each is refused with the modes that own the
+    /// surrounding document (`--extract`, `--chunk`, `--stream`). A whole-page
+    /// template is additionally refused with `--prepend_file`, whose content
+    /// has no slot in a template and would otherwise be dropped silently.
     fn validate_template_options(&self) -> Result<(), String> {
-        let wrapper = !self.template.is_empty();
-        let whole = !self.document_template.is_empty();
-        if !wrapper && !whole {
+        let (whole_document, body, flag) = self.template_source()?;
+        if whole_document == 2 {
             return Ok(());
         }
-        if wrapper && whole {
-            return Err("--body_template and --document_template cannot be combined".to_string());
-        }
-        let flag = if wrapper {
-            "--body_template"
-        } else {
-            "--document_template"
-        };
         if self.extract {
             return Err(format!("{flag} is not valid with --extract"));
         }
@@ -659,21 +663,58 @@ impl Options {
         if self.stream {
             return Err(format!("{flag} is not valid with --stream"));
         }
-        if whole && !self.prepend_file.is_empty() {
-            return Err("--document_template is not valid with --prepend_file".to_string());
+        if whole_document == 1 && !self.prepend_file.is_empty() {
+            return Err(format!("{flag} is not valid with --prepend_file"));
         }
-        let path = if wrapper {
-            &self.template
-        } else {
-            &self.document_template
-        };
-        let body = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
         let declared = self
             .vars
             .iter()
             .map(|(n, _)| n.as_str())
             .collect::<Vec<_>>();
         crate::template::validate(&body, &declared)
+    }
+
+    /// Resolve which template is active, if any, and its text.
+    ///
+    /// Returns `(whole_document, template text, flag name)`, where
+    /// `whole_document` is 0 for a body wrapper, 1 for a whole-page template
+    /// and 2 for "no template". A shipped library name that does not exist is
+    /// an error naming the library, so a typo is a message, not a silent
+    /// shrug.
+    pub fn template_source(&self) -> Result<(u8, String, String), String> {
+        let wrapper = !self.template.is_empty();
+        let whole = !self.document_template.is_empty();
+        let library = !self.template_library.is_empty();
+        let set = usize::from(wrapper) + usize::from(whole) + usize::from(library);
+        if set == 0 {
+            return Ok((2, String::new(), String::new()));
+        }
+        if set > 1 {
+            return Err(
+                "--body_template, --document_template and --template_library cannot be combined"
+                    .to_string(),
+            );
+        }
+        if wrapper {
+            let body = std::fs::read_to_string(&self.template)
+                .map_err(|e| format!("{}: {e}", self.template))?;
+            return Ok((0, body, "--body_template".to_string()));
+        }
+        if whole {
+            let body = std::fs::read_to_string(&self.document_template)
+                .map_err(|e| format!("{}: {e}", self.document_template))?;
+            return Ok((1, body, "--document_template".to_string()));
+        }
+        let shipped = crate::library::get(&self.template_library).ok_or_else(|| {
+            let list = crate::library::names().collect::<Vec<_>>().join(", ");
+            format!(
+                "unknown shipped template {:?}; available: {list}",
+                self.template_library
+            )
+        })?;
+        let whole = matches!(shipped.model, crate::library::Model::Document);
+        let flag = format!("--template_library {}", shipped.name);
+        Ok((u8::from(whole), shipped.html.to_string(), flag))
     }
 
     /// The options whose value is a regular expression supplied by the caller,
