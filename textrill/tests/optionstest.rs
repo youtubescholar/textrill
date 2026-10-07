@@ -12,7 +12,7 @@ fn the_option_and_spelling_counts_match_the_readme() {
     // prose from drifting away from `cli::SPECS`.
     assert_eq!(cli::SPECS.len(), 65, "option count changed");
     let spellings: usize = cli::SPECS.iter().map(|s| s.names.len()).sum();
-    assert_eq!(spellings, 121, "accepted-spelling count changed");
+    assert_eq!(spellings, 122, "accepted-spelling count changed");
 }
 
 #[test]
@@ -66,6 +66,37 @@ fn exact_option_name_beats_prefix() {
     assert_eq!(name_of("LO"), Some("link_only"));
     assert_eq!(name_of("l"), Some("links_dictionaries"));
     assert_eq!(name_of("nope"), None);
+}
+
+/// 2.3: the two template options are a body-wrap / whole-page pair now, not a
+/// bare `--template` and a near-identical `--document_template`. The legacy
+/// spelling survives as an alias.
+#[test]
+fn the_template_options_are_a_named_pair() {
+    let body = cli::lookup("body_template").expect("body_template exists");
+    let whole = cli::lookup("document_template").expect("document_template exists");
+    let legacy = cli::lookup("template").expect("legacy alias exists");
+    assert_eq!(body.names[0], "body_template");
+    assert_eq!(
+        legacy.names[0], "body_template",
+        "legacy alias resolves to the renamed option"
+    );
+    assert_ne!(body.names[0], whole.names[0]);
+    assert!(
+        body.help.contains("body"),
+        "help names the pole: {}",
+        body.help
+    );
+    assert!(
+        body.help.contains("deprecated"),
+        "help says the old name is deprecated: {}",
+        body.help
+    );
+    assert!(
+        whole.help.contains("whole-document"),
+        "help names the other pole: {}",
+        whole.help
+    );
 }
 
 #[test]

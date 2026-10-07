@@ -3162,7 +3162,7 @@ impl Converter {
             }
         };
         let body = if stripped.is_empty() { body } else { stripped };
-        // P5.5. A template replaces the default arrangement. `--template`
+        // P5.5. A template replaces the default arrangement. `--body_template`
         // wraps the body inside the engine's own prolog and epilog; a
         // `--document_template` owns the whole page, so neither is emitted.
         if !self.template_text.is_empty() {

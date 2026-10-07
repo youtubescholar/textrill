@@ -639,10 +639,10 @@ impl Options {
             return Ok(());
         }
         if wrapper && whole {
-            return Err("--template and --document_template cannot be combined".to_string());
+            return Err("--body_template and --document_template cannot be combined".to_string());
         }
         let flag = if wrapper {
-            "--template"
+            "--body_template"
         } else {
             "--document_template"
         };

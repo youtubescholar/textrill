@@ -171,7 +171,7 @@ parity framing never surfaced them. Full reproductions in
 |---|---|---|
 | 2.1 | ~~Recognise an ordered list that does not start at 1~~ **withdrawn** | Low. Currently the structure is simply not found. Must not renumber `3.`/`7.` into `1.`/`2.` — the original numerals have to survive, so this needs `<li value>` or a stated policy. See "Items 2.1–2.2, withdrawn". |
 | 2.2 | ~~A blank-line-separated ordered list after a bullet list stays a sibling~~ **withdrawn** | Low. Needs a corpus case that fails before the fix. See "Items 2.1–2.2, withdrawn". |
-| 2.3 | `--template` vs `--document_template` | Docs first: the names promise almost the same thing. Then rename or warn. |
+| 2.3 | ~~`--template` vs `--document_template`~~ **done** | Docs first: the names promise almost the same thing. Renamed: the body wrap is now `--body_template`; the legacy `--template` name still works and warns. See "Item 2.3, resolved". |
 | 2.4 | Definition lists need a real trigger | `term : definition` produces a plain paragraph today. Decide whether to document the existing trigger or make the obvious form work. |
 
 ### Items 2.1–2.2, withdrawn
@@ -193,6 +193,22 @@ constraint on `<li value>` (numerals must survive, so a non-1 start needs an
 explicit value) is documented there too. A future attempt at either item has to
 come back with a gate that can declare a content divergence: the corpus already
 can, via required-failure NOGOLDEN cases; the fuzzer cannot, by design.
+
+### Item 2.3, resolved
+
+**The two template names were a trap, and the body wrap has a real name now.**
+`--template` (fragment inside `<body>`) and `--document_template` (whole page)
+differed only by the word `document_`, and picking the wrong one silently
+nested a complete document inside a `<body>` with two doctypes and two titles.
+Templating is textrill's own feature — the reference has none — so the names
+were ours to fix. The body wrap is now `--body_template`, the pair reads as
+opposites in `--help`, and the legacy `--template` spelling is kept working (an
+rc file may use it) but prints a deprecation warning naming both poles.
+
+Gates: `optionstest` asserts the alias resolves to the renamed option and that
+the help text names the pair and the deprecation; `templatetest` asserts the
+alias still converts byte-identically and warns. The accepted-spelling count
+moved 121 → 122, and `make verify` is green.
 
 ## Phase 3 — HTML5 by default
 
@@ -331,7 +347,7 @@ oracle on top of the baseline.
 
 | step | item | why here | check (beyond the baseline) |
 |---|---|---|---|
-| S1 | Phase 2.3 — `--template` vs `--document_template` | The surviving "fix what is wrong" items; still correct next | name/warn decision settled; `--help` states it; `optionstest` asserts the line |
+| S1 | ~~Phase 2.3 — `--template` vs `--document_template`~~ **done** | The surviving "fix what is wrong" items; still correct to do next | renamed: `--body_template` is the body wrap, the legacy `--template` warns; `optionstest` + `templatetest` assert it; verify green |
 | S2 | Phase 2.4 — definition-list trigger | Same | document the existing trigger, or implement and pin it with a corpus case + oracle (per the decision); verify green |
 | S3 | Phase 4.1 — `--var` | Highest user-visible value; OFFERING §5 row 2 | template tests extended for `{{textrill:var:name}}`; the 4.4 unknown-slot guard stays green |
 | S4 | Phase 4.2 — shipped templates | "templates people could use" | a conversion test per shipped template; 4.4 guard green |

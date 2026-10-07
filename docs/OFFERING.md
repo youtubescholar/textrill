@@ -21,7 +21,7 @@ Measured 2026-10-06, not described. This is the inventory the offer rests on.
 | CLI | 65 options (`textrill --help`), long spellings plus the reference's short aliases, `@file` groups |
 | Option files | `@file` < `~/.textrillrc` < `./.textrillrc` < command line; legacy `.txt2htmlrc`/`.txt2html.dict` read only when the textrill name is absent in the same directory |
 | Link dictionary | `--default_link_dict`, `links_dictionaries`, `.textrill.dict` |
-| Templates | `--template` (body wrap) and `--document_template` (whole document); 7 namespaced slots; an unknown `textrill:` slot is a hard error, every other `{{…}}` passes through untouched |
+| Templates | `--body_template` (body wrap) and `--document_template` (whole document); 7 namespaced slots; an unknown `textrill:` slot is a hard error, every other `{{…}}` passes through untouched |
 | Output modes | one file, `--extract` (body only), `--section`, `--chunk`, `--toc`, `--number_headings`, `--citations`, `--glossary` |
 | Encoding | BOM → UTF-16 evidence → UTF-8 → CP1252, with explicit overrides for what cannot be detected |
 | GUI | `textrill-gui-rs`, native `egui`; an options panel over the engine's own options; settings at `$XDG_CONFIG_HOME/textrill-gui/textrill.conf` (QSettings-compatible, hand-editable) |

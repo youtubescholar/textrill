@@ -74,15 +74,16 @@ output.
 | `--toc` | generated `<nav class="toc">` with links to those ids |
 | `--chunk` | one file per top-level section, plus pager links |
 | `--stream` | constant memory: one paragraph in, one out |
-| `--template` | wraps the **body** in a fragment |
+| `--body_template` | wraps the **body** in a fragment |
 | `--document_template` | wraps the **whole document** |
 | `--link_only` | convert URLs and nothing else |
 | `--mailmode` | mail headers and quoted replies |
 
-`--template` and `--document_template` are a trap. The names are nearly
-identical and the semantics are opposites; picking the wrong one produces a
-complete HTML document nested inside a `<body>`, with two doctypes and two
-titles, and no error. This is §4.4.
+The two template options were a trap: nearly identical names, opposite
+behaviour, and picking the wrong one silently produced a complete HTML document
+nested inside a `<body>`, with two doctypes and two titles. §4.4 records that
+and its fix — the body wrap is now `--body_template`, and the legacy
+`--template` name warns.
 
 ### Templates
 
@@ -109,9 +110,9 @@ every other `{{…}}` is passed through.
 
 ## 4. What is weak
 
-All five were things the tool did badly or claimed falsely about itself; §4.3
-and §4.5 are fixed and recorded as such. The rest are not regressions: the first
-two are byte-for-byte what the Perl original does, which is why the parity
+All five were things the tool did badly or claimed falsely about itself; §4.3,
+§4.4 and §4.5 are fixed and recorded as such. The rest are not regressions: the
+first two are byte-for-byte what the Perl original does, which is why the parity
 framing never surfaced them.
 
 ### 4.1 A numbered list that does not start at 1 is not a list
@@ -176,10 +177,17 @@ and 13 golden comparisons, resolved by `tests/corpus/normalize.py` plus
 `tests/provenance.rs`. Rationale and the sabotage runs that verified both halves
 are in `docs/PLAN.md` § "Item 1.1, resolved".
 
-### 4.4 `--template` vs `--document_template`
+### 4.4 `--template` vs `--document_template` — fixed
 
-Two near-identically named options with opposite behaviour and no diagnostic.
-Worth a distinct name, or a warning when a document template lacks `<html>`.
+Two near-identically named options with opposite behaviour and no diagnostic:
+picking the wrong one silently produced a complete HTML document nested inside
+a `<body>`, with two doctypes and two titles. **Now `--body_template` names the
+body wrap**, making the pair `--body_template` (fragment inside `<body>`) and
+`--document_template` (whole page) unambiguous opposites; `--help` describes
+each against the other. The legacy `--template` spelling still works, because
+an rc file may use it, but it prints a deprecation warning naming both poles so
+the trap is visible instead of silent. Gated by `optionstest` (help text and
+alias resolution) and `templatetest` (the alias still converts, and warns).
 
 ### 4.5 The tool has no name of its own — fixed
 

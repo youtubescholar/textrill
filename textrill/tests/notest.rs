@@ -18,7 +18,7 @@
 //!    empty paragraph, no stray newlines.
 //! 5. The two modes are independent, and neither disturbs the other phases
 //!    (`--number_headings`, `--section`, `--toc`, `--extract`, `--html5`,
-//!    `--template`).
+//!    `--body_template`).
 //! 6. The refused combinations (`--chunk`, `--stream`) are refused up front.
 
 use textrill::convert::Converter;

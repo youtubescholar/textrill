@@ -126,7 +126,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **65 options** with **121 accepted spellings** including short
+There are **65 options** with **122 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names and defaults are the upstream ones, unchanged, so a document
@@ -149,7 +149,7 @@ converts the same way under either tool. A few are worth calling out:
 | `--chunk` | off | Write one HTML file per top-level section |
 | `--number_headings` | off | Prefix headings with hierarchical numbers (`1`, `1.1`, …) |
 | `--stream` | off | Read and write a paragraph at a time (UTF-8 input only) |
-| `--template` | none | Wrap the body in a template file (slots, see below) |
+| `--body_template` | none | Wrap the body in a template file (slots, see below); the legacy `--template` name still works |
 | `--document_template` | none | Use a whole-document template file |
 | `--encoding` | `auto` | How to decode the input (see below) |
 
@@ -244,11 +244,16 @@ loops, conditionals, expressions or includes, and no JavaScript.
 
 There are two levels:
 
-- `--template FILE` inserts a **fragment inside `<body>`**. The engine still
+- `--body_template FILE` inserts a **fragment inside `<body>`**. The engine still
   emits the doctype, `<head>` and the `<body>` tags, so you only write the part
   you want to change.
 - `--document_template FILE` takes over the **whole page**. The engine emits
   none of its own prolog, so you write the doctype, head and body yourself.
+
+The two names are a body-wrap / whole-page pair; until textrill 0.1.*, the body
+wrap was called `--template`. That spelling still works, but it now prints a
+deprecation warning naming the pair, so nobody has to guess which one the
+near-identical name meant.
 
 With neither option the output is byte-for-byte what it always was.
 
@@ -332,7 +337,7 @@ note set produces no output rather than a `[1]` pointing at nothing:
 whole document, and both write output as they go. `--extract` works, since the
 lists simply append to the body.
 
-With `--template`, `{{textrill:citations}}` and `{{textrill:glossary}}` place
+With `--body_template`, `{{textrill:citations}}` and `{{textrill:glossary}}` place
 the two lists wherever the template wants them. A template that names neither
 slot still gets them appended, so an existing template never loses a list.
 

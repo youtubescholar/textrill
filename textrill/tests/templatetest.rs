@@ -1,4 +1,4 @@
-//! P5.5 — `--template` and `--document_template`.
+//! P5.5 — `--body_template` and `--document_template`.
 //!
 //! Templates are off by default, so the reference output must not move. These
 //! tests pin the wrapper and whole-document models, the slot substitution, the
@@ -70,7 +70,7 @@ fn content_only_wrapper_is_byte_identical_to_default() {
     let template = write_file(&dir, "wrap.html", "{{textrill:content}}");
 
     let plain = run(&[&input]);
-    let wrapped = run(&["--template", &template, &input]);
+    let wrapped = run(&["--body_template", &template, &input]);
     assert_eq!(plain.code, 0, "stderr: {}", plain.stderr);
     assert_eq!(wrapped.code, 0, "stderr: {}", wrapped.stderr);
     assert_eq!(
@@ -94,7 +94,7 @@ fn wrapper_supplies_surrounding_markup() {
         "wrap.html",
         "<main class=\"page\">\n{{textrill:content}}</main>\n",
     );
-    let out = run(&["--template", &template, &input]);
+    let out = run(&["--body_template", &template, &input]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(
         out.stdout.contains("<main class=\"page\">"),
@@ -118,7 +118,7 @@ fn toc_slot_places_the_generated_navigation() {
         "wrap.html",
         "<aside>{{textrill:toc}}</aside>\n{{textrill:content}}",
     );
-    let out = run(&["--template", &template, "--toc", &input]);
+    let out = run(&["--body_template", &template, "--toc", &input]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     let aside = out.stdout.find("<aside>").unwrap();
     let nav = out.stdout.find("<nav class=\"toc\"").unwrap();
@@ -171,7 +171,7 @@ fn title_slot_carries_the_escaped_title() {
         "wrap.html",
         "<h1 class=\"banner\">{{textrill:title}}</h1>\n{{textrill:content}}",
     );
-    let out = run(&["--template", &template, "--title", "A & B", &input]);
+    let out = run(&["--body_template", &template, "--title", "A & B", &input]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(
         out.stdout.contains("<h1 class=\"banner\">A &amp; B</h1>"),
@@ -189,7 +189,7 @@ fn other_engine_tokens_are_passed_through() {
         "wrap.html",
         "{{#each sections}}{{title}}{{/each}}\n{{textrill:content}}",
     );
-    let out = run(&["--template", &template, &input]);
+    let out = run(&["--body_template", &template, &input]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(
         out.stdout.contains("{{#each sections}}{{title}}{{/each}}"),
@@ -203,7 +203,7 @@ fn unknown_textrill_slot_is_a_hard_error() {
     let dir = tmpdir();
     let input = write_file(&dir, "in.txt", SAMPLE);
     let template = write_file(&dir, "wrap.html", "{{textrill:nope}}{{textrill:content}}");
-    let out = run(&["--template", &template, &input]);
+    let out = run(&["--body_template", &template, &input]);
     assert_eq!(out.code, 1);
     assert!(
         out.stderr.contains("unknown template slot"),
@@ -223,7 +223,7 @@ fn a_template_without_a_content_slot_is_refused() {
     let dir = tmpdir();
     let input = write_file(&dir, "in.txt", SAMPLE);
     let template = write_file(&dir, "wrap.html", "<div>{{textrill:toc}}</div>");
-    let out = run(&["--template", &template, &input]);
+    let out = run(&["--body_template", &template, &input]);
     assert_eq!(out.code, 1);
     assert!(out.stderr.contains("content"), "{}", out.stderr);
 }
@@ -233,7 +233,7 @@ fn a_missing_template_file_is_reported() {
     let dir = tmpdir();
     let input = write_file(&dir, "in.txt", SAMPLE);
     let missing = dir.join("nope.html").to_string_lossy().into_owned();
-    let out = run(&["--template", &missing, &input]);
+    let out = run(&["--body_template", &missing, &input]);
     assert_eq!(out.code, 1);
     assert!(out.stderr.contains("nope.html"), "{}", out.stderr);
 }
@@ -244,7 +244,13 @@ fn the_two_template_options_are_mutually_exclusive() {
     let input = write_file(&dir, "in.txt", SAMPLE);
     let wrapper = write_file(&dir, "wrap.html", "{{textrill:content}}");
     let doc = write_file(&dir, "doc.html", "{{textrill:content}}");
-    let out = run(&["--template", &wrapper, "--document_template", &doc, &input]);
+    let out = run(&[
+        "--body_template",
+        &wrapper,
+        "--document_template",
+        &doc,
+        &input,
+    ]);
     assert_eq!(out.code, 1);
     assert!(out.stderr.contains("cannot be combined"), "{}", out.stderr);
 }
@@ -254,10 +260,10 @@ fn templates_are_refused_with_modes_that_own_the_document() {
     let dir = tmpdir();
     let wrapper = write_file(&dir, "wrap.html", "{{textrill:content}}");
     for flag in ["--extract", "--chunk", "--stream"] {
-        let out = run(&["--template", &wrapper, flag]);
+        let out = run(&["--body_template", &wrapper, flag]);
         assert_eq!(out.code, 1, "{flag} should be refused");
         assert!(
-            out.stderr.contains("--template is not valid"),
+            out.stderr.contains("--body_template is not valid"),
             "{flag}: {}",
             out.stderr
         );
@@ -272,4 +278,30 @@ fn document_template_is_refused_with_prepend_file() {
     let out = run(&["--document_template", &doc, "--prepend_file", &other]);
     assert_eq!(out.code, 1);
     assert!(out.stderr.contains("--prepend_file"), "{}", out.stderr);
+}
+
+/// 2.3: the legacy `--template` spelling still works (an rc file may use it),
+/// but it is deprecated and says so, naming the pair so the trap is visible.
+#[test]
+fn the_legacy_template_alias_still_works_and_warns() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let template = write_file(&dir, "wrap.html", "{{textrill:content}}");
+    let out = run(&["--template", &template, &input]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("<h1>"),
+        "alias must still convert, got: {}",
+        out.stdout
+    );
+    assert!(
+        out.stderr.contains("--template"),
+        "deprecation must name the alias: {}",
+        out.stderr
+    );
+    assert!(
+        out.stderr.contains("body_template"),
+        "deprecation must name the replacement: {}",
+        out.stderr
+    );
 }

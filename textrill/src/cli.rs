@@ -90,7 +90,7 @@ pub const SPECS: &[Spec] = specs![
     Str "URL of a stylesheet linked into the output." ["style_url"],
     Int "Width of a tab character." ["tab_width", "tabwidth", "tw"],
     TableType "Enable one table type, e.g. ALIGN=0." ["table_type"],
-    Str "Wrap the body in a template file (P5.5)." ["template"],
+    Str "Wrap the body in a template file (P5.5); the whole-document counterpart is --document_template. The old name --template still works but is deprecated." ["body_template", "template"],
     Str "Document title." ["title", "t"],
     Flag "Use the first line of the text as the title." ["titlefirst", "tf"],
     Flag "Prepend a generated table of contents (P5.2)." ["toc"],
@@ -238,7 +238,7 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
             opts.table_type.border as u8,
             opts.table_type.delim as u8
         ),
-        "template" => opts.template.clone(),
+        "body_template" => opts.template.clone(),
         "title" => opts.title.clone(),
         "titlefirst" => opts.titlefirst.to_string(),
         "toc" => opts.toc.to_string(),
@@ -304,6 +304,16 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
         let (spec, negated) = resolve(name).map_err(&at)?;
         if negated && !matches!(spec.kind, Kind::Flag) {
             return Err(at(format!("Unknown option `{name}`")));
+        }
+
+        // 2.3: `--template` predates the clearer `--body_template`, and the two
+        // template names were a trap. The legacy spelling keeps working (an rc
+        // file may use it), but it says so, and points at the pair.
+        if spec.names[0] == "body_template" && !name.is_empty() && "template".starts_with(name) {
+            eprintln!(
+                "textrill: warning: `--{name}` is deprecated; use --body_template \
+                 (body wrap) or --document_template (whole page)"
+            );
         }
 
         match spec.kind {
@@ -580,7 +590,7 @@ pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
         "preformat_end_marker" => opts.preformat_end_marker = v.to_string(),
         "prepend_file" => opts.prepend_file = v.to_string(),
         "style_url" => opts.style_url = v.to_string(),
-        "template" => opts.template = v.to_string(),
+        "body_template" => opts.template = v.to_string(),
         "title" => opts.title = v.to_string(),
         "underline_delimiter" => opts.underline_delimiter = v.to_string(),
         other => {
