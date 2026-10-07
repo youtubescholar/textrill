@@ -24,7 +24,7 @@ Structure is *inferred from layout*.
 That is the whole product, and it is a narrower thing than pandoc. It is also a
 thing pandoc does not do at all, which is measured in §5.
 
-The tool is 67 options (`textrill --help`), a dependency-free engine, a static
+The tool is 68 options (`textrill --help`), a dependency-free engine, a static
 `x86_64-unknown-linux-musl` binary, and a native GUI crate.
 
 ---
@@ -311,7 +311,8 @@ mention Perl:
 
 1. Input is plain text. No markup required, and no markup language assumed.
 2. Structure is inferred from layout, and every inference is reported — the
-   counts in `make examples` are part of the output contract.
+   counts in `make examples` (and on stderr via `--report`, S6) are part of the
+   output contract.
 3. Text is never silently dropped. Where inference declines, the characters stay.
 4. Encoding is detected, and an explicit override always wins.
 5. Malformed input produces an error and a non-zero exit, never a partial file.
@@ -334,9 +335,13 @@ but it must be visible.
   anyone who wants the old bytes back.
 - Is `--chunk` on a document with no headings a useful feature or a silent
   no-op? Today it writes one file named after the input.
-- The 13 options with no Perl equivalent (§ appendix) are not gaps. They are
-  features Perl does not have, and under the new framing they are assets.
-  They need documenting on their own terms rather than as deviations.
+- The options with no Perl equivalent are not gaps; they are features Perl does
+  not have, and under the new framing they are assets. The audit that first
+  counted them (13, dated 2026-10-06) lives in
+  `legacy-archive/REMEDIATION-PLAN.md` under "Oracle coverage", not in an
+  appendix here; `--var`, `--template_library` and `--report` (S3, S4, S6) have
+  since brought the count to 16. They need documenting on their own terms
+  rather than as deviations.
 
 ---
 
@@ -344,7 +349,7 @@ but it must be visible.
 
 ```sh
 make examples                                  # the smoke run over examples/
-textrill --help                                # the 67-option surface
-cargo test --manifest-path textrill/Cargo.toml # 346 tests
+textrill --help                                # the 68-option surface
+cargo test --manifest-path textrill/Cargo.toml # 364 tests
 bash textrill/tests/corpus/run.sh              # 61 differential cases, 33 goldens
 ```

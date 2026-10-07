@@ -24,7 +24,7 @@ What is **done**:
 
 - The conversion engine is byte-verified against the upstream reference across a
   differential corpus of 61 cases and 33 upstream golden files.
-- 346 Rust tests, a fuzzer, and a 74-test native GUI suite.
+- 364 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.
@@ -126,7 +126,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **67 options** with **124 accepted spellings** including short
+There are **68 options** with **125 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names are the upstream ones, unchanged, so a document converts the
@@ -152,6 +152,7 @@ upstream pair. A few are worth calling out:
 | `--chunk` | off | Write one HTML file per top-level section |
 | `--number_headings` | off | Prefix headings with hierarchical numbers (`1`, `1.1`, …) |
 | `--stream` | off | Read and write a paragraph at a time (UTF-8 input only) |
+| `--report` | off | Print the inference counts — headings, paragraphs, capitals, breaks, bytes — on standard error |
 | `--body_template` | none | Wrap the body in a template file (slots, see below); the legacy `--template` name still works |
 | `--document_template` | none | Use a whole-document template file |
 | `--template_library` | none | Use a shipped template by name: `article`, `book`, `manpage`, `slide` or `bare` |
@@ -240,6 +241,29 @@ in the `--toc` labels and in each `--chunk` page. It is independent of
 
 The markup here is HTML5 (`<article>`, `<nav>`), which is the default output
 mode, so no extra flag is needed.
+
+### Reporting what was recovered
+
+An inference a user cannot see is indistinguishable from a feature that
+silently does nothing, so `--report` prints what the engine recovered, on
+standard error, once the output is written:
+
+```sh
+$ textrill --report examples/homer.txt >/dev/null
+```
+
+```text
+textrill: report bytes=38477 headings=0 paragraphs=64 strong=39 br=34
+```
+
+Five numbers, in the same `key=value` form `make examples` prints (it reads
+them from this line rather than re-computing them, so the two cannot drift):
+bytes, headings (`<h1>`–`<h6>`), paragraphs, capitalised runs (`<strong>`) and
+line breaks (`<br>`). The counts are of the tags in the **produced document**,
+not of the events the engine believes it performed — a user with the file can
+reproduce every one with `grep`, and the tests do. The output is byte-identical
+with and without the flag; only stderr differs. It is refused with `--stream`,
+which never assembles a whole document to count.
 
 ### Streaming large inputs
 

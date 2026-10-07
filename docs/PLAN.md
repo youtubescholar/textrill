@@ -35,8 +35,9 @@ answered per input class, and answered by us.
    mark the document up first is a different tool.
 2. **Never drop text.** Declining to infer structure is fine. Dropping or
    silently reordering characters is not.
-3. **Infer, then say so.** `make examples` reports what was recovered, so a
-   regression in inference is a changed number rather than a shrug.
+3. **Infer, then say so.** `make examples` reports what was recovered — and the
+   CLI's own `--report` (S6) prints the same counts on stderr — so a regression
+   in inference is a changed number rather than a shrug.
 4. **The user's template is the user's.** No imposed page, no theme.
 5. **Errors are errors.** Non-zero exit, nothing half-written.
 
@@ -421,7 +422,7 @@ decision; Phase 7 grows the corpus for exactly this reason.
 
 | # | item | note |
 |---|---|---|
-| 5.0 | `--report`: the inference counts on stderr | Report-only, and first. The counts exist today only in `make examples`, which greps the output itself; the CLI offers no `--report`, `--verbose` or summary (verified in `--help`). A user whose `--toc` came out empty, and this phase's own measurement harness, both need "what did you see?" before anything is allowed to change. |
+| 5.0 | ~~`--report`: the inference counts on stderr~~ **resolved (S6)** | Report-only, and first. The counts exist today only in `make examples`, which greps the output itself; the CLI offers no `--report`, `--verbose` or summary (verified in `--help`). A user whose `--toc` came out empty, and this phase's own measurement harness, both need "what did you see?" before anything is allowed to change. See "Item 5.0, resolved". |
 | 5.1 | Measure candidate rules over `examples/` | The table above is the first data point. Required before any behaviour change, as below. |
 | 5.2 | Decide what `-H`'s block-start condition should be | Either document it in `--help` and the README, or change it — measured, not silently. Changing it means a heading rule can consume a line from the middle of a paragraph, which is the same hazard as 5.1's false positives. |
 
@@ -430,6 +431,61 @@ candidate headings, how many false positives on prose that is not structured. If
 the false positive rate is not near zero on real documents, this stays a
 proposal. The archived plan's own advice applies — measure first, and prefer
 report-only before behaviour change, which is what 5.0 is for.
+
+### Item 5.0, resolved
+
+**`--report` prints what the conversion recovered, on standard error, after the
+output is written**: `bytes`, `headings` (`<h1>`–`<h6>`), `paragraphs`,
+`strong` (capitalised runs) and `br` (line breaks), as one `key=value` line the
+way `make examples` prints them:
+
+```text
+textrill: report bytes=38477 headings=0 paragraphs=64 strong=39 br=34
+```
+
+Four decisions recorded, because each is the shape of a trap:
+
+- **The counts are of the produced tags, not of emission events.** The engine
+  truncates a `<p>` wrapper that already lost its content (`notes.rs` empties it)
+  while the paragraph still contributed its `<p>` tag at the moment it was
+  emitted, so an event counter would report paragraphs the file does not contain.
+  A count the file does not agree with is the bug this item exists to prevent, so
+  the scanner reads the finished output — which is what a user with the file can
+  reproduce with `grep`.
+- **Counting is case-insensitive.** `--no-html5` emits the reference's
+  upper-case tags; a report that reads 0 headings off a valid HTML 4 document
+  would be reporting the serialisation rather than the structure.
+- **`paragraphs` is `<p` followed by `>` or whitespace**: `<p class=…>`
+  (mailmode) and `<p>` count, `<pre>` does not. That is the one rule a naive
+  `<p` prefix gets wrong, and the sabotage below is built on it.
+- **`make examples` now reads `--report` instead of `grep`ping**, so the CLI
+  count and the smoke-run count are one implementation and cannot drift. The
+  independence has to come from somewhere, so `reporttest` recounts the output
+  with a deliberately different implementation (lowercase + `matches`, where the
+  product scans bytes).
+
+Refused with `--stream`, which never assembles a finished document to count —
+the same class of refusal as the whole-body passes. The output is byte-identical
+with and without the flag; only stderr differs. With `--chunk` the line totals
+the run, summing the files written.
+
+`--report` has no reference equivalent: the wrapper's `GetOptions` declares
+`verbose!` but never reads it, so there is nothing to be byte-par with.
+
+Gates: `reporttest` (9 tests) asserts the flag is off by default, prints only on
+stderr, leaves the output byte-identical (stdout and file paths), matches an
+independent recount across `<pre>`-bearing, mailmode and upper-case inputs,
+totals `--chunk` runs, refuses `--stream`, and pins exactly the numbers `make
+examples` prints for `examples/homer.txt`; the `report` module's unit tests pin
+the individual rules; `optionstest` moves the counts 67 → 68 options and
+124 → 125 spellings; the GUI's widget-coverage test moves 67 → 68 (`report`
+appears as an inert checkbox); `positioning.py` P16 moves 67 → 68. Two sabotages
+were observed, both before the fix was believed: (1) with the paragraph rule as
+a naive `<p` prefix, `an_indented_block_is_not_a_paragraph` and
+`the_counts_are_what_is_in_the_output` fail — and they had to exist, because
+homer.txt has no `<pre>` at all, so the absolute homer gate alone would not have
+noticed; (2) with the report written to stdout instead of stderr, six tests
+fail, because the output now differs. `make verify` is green.
 
 ## Phase 6 — Packaging
 
@@ -494,7 +550,7 @@ original does it too".
 | S3 | ~~Phase 4.1 — `--var`~~ **done** | Highest user-visible value; OFFERING §5 row 2 | substitution + undeclared-name gate broken once (see "Item 4.1, resolved"); the 4.4 unknown-slot guard stays green |
 | S4 | ~~Phase 4.2 — shipped templates~~ **done** | "templates people could use" | a conversion test per shipped template; 4.4 guard green; the Item 4.2 gates |
 | S5 | ~~Phase 3 — HTML5 default~~ **done** | A deliberate *option-default* divergence; the doctype interacts with the differential | precondition pins (corpus both sides, fuzz pair mandatory) made the exemptions unnecessary and the flip moved no case; provenance asserts the HTML5 charset meta; sabotage observed — old defaults fail html5test/provenance/P8 while the pinned corpus stays green |
-| S6 | Phase 5.0 — `--report` | Report-only instrument; prerequisite to any heading change | CLI test asserts the counts on stderr; they match what `make examples` reports |
+| S6 | ~~Phase 5.0 — `--report`~~ **done** | Report-only instrument; prerequisite to any heading change | `--report` prints the five counts on stderr `key=value`; `make examples` reads them from that line instead of `grep`ping, so the two cannot drift; `reporttest` recounts the output with an independent implementation; sabotage observed — a naive `<p` prefix overcounts `<pre>` blocks, and a report on stdout pollutes the output (see "Item 5.0, resolved") |
 | S7 | Phase 7 — grow `examples/` | 5.1 measures over real documents; one document cannot support a false-positive rate | each added document's recovered-structure counts are recorded in `make examples`; verify green |
 | S8 | Phase 5.1 — measure candidate rules | Required before any Phase 5 behaviour change | measurement table updated with per-rule false-positive counts; no behaviour change this step |
 | S9 | Phase 5.2 — decide `-H` block-start | The only Phase 5 behaviour change, once the measurement allows it | document the condition in `--help`/README, or change it with new corpus cases + oracle; verify green |

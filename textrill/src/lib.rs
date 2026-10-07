@@ -130,6 +130,7 @@ pub mod notes;
 pub mod options;
 pub mod prefilter;
 pub mod rcfile;
+pub mod report;
 pub mod section;
 pub mod template;
 pub mod urlscheme;

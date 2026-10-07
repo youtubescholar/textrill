@@ -188,10 +188,10 @@ def main():
           merged, merged if merged in joined else "(not found: no merge)")
 
     # P16: our own surface, which README.md and docs/CAPABILITIES.md §1 both
-    # call "67 options".
+    # call "68 options".
     help_text = run([str(MINE), "--help"]).stdout
     opts = re.findall(r"^    [-a-zA-Z_]", help_text, re.M)
-    check("P16", "textrill --help option surface", 67, len(opts))
+    check("P16", "textrill --help option surface", 68, len(opts))
 
     # P17-P20: the conjunction claim in docs/OFFERING.md §2 -- textrill reads
     # what pandoc will not, pandoc writes what we do not, so the two are the

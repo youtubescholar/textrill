@@ -84,6 +84,7 @@ pub const SPECS: &[Spec] = specs![
     Int "Whitespace needed in a line to preformat it." ["preformat_whitespace_min", "prewhite", "p"],
     Str "File whose contents are prepended to the output." ["prepend_file", "prepend_body", "pp"],
     Flag "Keep the original indentation of list items." ["preserve_indent", "pi"],
+    Flag "Print what the conversion recovered (bytes, headings, paragraphs, capitals, breaks) on standard error (P5.0)." ["report"],
     Flag "Wrap each heading section in <article> (P5.2)." ["section"],
     Int "Lines shorter than this are broken with <br/>." ["short_line_length", "shortline", "s"],
     Flag "Read and write a paragraph at a time (P5.4)." ["stream"],
@@ -228,6 +229,7 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
         "preformat_whitespace_min" => opts.preformat_whitespace_min.to_string(),
         "prepend_file" => opts.prepend_file.clone(),
         "preserve_indent" => opts.preserve_indent.to_string(),
+        "report" => opts.report.to_string(),
         "section" => opts.section.to_string(),
         "short_line_length" => opts.short_line_length.to_string(),
         "stream" => opts.stream.to_string(),
@@ -533,6 +535,8 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         "escape_HTML_chars" => opts.escape_html_chars = value,
         "explicit_headings" => opts.explicit_headings = value,
         "extract" => opts.extract = value,
+        // P5.0.
+        "report" => opts.report = value,
         // P5.2.
         "section" => opts.section = value,
         "toc" => opts.toc = value,

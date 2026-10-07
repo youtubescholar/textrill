@@ -76,7 +76,7 @@ Three capabilities, and the competition on each:
 
 | capability | textrill | nearest thing | gap |
 |---|---|---|---|
-| read unmarked text | yes, 67 options of layout inference | nothing active | **clear** |
+| read unmarked text | yes, 68 options of layout inference | nothing active | **clear** |
 | infer structure | setext, capitals, short lines, lists, rules, pre, tables, mail | txt2tags, needs underlining | real |
 | user templates | 7 slots, `--var` parameters (4.1), 5 shipped templates incl. `--template_library` (4.2) | pandoc: 20+ writers, `-V` variables, `$if`, `$for`, partials | **medium** |
 

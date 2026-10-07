@@ -159,6 +159,12 @@ corpus: build
 # engine recovered, so a regression in layout inference shows up as a changed
 # count rather than as a shrug.
 #
+# The counts come from the tool itself: `--report` (P5.0) prints the same five
+# numbers -- bytes, headings, paragraphs, capitalised runs, line breaks -- that
+# this target used to compute with `grep`, and a single implementation cannot
+# drift. `tests/reporttest.rs` keeps that instrument honest by recounting the
+# output independently.
+#
 # This target does not compare against anything. There is no oracle for "did you
 # read this document the way a person would"; the counts below are the record.
 EXAMPLES_DIR ?= examples
@@ -168,15 +174,16 @@ examples: build
 	for f in $(EXAMPLES_DIR)/*.txt; do \
 	  [ -e "$$f" ] || { echo "no examples in $(EXAMPLES_DIR)/"; exit 1; }; \
 	  out=$$(mktemp); \
-	  $(RELEASE_BIN) --infile "$$f" --outfile "$$out" || { \
-	    echo "FAIL  $$(basename $$f): converter exited non-zero"; rc=1; rm -f "$$out"; continue; }; \
-	  bytes=$$(wc -c < "$$out"); \
-	  h=$$(grep -coE '<h[1-6]' "$$out" || true); \
-	  p=$$(grep -coE '<p>' "$$out" || true); \
-	  st=$$(grep -coE '<strong>' "$$out" || true); \
-	  br=$$(grep -coE '<br' "$$out" || true); \
-	  printf '%-22s %8s B  h=%-4s p=%-4s strong=%-4s br=%s\n' \
-	    "$$(basename "$$f")" "$$bytes" "$$h" "$$p" "$$st" "$$br"; \
+	  rep=$$($(RELEASE_BIN) --infile "$$f" --outfile "$$out" --report 2>&1); \
+	  if [ $$? -ne 0 ]; then \
+	    echo "FAIL  $$(basename $$f): converter exited non-zero"; rc=1; rm -f "$$out"; continue; \
+	  fi; \
+	  case $$rep in \
+	    textrill:\ report\ bytes=*) ;; \
+	    *) echo "FAIL  $$(basename $$f): no report line ($$rep)"; rc=1; rm -f "$$out"; continue ;; \
+	  esac; \
+	  rep=$${rep#textrill: report }; \
+	  printf '%-22s %s\n' "$$(basename "$$f")" "$$rep"; \
 	  rm -f "$$out"; \
 	done; \
 	exit $$rc

@@ -316,6 +316,18 @@ pub struct Options {
     /// Refused with `--chunk` and `--stream`, for the reasons given on
     /// [`Options::citations`].
     pub glossary: bool,
+    /// P5.0. Print what the conversion recovered — bytes, headings, paragraphs,
+    /// capitalised runs and line breaks — as one `key=value` line on standard
+    /// error once the output is written.
+    ///
+    /// The counts are of the tags in the produced document rather than of the
+    /// events the engine performed, so a user with the file can reproduce them
+    /// (see [`crate::report`]). The output is byte-identical with and without
+    /// it; only stderr differs. Default **off**, because stderr is where the
+    /// diagnostics live and a report nobody asked for is a diagnostic. Refused
+    /// with `--stream`, which has no finished document to count: the whole-body
+    /// passes are refused there for the same reason.
+    pub report: bool,
     /// Phase 5. Wrap each heading-delimited section of the body in an
     /// `<article class="section" id="chunk-N">` element.
     ///
@@ -476,6 +488,7 @@ impl Default for Options {
             preformat_whitespace_min: 5,
             prepend_file: String::new(),
             preserve_indent: false,
+            report: false,
             short_line_length: 40,
             style_url: String::new(),
             tab_width: 8,

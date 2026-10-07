@@ -13,6 +13,7 @@ use std::process::ExitCode;
 use textrill::cli;
 use textrill::convert::Converter;
 use textrill::options::{Encoding, Options};
+use textrill::report::Counts;
 
 const PROG: &str = "textrill";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -61,6 +62,17 @@ fn main() -> ExitCode {
     }
 
     let mut conv = Converter::new(opts.clone());
+
+    // P5.0. `--report` counts the finished document, and a streaming run never
+    // has one: it writes each paragraph and drops it, so there is nothing to
+    // scan. Refusing rather than printing zeros, because a report of 0 headings
+    // and 0 paragraphs from a document that plainly has them is a lie about the
+    // input. This is the same class of refusal as `--number_headings`,
+    // `--section`, `--toc` and `--chunk` below, which need the body in hand.
+    if opts.report && opts.stream {
+        eprintln!("{PROG}: --report is not valid with --stream");
+        return ExitCode::from(1);
+    }
 
     // P5.4. `--stream` feeds one paragraph at a time. It is only valid when
     // nothing needs the assembled body and the input is UTF-8, which is the
@@ -116,6 +128,18 @@ fn main() -> ExitCode {
                 wrote = false;
             }
         }
+        // P5.0. One line for the whole run: `--chunk` writes several files and
+        // the report is about what was produced, not about one of them. Placed
+        // like the buffered path's -- after the writes, before the exit-status
+        // checks -- so both say the same thing about a run that produced a
+        // document and then failed.
+        if opts.report && wrote {
+            let mut total = Counts::default();
+            for (_, html) in &files {
+                total.add(&Counts::of(html));
+            }
+            eprintln!("{PROG}: report {total}");
+        }
         if !unreadable.is_empty() {
             eprintln!(
                 "{PROG}: could not read {} input file(s), exiting non-zero",
@@ -161,7 +185,7 @@ fn main() -> ExitCode {
             Err(e) => Err(e),
         }
     } else {
-        std::fs::write(&opts.outfile, out)
+        std::fs::write(&opts.outfile, &out)
     };
     let wrote = match result {
         Ok(()) => true,
@@ -174,6 +198,15 @@ fn main() -> ExitCode {
             false
         }
     };
+
+    // P5.0. After the write, so that the counts describe what reached the
+    // output rather than what the converter held, and before the exit-status
+    // checks, so that a run which produced a document and then failed on a
+    // later input still reports it. Only on a successful write: a report of a
+    // file that was never opened would be a report of nothing.
+    if opts.report && wrote {
+        eprintln!("{PROG}: report {}", Counts::of(&out));
+    }
 
     // Reported after the write, so that a broken pipe (`txt2html f | head`) is
     // still exit 0 and a successful conversion of the readable inputs is not
