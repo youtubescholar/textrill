@@ -65,6 +65,28 @@ reports success wrongly" below.
   * `pre2` — the golden file has a trailing newline the reference output does
     not. Upstream's own comparison strips CR and LF before diffing.
 
+### The doctype is pinned on both sides
+
+textrill's default doctype is HTML5 (PLAN Phase 3); the reference's is XHTML.
+A case whose doctype came from a *default* rather than from its own entry
+would therefore change meaning on one side only — 34 of the cases above
+relied on defaults before the flip — so neither harness is allowed to have
+one:
+
+* the reference driver is constructed with `HTML::TextToHTML->new('xhtml' => 1,
+  @ctor)`, the module's own default spelled out and placed *first*, so
+  `CTOR[]` (`sample`) and `EXTRA[]` (`empty1`, `empty3`) still override it;
+* the port is invoked with `--xhtml` before the case's own flags, so later
+  flags still win — `CLI[sample]='--no-xhtml …'` reaches HTML 4 as it did
+  before the flip;
+* `fuzz.py` puts exactly one of `--xhtml` / `--no-xhtml` at the front of every
+  case's argv, and the pair is excluded from the random option pool: a fuzzer
+  samples options rather than declaring them, and a default it does not know
+  about is a comparison it cannot reproduce.
+
+With the pins in place the flip moved no case: PASS stays 61/61 and all 33
+goldens stay byte-identical, because no case reads the default doctype.
+
 Current status: **61/61 cases byte-identical**, and all 33 upstream golden
 checks reproduce byte for byte across 29 distinct files (the `empty1`–`empty4`
 cases all compare against the one `good_empty.html`, which is why the count of

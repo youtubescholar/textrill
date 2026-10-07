@@ -16,7 +16,7 @@ Positional:
   file          text file to open (UTF-8 or Latin-1)
 
 Options:
-  --xhtml       produce XHTML, the converter's default
+  --xhtml       produce XHTML 1.0 Strict (the Perl original's default)
   --no-xhtml    produce HTML 4 instead
   --tables      start with table recognition on
   --version     print the version and exit

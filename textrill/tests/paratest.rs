@@ -1,6 +1,12 @@
 //! Mirrors upstream `t/10para.t`: the string-level API (process_para,
 //! process_chunk, is_fragment) and the option handling for caps_tag and the
 //! bold/italic delimiters.
+//!
+//! The expected strings are upstream's own, which means they are XHTML
+//! strings: upstream runs with the Perl module's `xhtml => 1` default, so
+//! `<br/>` and `</p>` are what t/10para.t asserts. Every converter here pins
+//! `xhtml: true` for that reason (PLAN Phase 3 exempts these mirrors rather
+//! than rewriting them to the port's HTML5 default).
 
 use textrill::convert::Converter;
 use textrill::options::Options;
@@ -8,6 +14,7 @@ use textrill::options::Options;
 fn converter() -> Converter {
     let o = Options {
         default_link_dict: String::new(),
+        xhtml: true,
         ..Options::default()
     };
     Converter::new(o)
@@ -59,6 +66,7 @@ fn process_chunk_caps_tag_off() {
     let o = Options {
         default_link_dict: String::new(),
         caps_tag: String::new(),
+        xhtml: true,
         ..Options::default()
     };
     let mut c = Converter::new(o);
@@ -73,6 +81,7 @@ fn process_chunk_custom_delimiters() {
         default_link_dict: String::new(),
         bold_delimiter: "^".to_string(),
         italic_delimiter: "--".to_string(),
+        xhtml: true,
         ..Options::default()
     };
     let mut c = Converter::new(o);
@@ -87,6 +96,7 @@ fn process_chunk_no_delimiters() {
         default_link_dict: String::new(),
         bold_delimiter: String::new(),
         italic_delimiter: String::new(),
+        xhtml: true,
         ..Options::default()
     };
     let mut c = Converter::new(o);
@@ -100,6 +110,7 @@ fn instring_round_trip() {
     let o = Options {
         default_link_dict: String::new(),
         instring: vec!["hello world\n".to_string()],
+        xhtml: true,
         ..Options::default()
     };
     let mut c = Converter::new(o);

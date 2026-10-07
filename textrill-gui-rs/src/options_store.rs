@@ -75,6 +75,27 @@ pub fn decode(text: &str, opts: &mut Options) {
 }
 
 fn apply(opts: &mut Options, name: &str, value: &Json) {
+    // The blob is a full-state snapshot, not a command line. `cli::set_value`
+    // treats the two doctype flags as transitions -- `xhtml: false` read as
+    // `--no-xhtml` means "go to HTML4" and clears `html5` -- which is right
+    // for parsing arguments and wrong for replaying a saved panel, where
+    // `html5: true` sitting next to `xhtml: false` records what *is* on and
+    // must survive `cli::SPECS` order (html5 first, xhtml last). Assign the
+    // two directly, as the Python panel's `set_values` did; the rest of the
+    // blob is plain values either way.
+    if let Json::Bool(on) = value {
+        match name {
+            "html5" => {
+                opts.html5 = *on;
+                return;
+            }
+            "xhtml" => {
+                opts.xhtml = *on;
+                return;
+            }
+            _ => {}
+        }
+    }
     let mut set = |v: &str| {
         let _ = cli::set_value(opts, name, v);
     };

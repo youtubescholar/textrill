@@ -86,7 +86,7 @@ checked by hand:
 textrill --help | grep -cE '^    '                       # 67 options
 pandoc --list-input-formats                              # no plain, 43 total
 pandoc -f plain -t html examples/homer.txt               # rejected
-textrill --infile examples/homer.txt --outfile -         # 38 882 B, 64 p, 3 029 max
+textrill --infile examples/homer.txt --outfile -         # 38 477 B, 64 p, 3 030 max
 pandoc -f markdown -t html examples/homer.txt            # 38 132 B, 62 p, 3 665 max
 
 # the conjunction: our HTML into pandoc's writers
@@ -102,8 +102,8 @@ textrill --title "The Odyssey" --infile examples/homer.txt --outfile - \
 | P1 | pandoc has no plain-text reader | `plain` absent from `--list-input-formats`; 43 readers |
 | P2 | `pandoc -f plain` | rejected, non-zero exit |
 | P3 | the 3.12 source registers no plain reader | no `"plain"` entry in `Readers.hs` |
-| P4–P8 | textrill on `examples/homer.txt` | 39 `<strong>`, 34 `<br/>`, 0 headings, 64 paragraphs, largest 3 029 chars, 38 882 B |
-| P9–P12 | pandoc, forced to markdown, same file | 0 `<strong>`, 0 `<br/>`, 62 paragraphs, largest 3 665 chars, 38 132 B |
+| P4–P8 | textrill on `examples/homer.txt` | 39 `<strong>`, 34 `<br>`, 0 headings, 64 paragraphs, largest 3 030 chars, 38 477 B |
+| P9–P12 | pandoc, forced to markdown, same file | 0 `<strong>`, 0 `<br>`, 62 paragraphs, largest 3 665 chars, 38 132 B |
 | P13–P15 | mechanism, small input | textrill keeps indented lines apart; pandoc joins them into one paragraph |
 | P16 | our own surface | 67 options |
 | P17–P18 | our HTML into `pandoc -t epub` | exits 0; the result carries `application/epub+zip` |
@@ -153,7 +153,7 @@ item; this document's contribution is the order and the reason.
 | 2 | `PLAN.md` Phase 4.1 — `--var name=value` | **Built (S3).** The single highest-value addition is delivered: a fixed frame is now parameterisable, `{{textrill:var:name}}` filled verbatim and strict on undeclared names. |
 | 3 | `PLAN.md` Phase 4.2 — a shipped template library | **Built (S4).** Five templates ship embedded in the binary and as files under `textrill/templates/` (`article`, `book`, `manpage`, `slide`, `bare`), selected with `--template_library NAME`. All use only the fixed slots, so each works with zero required arguments and produces no silent-empty frames; someone with no template now has actual ones to start from. |
 | 4 | `PLAN.md` Phase 5.0 — `--report`, the counts on stderr | The report-only instrument the plan already asks for, and the first thing a user whose `--toc` came out empty needs: *what did you see?* The counts exist only in `make examples` today; the CLI prints none. |
-| 5 | `PLAN.md` Phase 5 — headings in documents that have none | `homer.txt` yields no headings at all: 39 capitalised runs become `<strong>`, `--toc` lists nothing, `--chunk` writes one 38 882-byte file. This is the capability claim a reader will test first ("it found my chapter headings, or it did not"), and the plan's first measurement already landed: its candidate rule fires on 2 lines of that document, both signatures (Phase 5). Research before behaviour, as the plan requires. |
+| 5 | `PLAN.md` Phase 5 — headings in documents that have none | `homer.txt` yields no headings at all: 39 capitalised runs become `<strong>`, `--toc` lists nothing, `--chunk` writes one 38 477-byte file. This is the capability claim a reader will test first ("it found my chapter headings, or it did not"), and the plan's first measurement already landed: its candidate rule fires on 2 lines of that document, both signatures (Phase 5). Research before behaviour, as the plan requires. |
 | 6 | `PLAN.md` Phase 6 — packaging, blocked on the GitHub owner | A static binary is already buildable; an installable app is not. The owner decision is the same one that blocks `Cargo.toml` `repository` and the app-id, so it is one decision, not three. |
 | 7 | `PLAN.md` Phase 7 — grow `examples/` | One document is not evidence of trustworthiness on *your* document. The growth list is already written. |
 | 8 | Phase 4.3 — `{{textrill:if:…}}` | One template serving documents with and without a TOC. Valuable, and after the library exists rather than before it. |
@@ -180,7 +180,7 @@ links.
 
 **Does not work yet, in the order a user meets it:**
 
-1. *`--toc` emits zero items and `--chunk` emits one 38 882-byte file*, because
+1. *`--toc` emits zero items and `--chunk` emits one 38 477-byte file*, because
    no line in the document becomes a heading. And nothing says so: the CLI
    prints no inference counts at all, so an empty table of contents looks like
    a working feature rather than a report of what was seen. That is item 2,

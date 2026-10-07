@@ -1,9 +1,11 @@
-//! P5.1 — the opt-in HTML5 output mode.
+//! P5.1 — the HTML5 output mode, which is the default (PLAN Phase 3).
 //!
-//! The contract is byte-identical output from the reference by default, so this
-//! mode must be invisible until it is asked for. The first test pins that; the
-//! rest pin what asking for it changes: the short doctype, an `<html>` element
-//! with no XHTML namespace, and a charset declaration in the head.
+//! The reference's XHTML 1.0 Strict default is wrong for a new tool in 2026,
+//! so the port emits HTML5 unless told otherwise; this suite pins both
+//! directions: what the default does (short doctype, no namespace, one charset
+//! meta, lower-case tags) and that the reference-compatible modes are still
+//! reachable through `--no-html5` and `--xhtml` — the modes the corpus pins
+//! case by case.
 
 use textrill::cli;
 use textrill::convert::Converter;
@@ -16,14 +18,40 @@ fn render(opts: Options) -> String {
 }
 
 #[test]
-fn html5_is_off_by_default() {
+fn html5_is_on_by_default() {
     let conv = Converter::new(Options::default());
-    assert!(!conv.opts.html5);
+    assert!(conv.opts.html5);
     let out = render(Options::default());
-    // The XHTML prolog stays; nothing HTML5 leaks into the default output.
+    // Short doctype, no namespace, exactly one charset meta, lower case.
+    assert!(out.starts_with("<!DOCTYPE html>\n<html"), "{out:?}");
+    assert!(!out.contains("xmlns"), "{out:?}");
+    assert!(!out.contains("XHTML"), "{out:?}");
+    assert_eq!(out.matches("charset").count(), 1, "{out:?}");
+    assert!(out.contains("<meta charset=\"utf-8\">"), "{out:?}");
+}
+
+#[test]
+fn the_reference_default_is_still_one_flag_away() {
+    // Exempted, not deleted (PLAN Phase 3): the pre-flip default was the
+    // reference's XHTML 1.0 Strict, and these are the assertions it made.
+    // One --xhtml (the flag the corpus and fuzz pin) brings it back, and it
+    // must take HTML5 mode with it rather than composing with it.
+    let mut opts = Options::default();
+    cli::set_value(&mut opts, "xhtml", "1").expect("xhtml");
+    assert!(opts.xhtml);
+    assert!(!opts.html5, "the two doctypes are mutually exclusive");
+    let out = render(opts);
     assert!(out.contains("<!DOCTYPE html PUBLIC"), "{out:?}");
     assert!(!out.contains("<html>\n"), "{out:?}");
     assert!(!out.contains("<!DOCTYPE html>\n"), "{out:?}");
+    assert!(
+        out.contains("xmlns=\"http://www.w3.org/1999/xhtml\""),
+        "{out:?}"
+    );
+    assert!(
+        !out.contains("charset"),
+        "no charset outside HTML5 mode: {out:?}"
+    );
 }
 
 #[test]
@@ -61,9 +89,9 @@ fn html5_and_meta_charset_do_not_emit_two_charsets() {
 
 #[test]
 fn html5_respects_tag_case() {
-    // The default carries xhtml, which turns lower_case_tags on, so the bare
-    // flag already gives idiomatic lower case. Asking for upper case explicitly
-    // is still valid HTML5 and must not be overridden.
+    // The default carries lower_case_tags (it is the modern lower-case mode),
+    // but HTML5 does not force it the way XHTML does: asking for upper case
+    // explicitly is still valid HTML5 and must not be overridden.
     let out = render(Options {
         html5: true,
         xhtml: false,

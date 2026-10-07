@@ -105,6 +105,30 @@ fn html5_mode_also_names_textrill() {
 }
 
 #[test]
+fn the_default_document_declares_its_encoding() {
+    // PLAN Phase 3: the default doctype is HTML5, and HTML5 always declares
+    // an encoding whether or not --meta_charset was asked for. The reference
+    // emits no charset at all, and the differential never sees this line
+    // because every corpus and fuzz case pins a reference-compatible mode --
+    // so this test is where the deliberate divergence is pinned, with the
+    // html5test checks on the mode's own contract as the other half.
+    let out = render(Options::default());
+    assert_eq!(out.matches("charset").count(), 1, "{out:?}");
+    assert!(out.contains(r#"<meta charset="utf-8">"#), "{out:?}");
+    // In the reference-compatible modes it stays absent (exempted, not
+    // deleted: the pre-flip default emitted none either).
+    let legacy = Options {
+        html5: false,
+        ..Options::default()
+    };
+    let legacy_out = render(legacy);
+    assert!(
+        !legacy_out.contains("charset"),
+        "HTML4 mode: {legacy_out:?}"
+    );
+}
+
+#[test]
 fn a_full_document_from_the_cli_names_textrill() {
     // The tests above drive the library directly. This one spawns the real
     // binary, following tests/cliexit.rs, so the assertion covers the path a
@@ -137,6 +161,11 @@ fn a_full_document_from_the_cli_names_textrill() {
         "{out:?}"
     );
     assert!(!out.contains("TextToHTML"), "{out:?}");
+    // The CLI path carries the default-mode charset too, so a refactor that
+    // builds the document differently cannot satisfy the library tests while
+    // the shipped binary stops declaring an encoding.
+    assert_eq!(out.matches("charset").count(), 1, "{out:?}");
+    assert!(out.contains(r#"<meta charset="utf-8">"#), "{out:?}");
 
     let _ = std::fs::remove_file(&infile);
     let _ = std::fs::remove_file(&outfile);

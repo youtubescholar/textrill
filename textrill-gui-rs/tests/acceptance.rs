@@ -120,7 +120,7 @@ fn a_conversion_reaches_the_preview() {
     wait_for_conversion(&mut app, Duration::from_secs(10));
 
     assert!(
-        app.output.contains("<p>Hello</p>"),
+        app.output.contains("<p>Hello"),
         "unexpected output: {}",
         app.output
     );

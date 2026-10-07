@@ -2863,18 +2863,12 @@ impl Converter {
             let first_line = para.split('\n').next().unwrap_or("").to_string();
 
             if !self.opts.doctype.is_empty() {
-                if self.opts.html5 {
-                    // P5.1. HTML5 serialisation: the short doctype, and an
-                    // <html> element with no namespace. Attribute and tag case
-                    // still follows lower_case_tags, so a bare --html5 emits
-                    // valid but upper-case tags. The charset meta below is
-                    // forced on with the doctype: an HTML5 document without a
-                    // declared encoding is the exact thing the mode exists to
-                    // fix, and a validator warns about it.
-                    out.push_str("<!DOCTYPE html>\n");
-                    out.push_str(&self.get_tag("html", TAG_START, ""));
-                    out.push('\n');
-                } else if self.opts.xhtml {
+                // XHTML is checked first even though HTML5 is the default:
+                // tests and front ends flip `opts.xhtml` on a converter that
+                // already carries the default `html5: true`, and the doctype
+                // that was asked for explicitly must be the one emitted. The
+                // CLI mode flags keep the two exclusive anyway (cli.rs).
+                if self.opts.xhtml {
                     out.push_str("<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"\n");
                     out.push_str("\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n");
                     out.push_str(&self.get_tag(
@@ -2882,6 +2876,17 @@ impl Converter {
                         TAG_START,
                         " xmlns=\"http://www.w3.org/1999/xhtml\"",
                     ));
+                    out.push('\n');
+                } else if self.opts.html5 {
+                    // P5.1. HTML5 serialisation: the short doctype, and an
+                    // <html> element with no namespace. Tag case follows
+                    // lower_case_tags as everywhere else; the mode flags set
+                    // it, so the default is lower-case HTML5. The charset meta
+                    // below is forced on with the doctype: an HTML5 document
+                    // without a declared encoding is the exact thing the mode
+                    // exists to fix, and a validator warns about it.
+                    out.push_str("<!DOCTYPE html>\n");
+                    out.push_str(&self.get_tag("html", TAG_START, ""));
                     out.push('\n');
                 } else {
                     out.push_str("<!DOCTYPE HTML PUBLIC \"");

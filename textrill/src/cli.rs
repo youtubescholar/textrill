@@ -540,8 +540,26 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         // Note and glossary collection.
         "citations" => opts.citations = value,
         "glossary" => opts.glossary = value,
-        // P5.1.
-        "html5" => opts.html5 = value,
+        // P5.1. The mode flags carry their tag case with them, because the
+        // default is now lower-case HTML5 and `--no-html5` has to mean the
+        // reference's HTML4 *with* the reference's upper-case tags. An
+        // explicit `--lower_case_tags` given after the flag still wins; the
+        // order that cannot express itself is `--lower_case_tags --no-html5`
+        // (and `--lower_case_tags --no-xhtml`), where entering the mode resets
+        // it -- the reference is itself order-dependent on this axis, since
+        // `--xhtml` forces lower_case_tags on in deal_with_options whatever
+        // came before it. Unlike the reference, an explicit
+        // `--no-lower_case_tags` is honoured in the default HTML5 mode: the
+        // port does not force lower case on for its own doctype the way the
+        // reference does for XHTML, because an option that does nothing is
+        // worse than a mode pair that differs by a default.
+        "html5" => {
+            opts.html5 = value;
+            if value {
+                opts.xhtml = false;
+            }
+            opts.lower_case_tags = value;
+        }
         "indent_par_break" => opts.indent_par_break = value,
         "link_only" => opts.link_only = value,
         "lower_case_tags" => opts.lower_case_tags = value,
@@ -560,7 +578,17 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         "utf8" => {}
         "use_mosaic_header" => opts.use_mosaic_header = value,
         "use_preformat_marker" => opts.use_preformat_marker = value,
-        "xhtml" => opts.xhtml = value,
+        // The XHTML half of the same rule: `--xhtml` is lower case (the
+        // reference forces lower_case_tags on for it), `--no-xhtml` is the
+        // reference's HTML4 default, which is upper case -- so the flag sets
+        // both the doctype and the tag case, and clearing html5 unconditionally
+        // keeps the two doctypes exclusive (`--no-xhtml` after `--html5` has
+        // to mean HTML4, not "HTML5 but XHTML-shaped").
+        "xhtml" => {
+            opts.xhtml = value;
+            opts.html5 = false;
+            opts.lower_case_tags = value;
+        }
         other => {
             let _ = other;
         }

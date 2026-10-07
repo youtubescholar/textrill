@@ -600,11 +600,7 @@ fn loading_a_file_fills_the_document_and_converts() {
     wait_for_conversion(&mut app, Duration::from_secs(10));
 
     assert_eq!(app.doc.text, "Hello\n");
-    assert!(
-        app.output.contains("<p>Hello</p>"),
-        "output: {}",
-        app.output
-    );
+    assert!(app.output.contains("<p>Hello"), "output: {}", app.output);
 }
 
 fn wait_for_conversion(app: &mut TextrillApp, timeout: Duration) {

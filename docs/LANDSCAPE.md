@@ -59,8 +59,8 @@ The same posture, stated plainly, applies to inference: pandoc converts
 |  | textrill | pandoc (markdown) |
 |---|---|---|
 | `<strong>` | 39 | 0 |
-| `<br/>` | 34 | 0 |
-| largest paragraph | 3 029 chars | 3 665 chars |
+| `<br>` | 34 | 0 |
+| largest paragraph | 3 030 chars | 3 665 chars |
 
 pandoc merges the title block, the contents list and the first chapter headings
 into one 3 665-character paragraph, because markdown's soft-wrap joining rule

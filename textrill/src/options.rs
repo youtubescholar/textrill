@@ -351,11 +351,15 @@ pub struct Options {
     /// P5.1. Emit an HTML5 document: `<!DOCTYPE html>`, an `<html>` element
     /// without the XHTML namespace, and `<meta charset="utf-8">`.
     ///
-    /// Default **off**. Byte-identical output from the reference is the port's
-    /// contract, so HTML5 is strictly opt-in; turning it on by default would
-    /// move every golden. The tag and attribute case still follows
-    /// `lower_case_tags`, so `--html5 --lower_case_tags` gives idiomatic
-    /// lower-case HTML5 and `--html5` alone gives valid but upper-case tags.
+    /// Default **on** (PLAN Phase 3): XHTML 1.0 Strict is the Perl default and
+    /// is wrong for a new tool in 2026, so the port emits HTML5 and a charset
+    /// meta unless told otherwise. `--no-html5` and `--no-xhtml` both select
+    /// the reference's HTML 4.01 output, `--xhtml` selects XHTML; the corpus
+    /// cases that assert HTML4 pin those flags rather than being deleted.
+    /// Tag case follows [`Options::lower_case_tags`], which each mode flag
+    /// sets as part of entering its mode: the default is lower-case HTML5,
+    /// `--no-html5` is upper-case HTML4 (the reference's own default), and an
+    /// explicit `--lower_case_tags` given after the mode flag wins.
     pub html5: bool,
     pub indent_width: usize,
     pub indent_par_break: bool,
@@ -449,7 +453,7 @@ impl Default for Options {
             stream: false,
             hrule_min: 4,
             glossary: false,
-            html5: false,
+            html5: true,
             indent_width: 2,
             indent_par_break: false,
             italic_delimiter: "*".to_string(),
@@ -457,7 +461,7 @@ impl Default for Options {
             meta_charset: false,
             links_dictionaries: Vec::new(),
             link_only: false,
-            lower_case_tags: false,
+            lower_case_tags: true,
             mailmode: false,
             make_anchors: true,
             make_links: true,
@@ -484,7 +488,7 @@ impl Default for Options {
             unhyphenation: true,
             use_mosaic_header: false,
             use_preformat_marker: false,
-            xhtml: true,
+            xhtml: false,
             infile: Vec::new(),
             instring: Vec::new(),
         }
@@ -791,8 +795,15 @@ impl Options {
             self.endpreformat_trigger_lines = 1;
         }
         self.endpreformat_trigger_lines = self.endpreformat_trigger_lines.clamp(0, 2);
-        // XHTML implies lower case
+        // XHTML implies lower case, as in the reference (TextToHTML.pm:1957),
+        // and takes HTML5 mode with it: the two doctypes are mutually
+        // exclusive, and a struct built directly with `xhtml: true` would
+        // otherwise carry the default `html5: true` as well and serialise as
+        // HTML5. HTML4 (neither flag) does not touch lower_case_tags here --
+        // the CLI mode flags set the tag case as part of entering their mode,
+        // which is where the reference's own `xhtml => 0` default lives.
         if self.xhtml {
+            self.html5 = false;
             self.lower_case_tags = true;
         }
     }

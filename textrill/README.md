@@ -129,8 +129,10 @@ textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > RE
 There are **67 options** with **124 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
-The option names and defaults are the upstream ones, unchanged, so a document
-converts the same way under either tool. A few are worth calling out:
+The option names are the upstream ones, unchanged, so a document converts the
+same way under either tool; the doctype default is the one deliberate
+departure (HTML5, see "HTML5 output" above) and `--xhtml` restores the
+upstream pair. A few are worth calling out:
 
 | Option | Default | Effect |
 | --- | --- | --- |
@@ -143,7 +145,8 @@ converts the same way under either tool. A few are worth calling out:
 | `--allowed_url_schemes` | none | Allow only these URL schemes in `href`s, instead of refusing the script-bearing ones |
 | `--extract` | off | Output only the body, without the surrounding document |
 | `--meta_charset` | off | Emit `<meta charset="utf-8">` |
-| `--html5` | off | Emit HTML5: `<!DOCTYPE html>`, no namespace, charset meta |
+| `--html5` | on | Emit HTML5: `<!DOCTYPE html>`, no namespace, charset meta; `--no-html5` gives the Perl original's HTML 4.01 |
+| `--xhtml` | off | Emit XHTML 1.0 Strict instead — the Perl original's default |
 | `--section` | off | Wrap each heading section in `<article id="chunk-N">` |
 | `--toc` | off | Prepend a generated table of contents (implies `--section`) |
 | `--chunk` | off | Write one HTML file per top-level section |
@@ -189,13 +192,16 @@ definition would rewrite what a sentence means.
 
 ### HTML5 output
 
-By default the prolog matches the Perl original: an XHTML 1.0 Strict doctype
-with an `xmlns` on `<html>`, and no encoding declaration. `--html5` switches the
-prolog to HTML5 — the short `<!DOCTYPE html>`, an `<html>` element with no
-namespace, and a forced `<meta charset="utf-8">` — and leaves the body markup
-unchanged. It is **off by default** so output stays byte-identical to the
-reference; tag case is still governed by the usual `--xhtml`/`--lower_case_tags`
-settings, so a bare `--html5` is already lower-case.
+By default the prolog is HTML5: the short `<!DOCTYPE html>`, an `<html>`
+element with no namespace, a forced `<meta charset="utf-8">`, and lower-case
+tags. The Perl original's modes are all still one flag away: `--xhtml` gives
+the XHTML 1.0 Strict doctype with the XHTML namespace, and `--no-html5` (or
+`--no-xhtml`) gives the HTML 4.01 prolog with upper-case tags, byte for byte
+what the reference produces. The corpus and the fuzzer pin those modes
+explicitly on both sides of the differential, so the default change never
+touches the parity gate. Tag case is governed by `--lower_case_tags` as
+usual, and each mode flag sets it as part of entering its mode — an explicit
+`--lower_case_tags` after the flag wins.
 
 ### Sectioning, TOC and multi-file output
 
@@ -232,8 +238,8 @@ wrote them — the converter has no way to know whether `docs/readme` exists.
 in the `--toc` labels and in each `--chunk` page. It is independent of
 `--section`/`--toc` and, like them, **off by default**.
 
-The markup here is HTML5 (`<article>`, `<nav>`), so these options are intended
-to be used together with `--html5`.
+The markup here is HTML5 (`<article>`, `<nav>`), which is the default output
+mode, so no extra flag is needed.
 
 ### Streaming large inputs
 
@@ -502,11 +508,11 @@ the two disagree the question is which is right, and textrill decides; see
 `../docs/PLAN.md`.
 
 Behaviour was pinned by differential testing against the real implementation
-rather than guessed from documentation, which is why the option names and
-defaults are the upstream ones and a document can be converted by either tool
-and compared:
+rather than guessed from documentation, which is why the option names are the
+upstream ones and a document can be converted by either tool and compared —
+with the doctype pinned explicitly on both sides (see below):
 
-- `tests/corpus/` runs 60 documents through both implementations and requires
+- `tests/corpus/` runs 61 cases through both implementations and requires
   byte-identical output.
 - The 33 upstream golden files are compared byte for byte.
 - The fuzzer hunts for divergences in Unicode handling, delimiter recovery and
@@ -515,6 +521,15 @@ and compared:
 Where textrill deliberately differs from upstream, the divergence is declared
 and explained in `tests/corpus/README.md` rather than left to be discovered.
 Known differences:
+
+- **The default doctype is HTML5, not XHTML.** The reference defaults to
+  XHTML 1.0 Strict; textrill emits HTML5 with a charset meta and lower-case
+  tags unless told otherwise. `--xhtml` selects the reference's XHTML mode and
+  `--no-html5` its HTML 4.01 mode, both byte-identical to the reference — and
+  every corpus case and every fuzz case pins one of them explicitly on both
+  sides of the comparison, so the differential never compares a default
+  against a pinned mode. See "The doctype is pinned on both sides" in the
+  corpus README.
 
 - **Input encoding detection** does not exist upstream. See `--encoding` above.
 - User-supplied regular expressions are validated before use. An invalid

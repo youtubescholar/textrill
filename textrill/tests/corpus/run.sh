@@ -180,7 +180,14 @@ run_case() {
       my @dicts = grep { length } split(/,/, $ENV{T2H_DICT});
       my %t = (infile => [@in], outfile => $ENV{T2H_OUT},
                default_link_dict => "", &{ eval "sub { $ENV{T2H_EXTRA} }" }());
-      my $c = HTML::TextToHTML->new(@ctor);
+      # The harness pins the doctype explicitly on the reference side rather
+      # than relying on the module default, and puts the pin first so a case
+      # may still override it: a later pair in the same args() hash wins, and
+      # CTOR[]/EXTRA[] (sample, empty1, empty3 need HTML4) come after. With the
+      # port default doctype changing out from under the corpus (PLAN Phase 3),
+      # a case whose doctype comes from a default rather than from its own
+      # entry would otherwise change meaning silently on one side only.
+      my $c = HTML::TextToHTML->new('xhtml' => 1, @ctor);
       $c->args(links_dictionaries => \@dicts) if @dicts;
       $c->txt2html(%t);
     ' 2>"$RUNDIR/ref/$stem.err")
@@ -188,7 +195,12 @@ run_case() {
   [ "$ref_rc" -eq 0 ] || CASE_ERR+="reference exited $ref_rc: $(head -c 200 "$RUNDIR/ref/$stem.err" | tr '\n' ' ')"
   local -a cliargs=()
   eval "cliargs=($cli)"
-  (cd "$REFDIR" && "$MINE" "${mine_infile[@]}" "${mine_dict[@]}" --outfile "$RUNDIR/mine/$stem.html" --default_link_dict "" "${cliargs[@]}" 2>"$RUNDIR/mine/$stem.err")
+  # The port-side twin of the reference pin above: --xhtml is passed before the
+  # case's own flags, so it establishes XHTML mode and the case's flags -- which
+  # always win, being later -- can still put a case into HTML4 (--no-xhtml) or
+  # anywhere else. The reference driver is pinned to the same mode, so the
+  # comparison stays like for like whether a case spells its doctype out or not.
+  (cd "$REFDIR" && "$MINE" "${mine_infile[@]}" "${mine_dict[@]}" --outfile "$RUNDIR/mine/$stem.html" --default_link_dict "" --xhtml "${cliargs[@]}" 2>"$RUNDIR/mine/$stem.err")
   local mine_rc=$?
   # A non-zero exit is a failure even if an output file happens to be present:
   # the engine may have written a partial document before giving up, and the

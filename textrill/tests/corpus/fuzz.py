@@ -147,6 +147,20 @@ BOOL_OPTS = [
     (["--no-use_mosaic_header"], "use_mosaic_header=>0"),
     (["--use_preformat_marker"], "use_preformat_marker=>1"),
     (["--no-use_preformat_marker"], "use_preformat_marker=>0"),
+]
+
+# The doctype pair is deliberately NOT in BOOL_OPTS. Every case pins its own
+# doctype -- exactly one of these, chosen first in build_case -- because the
+# port's default doctype is changing out from under the differential (PLAN
+# Phase 3: HTML5 by default). A case whose doctype came from a *default* would
+# silently change meaning on the port side while the reference kept emitting
+# XHTML, and the mismatch would look like a conversion defect rather than the
+# harness having lost its pin. Passing the pin first also keeps flag order
+# meaningful in the same way the reference's option handling is: the port's
+# mode flags set tag case as part of entering the mode, and an explicit
+# --lower_case_tags sampled afterwards still wins, which is what the reference
+# does too.
+DOCTYPE_PIN = [
     (["--xhtml"], "xhtml=>1"),
     (["--no-xhtml"], "xhtml=>0"),
 ]
@@ -384,7 +398,18 @@ STRUCTURAL_EXTRA = {
 # real link-handling regressions. The input domain statement stays honest
 # instead -- the fuzzer compares byte for byte over inputs where byte comparison
 # is the right oracle, and the scheme policy is tested where it belongs.
-DANGEROUS_SCHEME = re.compile(r"(?i)\b(?:javascript|data|vbscript|file)\s*:")
+#
+# The strip deliberately has no left boundary. It had a ``\\b``, and the seed-1
+# case that failed when the doctype pin moved the RNG stream (2026-10-07,
+# `out_file::` mutated from `tfiles/list-advanced.txt`'s `> out_file`) went
+# through it: the reference matches `file:` inside a word -- `profile:x` comes
+# out as `pro` + `<a href="file:x">file:x</a>` -- so a word boundary before
+# the scheme let every mid-word occurrence through while the port refused it
+# exactly as it refuses the standalone one. The strip is allowed to
+# be greedy (`profile:x` becomes `prox`): both halves share the input, so
+# over-stripping costs those words from the domain and under-stripping reports
+# a Tier 2 policy difference as if it were a conversion defect.
+DANGEROUS_SCHEME = re.compile(r"(?i)(?:javascript|data|vbscript|file)\s*:")
 
 
 def sanitise(text):
@@ -431,6 +456,11 @@ def build_case(rng, seeds):
     script now, so it only decides how the value is spelled on the command line.
     """
     picked = []  # list of (cli_argv, perl_kv_string)
+
+    # The doctype first, always: see DOCTYPE_PIN. One of the two spellings,
+    # never both, so the case's mode is unambiguous and every later sampled
+    # flag lands after it.
+    picked.append(rng.choice(DOCTYPE_PIN))
 
     if rng.random() < 0.15:
         name = rng.choice(STRUCTURAL)

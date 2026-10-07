@@ -259,11 +259,16 @@ fn two_lists_and_two_kinds_keep_their_ids_apart() {
 
 #[test]
 fn the_definition_block_leaves_nothing_behind() {
+    // Pinned to XHTML mode (PLAN Phase 3 exempts rather than deletes): the
+    // empty-paragraph shape this guards against is `<p></p>`, which only a
+    // mode that closes paragraphs can emit -- in the HTML5 default the assert
+    // would be vacuous and the gate gone.
     let out = ok(
         "Lead.\n\nSee {{textrill:cite:a}}.\n\n         {{textrill:def:cite:a}}\nA.\n{{/textrill:def:cite:a}}\n\nTail.\n",
         |o| {
             o.citations = true;
             o.extract = true;
+            o.xhtml = true;
         },
     );
     assert!(!out.contains("{{textrill"), "no marker may survive: {out}");
@@ -277,7 +282,9 @@ fn the_definition_block_leaves_nothing_behind() {
 fn the_paragraph_wrapper_goes_with_the_block() {
     // The engine wraps the block's lines in `<p>`, and puts the `</p>` on the
     // same line as the closing tag. Removing only the block leaves a stray
-    // `<p>` with nothing after it, so the wrapper has to go too.
+    // `<p>` with nothing after it, so the wrapper has to go too. XHTML mode is
+    // pinned for the `<p></p>` assert, which the HTML5 default (which never
+    // closes a paragraph) could not fail -- see the note above.
     let modes: Vec<(&str, Configure)> = vec![
         ("citations", |o| o.citations = true),
         ("glossary", |o| o.glossary = true),
@@ -288,6 +295,7 @@ fn the_paragraph_wrapper_goes_with_the_block() {
             |opts| {
                 o(opts);
                 opts.extract = true;
+                opts.xhtml = true;
             },
         );
         assert!(
@@ -303,13 +311,15 @@ fn the_paragraph_wrapper_goes_with_the_block() {
 #[test]
 fn a_definition_inline_in_prose_keeps_its_paragraph() {
     // The marker is part of the sentence, so the paragraph must survive; only
-    // the marker and the block go.
+    // the marker and the block go. XHTML pinned: `<p></p>` cannot occur in
+    // the HTML5 default (see the note in the property-4 tests above).
     let out = ok(
         "Lead.\n\nA sentence with {{textrill:cite:k}} inside it.\n\n\
          {{textrill:def:cite:k}}\nK.\n{{/textrill:def:cite:k}}\n",
         |o| {
             o.citations = true;
             o.extract = true;
+            o.xhtml = true;
         },
     );
     assert!(out.contains("A sentence with"), "{out}");

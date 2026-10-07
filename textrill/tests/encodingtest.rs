@@ -260,16 +260,25 @@ fn encoding_names_round_trip() {
 // --- P7.4: the charset declaration ----------------------------------------
 
 #[test]
-fn meta_charset_is_off_by_default() {
-    // The compatibility reason, asserted: byte-identical output from the
-    // reference is a stated goal, and the reference emits no charset.
+fn meta_charset_is_off_by_default_but_html5_declares_one() {
+    // The option stays off (PLAN Phase 3 keeps the reference-compatible
+    // modes reference-compatible), but the default *doctype* is now HTML5,
+    // and HTML5 always declares its encoding -- so default output carries
+    // exactly one charset meta, and the legacy modes carry none at all.
     let mut conv = Converter::new(Options::default());
     assert!(!conv.opts.meta_charset);
     conv.opts.instring = vec!["hi".to_string()];
     let out = conv.convert();
+    assert_eq!(out.matches("charset").count(), 1, "default output: {out:?}");
+    assert!(out.contains("charset=\"utf-8\""), "{out:?}");
+
+    let mut legacy = Converter::new(Options::default());
+    legacy.opts.html5 = false;
+    legacy.opts.instring = vec!["hi".to_string()];
+    let legacy_out = legacy.convert();
     assert!(
-        !out.contains("charset"),
-        "default output must not gain a meta: {out:?}"
+        !legacy_out.contains("charset"),
+        "HTML4 mode must not gain a meta: {legacy_out:?}"
     );
 }
 

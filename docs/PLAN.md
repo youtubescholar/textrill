@@ -318,6 +318,39 @@ HTML5 and a charset meta unless told otherwise; keep XHTML available. This is a
 deliberate divergence from the reference and should be recorded as one, with the
 corpus cases that assert HTML4 exempted rather than deleted.
 
+**Done (S5), precondition first.** The planned exemptions turned out to be
+unnecessary, because the stronger fix is to pin the doctype *on both sides* so
+no case reads a default: `run.sh` constructs the reference with
+`HTML::TextToHTML->new('xhtml' => 1, @ctor)` — the module's own default made
+explicit and placed first, so per-case `CTOR`/`EXTRA` (`sample`, `empty1`,
+`empty3`) still override — and invokes the port with `--xhtml` ahead of the
+case's own flags, so later flags still win; `fuzz.py` puts exactly one of
+`--xhtml`/`--no-xhtml` at the front of every generated case and drops the pair
+from the random option pool, since a fuzzer samples rather than declares. With
+the pins in, the flip moved zero cases: PASS stays 61/61 and all 33 goldens
+stay byte-identical (the eight encoding cases and `opt_injection` that must
+differ predate this and are unrelated). The flip itself: defaults become
+`html5: true`, `lower_case_tags: true`, `xhtml: false`; `--html5` and `--xhtml`
+are each other's complement and carry their mode's tag case, so `--no-html5`
+lands on the reference's HTML 4 *with* its upper-case tags, while an explicit
+`--lower_case_tags` given after the flag still wins and `--no-lower_case_tags`
+is honoured in the default HTML 5 mode (the reference never turns it off —
+recorded divergence, not emulation); `do_file_start` checks `xhtml` before
+`html5` so a post-construction mutation still wins; the HTML4 branch keeps the
+reference's bytes exactly. The settings blob needed the matching fix: it is a
+full-state snapshot, so `options_store::apply` assigns the two doctype
+booleans directly rather than replaying the CLI's transition arms (which would
+read `xhtml: false` as `--no-xhtml` and clear `html5` out from under the blob).
+Gates: `provenance` asserts the default document carries exactly one
+`<meta charset="utf-8">` and that legacy mode carries none, `html5test`
+asserts the default starts `<!DOCTYPE html>` without a namespace and that one
+flag reaches the reference's XHTML, and the GUI/CLI tests follow the new
+default. Sabotage observed: restoring the old defaults
+(`xhtml: true, html5: false, lower_case_tags: false`) turned `html5test` (3
+failures), `provenance` (2) and positioning P8 (bytes: documented 38 477,
+measured 38 882) red while the pinned corpus stayed 61/61 green — which is
+the reason the pins are the precondition and not an afterthought.
+
 ## Phase 4 — Templates, which is where we are behind
 
 `docs/LANDSCAPE.md` §3: textrill is ahead on reading prose and behind on output,
@@ -338,7 +371,7 @@ The finding that motivates all of this.
 
 `examples/homer.txt` has no headings: the engine turns the 39 capitalised runs
 it can see into `<strong>`, `--toc` lists nothing, and `--chunk` writes a single
-38 882-byte file. Pandoc finds none of it either, for a different reason.
+38 477-byte file. Pandoc finds none of it either, for a different reason.
 
 What the file actually contains, measured 2026-10-06 rather than assumed — and
 it is not what this phase first assumed when it claimed "37 obvious section
@@ -460,7 +493,7 @@ original does it too".
 | S2 | ~~Phase 2.4 — definition-list trigger~~ **done** | Same | documented, and pinned: the `definitions` corpus case (term trigger + `<p>` boundary) fails against the reference when the trigger breaks; verify green |
 | S3 | ~~Phase 4.1 — `--var`~~ **done** | Highest user-visible value; OFFERING §5 row 2 | substitution + undeclared-name gate broken once (see "Item 4.1, resolved"); the 4.4 unknown-slot guard stays green |
 | S4 | ~~Phase 4.2 — shipped templates~~ **done** | "templates people could use" | a conversion test per shipped template; 4.4 guard green; the Item 4.2 gates |
-| S5 | Phase 3 — HTML5 default | A deliberate *option-default* divergence; the doctype interacts with the differential | precondition first: corpus and fuzz differentials pin the doctype explicitly on both sides (fuzz's `--xhtml`/`--no-xhtml` pair is optional per case — make it mandatory), and the HTML4 corpus asserts are exempted, not deleted; then flip the default; provenance asserts the HTML5 charset meta; sabotage — a default that reverts to XHTML must fail a gate |
+| S5 | ~~Phase 3 — HTML5 default~~ **done** | A deliberate *option-default* divergence; the doctype interacts with the differential | precondition pins (corpus both sides, fuzz pair mandatory) made the exemptions unnecessary and the flip moved no case; provenance asserts the HTML5 charset meta; sabotage observed — old defaults fail html5test/provenance/P8 while the pinned corpus stays green |
 | S6 | Phase 5.0 — `--report` | Report-only instrument; prerequisite to any heading change | CLI test asserts the counts on stderr; they match what `make examples` reports |
 | S7 | Phase 7 — grow `examples/` | 5.1 measures over real documents; one document cannot support a false-positive rate | each added document's recovered-structure counts are recorded in `make examples`; verify green |
 | S8 | Phase 5.1 — measure candidate rules | Required before any Phase 5 behaviour change | measurement table updated with per-rule false-positive counts; no behaviour change this step |

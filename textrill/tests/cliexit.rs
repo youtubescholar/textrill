@@ -367,7 +367,7 @@ fn a_mix_of_readable_and_unreadable_still_converts_and_still_exits_non_zero() {
     );
     let written = std::fs::read_to_string(&out_path).expect("output should exist");
     assert!(
-        written.contains("<p>readable text</p>"),
+        written.contains("<p>readable text"),
         "the readable input was not converted: {written}"
     );
     let _ = std::fs::remove_file(&out_path);

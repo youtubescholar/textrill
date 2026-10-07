@@ -39,9 +39,9 @@ source.
 | `TITLE` + `=======` underline | `<h1><a name="section_1">` | yes |
 | `TITLE` + `-------` underline | `<h2><a name="section_1_1">` | yes |
 | Run of capitals, ≥ `min_caps_length` | `<strong>` | yes — 39 on `examples/homer.txt` |
-| Line shorter than `short_line_length` (40) | `<br/>` | yes — 34 on `examples/homer.txt` |
+| Line shorter than `short_line_length` (40) | `<br>` | yes — 34 on `examples/homer.txt` |
 | Leading `- ` | `<ul><li>` | yes |
-| Line of dashes alone | `<hr/>` | yes |
+| Line of dashes alone | `<hr>` | yes |
 | Line indented ≥ `preformat_whitespace_min` (5) | `<pre>` | yes |
 | URL in body text | `<a href>` | yes |
 | `term : definition` | *no* — stays a `<p>` | see §4 |
@@ -68,8 +68,9 @@ output.
 
 | Mode | What it produces |
 |---|---|
-| default | one XHTML 1.0 Strict document |
-| `--html5` | HTML5 doctype and charset meta |
+| default | one HTML5 document: short doctype, charset meta, lower-case tags |
+| `--xhtml` | one XHTML 1.0 Strict document (the Perl original's default) |
+| `--no-html5` / `--no-xhtml` | one HTML 4.01 document with upper-case tags (the Perl original's non-XHTML mode) |
 | `--extract` | body fragment only, no document wrapper |
 | `--section` | each heading section wrapped in `<article class="section" id="chunk-N">` |
 | `--toc` | generated `<nav class="toc">` with links to those ids |
@@ -146,7 +147,8 @@ is why the parity framing never surfaced them.
 7. seventh item
 ```
 ```
-<p>3. third item<br/>7. seventh item</p>
+<p>3. third item<br>
+7. seventh item
 ```
 
 No `<ol>`. The text survives, so nothing is lost, but the structure is gone —
@@ -264,12 +266,12 @@ input, `examples/homer.txt`.
 
 |  | textrill | pandoc, forced to markdown |
 |---|---|---|
-| bytes out | 38 882 | 38 132 |
+| bytes out | 38 477 | 38 132 |
 | `<h1>`–`<h6>` | 0 | 0 |
 | `<strong>` | **39** | **0** |
-| `<br/>` | **34** | **0** |
+| `<br>` | **34** | **0** |
 | paragraphs | 64 | 62 |
-| largest paragraph | 3 029 chars | **3 665 chars** |
+| largest paragraph | 3 030 chars | **3 665 chars** |
 
 And the finding that matters more than any number in that table:
 
@@ -279,9 +281,12 @@ Unknown input format plain
 ```
 
 Every figure in this table is re-measured by `make proof`
-(`docs/OFFERING.md` §3). The textrill byte count moved from 38 888 to 38 882
-when the generator line stopped naming the Perl module — six bytes of
-provenance, which is the only kind of byte-count change worth its own note.
+(`docs/OFFERING.md` §3). The textrill byte count has moved twice: from 38 888
+to 38 882 when the generator line stopped naming the Perl module — six bytes
+of provenance — and from 38 882 to 38 477 when Phase 3 made HTML5 the default
+(short doctype, no namespace, no closing tags on `<p>`, `<li>`, `<br>`, and
+`<hr>`). The paragraph measure moved with it: the separator blank line between
+blocks puts the largest at 3 030 rather than 3 029.
 
 **pandoc has no plain-text reader.** Forcing it into markdown mode produces zero
 structure and merges 3 665 characters — the entire title block and contents list
@@ -310,7 +315,7 @@ mention Perl:
 3. Text is never silently dropped. Where inference declines, the characters stay.
 4. Encoding is detected, and an explicit override always wins.
 5. Malformed input produces an error and a non-zero exit, never a partial file.
-6. Output is valid HTML, and `--html5` is the default going forward (§7).
+6. Output is valid HTML, and HTML5 is the default (§7).
 7. Templates are the user's; the tool does not impose a page.
 8. Generated `href`s are scheme-checked and escaped.
 9. No network, no telemetry, no phone-home.
@@ -324,7 +329,9 @@ but it must be visible.
 ## 7. Open questions this raised
 
 - Should XHTML 1.0 Strict remain the default? It is the Perl default. In 2026 the
-  answer for a new tool is HTML5.
+  answer for a new tool is HTML5 — **answered in S5**: HTML5 is now the default,
+  and `--xhtml` selects the Perl original's mode for the differential and for
+  anyone who wants the old bytes back.
 - Is `--chunk` on a document with no headings a useful feature or a silent
   no-op? Today it writes one file named after the input.
 - The 13 options with no Perl equivalent (§ appendix) are not gaps. They are

@@ -33,10 +33,12 @@ fn default_delimiters() {
     assert_eq!(o.italic_delimiter, "*");
     assert_eq!(o.bullets, "-=o*\u{b7}");
     assert_eq!(o.bullets_ordered, "");
-    // The module defaults to XHTML output, and turns lower_case_tags on with
-    // it; the non-XHTML path has to be requested explicitly.
-    assert!(o.xhtml);
-    assert!(!o.lower_case_tags);
+    // PLAN Phase 3: the default doctype is HTML5 and its tag case is lower;
+    // the reference-compatible pair (--no-html5 / --no-xhtml) is requested
+    // explicitly and is pinned case by case by the corpus, not by defaults.
+    assert!(!o.xhtml);
+    assert!(o.html5);
+    assert!(o.lower_case_tags);
     assert!(!o.extract);
     assert!(!o.make_tables);
     assert!(o.make_anchors);
