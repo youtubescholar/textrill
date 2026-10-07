@@ -1,0 +1,10 @@
+Glossary
+========
+
+dpi:
+    Dots per inch, abbreviated.
+
+scanner:
+    A device that records an image of a page as a file.
+
+term: inline stays a paragraph

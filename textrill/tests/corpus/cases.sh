@@ -310,6 +310,19 @@ CLI[url_scheme]='--extract --make_links'
 INPUT[url_scheme]="$HERE/inputs/url_scheme.txt"
 NOGOLDEN[url_scheme]='differential must fail: A11, a deliberate Tier 2 divergence where the port is unambiguously better. The reference emits whatever scheme a <URL:...> tag names, so this input came out of it with a live href="javascript:alert(document.domain)" and a live data: URL. The port refuses every scheme outside --allowed_url_schemes, unwraps the anchor and keeps the text, so a byte comparison against the reference must fail and cannot be the oracle. The oracle is tests/urlschemetest.rs, which asserts no refused scheme survives, that the words are kept, and that the relative href the label spelling produces is left alone'
 
+# --- 2.4: the definition-list trigger is a real, pinned shape now ---
+#
+# A line that is exactly `term:` (two or more word characters, a colon, nothing
+# after) opens a <dl>: the term becomes a <dt> and the following indented block
+# the <dd>. It has worked since the port's first day but was never documented
+# or tested; this case pins the emitted shape against the reference. The last
+# line `term: inline stays a paragraph` pins the deliberate boundary: a colon
+# is ordinary prose and the same delimiter (`1: two`, `a: one`) already starts
+# an ordered list, so the one-line form is not turned into a definition.
+EXTRA[definitions]='extract=>1'
+CLI[definitions]='--extract'
+INPUT[definitions]="$HERE/inputs/definitions.txt"
+
 # --- P7.1: the 0x80-0x9F range, where the fallback decode used to be wrong ---
 #
 # read_any_file falls back to a single-byte decode when the bytes are not valid

@@ -65,7 +65,7 @@ reports success wrongly" below.
   * `pre2` — the golden file has a trailing newline the reference output does
     not. Upstream's own comparison strips CR and LF before diffing.
 
-Current status: **60/60 cases byte-identical**, and all 33 upstream golden
+Current status: **61/61 cases byte-identical**, and all 33 upstream golden
 checks reproduce byte for byte across 29 distinct files (the `empty1`–`empty4`
 cases all compare against the one `good_empty.html`, which is why the count of
 checks exceeds the count of files; the other skipped cases are the `NOGOLDEN`
@@ -184,7 +184,7 @@ paragraph that happens to contain the word "generator". Verified by breaking
 each half on purpose:
 
 - `PROG` reverted to `HTML::TextToHTML` → 5/5 provenance tests fail, corpus
-  stays 60/60 and 33/33. The corpus genuinely does not judge this value.
+  stays 61/61 and 33/33. The corpus genuinely does not judge this value.
 - Every heading level shifted `+1` → corpus exits 1 with 11 differential and 11
   golden failures, `NORMALISED` unchanged at 67. A real content regression
   2 000 lines from the generator is still caught.

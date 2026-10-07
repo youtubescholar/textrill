@@ -45,6 +45,7 @@ source.
 | Line indented ≥ `preformat_whitespace_min` (5) | `<pre>` | yes |
 | URL in body text | `<a href>` | yes |
 | `term : definition` | *no* — stays a `<p>` | see §4 |
+| `term:` at line end, definition indented on the next block | `<dl>` with `<dt>` / `<dd>` | yes |
 
 Encoding is detected, not assumed: BOM → UTF-16 evidence → UTF-8 → CP1252.
 `examples/homer.txt` is UTF-8 with no BOM, and textrill reads it correctly. The
@@ -110,10 +111,10 @@ every other `{{…}}` is passed through.
 
 ## 4. What is weak
 
-All five were things the tool did badly or claimed falsely about itself; §4.3,
-§4.4 and §4.5 are fixed and recorded as such. The rest are not regressions: the
-first two are byte-for-byte what the Perl original does, which is why the parity
-framing never surfaced them.
+All six were things the tool did badly or claimed falsely about itself; §4.3,
+§4.4, §4.5 and §4.6 are fixed and recorded as such. The rest are not
+regressions: the first two are byte-for-byte what the Perl original does, which
+is why the parity framing never surfaced them.
 
 ### 4.1 A numbered list that does not start at 1 is not a list
 
@@ -204,6 +205,32 @@ tool does. The old names are still read where the new one is absent — that is 
 compatibility decision, and the one place where matching the old behaviour is
 genuinely right. Rationale, the directory-dedup rule and the sabotage runs are
 in `docs/PLAN.md` § "Items 1.2–1.4, resolved".
+
+### 4.6 Definition lists had a trigger nobody documented — fixed
+
+The one-line `term : definition` stays a `<p>` — that is byte-for-byte what the
+original does, and the same colon already starts an ordered list (`1: two`,
+`a: one`), so the one-line form cannot become a definition without rewriting
+what prose like `Note: the fix ships on Tuesday` means. That boundary is a
+decision, not an oversight. The definition-list trigger itself has worked since
+the port's first day:
+
+```
+term:
+    the definition of the term
+```
+
+```
+<dl>
+  <dt>term</dt>
+<dd>    the definition of the term
+</dd></dl>
+```
+
+but nothing told a user it existed. Now the README's Lists section documents
+the shape, and the `definitions` corpus case pins the emitted bytes against the
+reference — including the `<p>` boundary — so the trigger is a documented
+feature with a test that fails when it breaks, not a discovery.
 
 ---
 

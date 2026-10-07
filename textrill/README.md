@@ -160,6 +160,31 @@ either tool. Note that the default delimiters are off unless enabled — with th
 defaults above, only `#...#` and `*...*` are converted; a bare `_word_` is left
 alone unless `--underline_delimiter` is matched by surrounding text.
 
+### Lists
+
+Three shapes are recognised from the layout of the text. `- ` at line start
+opens an unordered list, a number or letter followed by `.`, `)`, `]` or `:`
+opens an ordered list, and a line that is exactly `term:` (a two-or-more-letter
+name, a colon, nothing after it) opens a **definition list**: the name becomes
+the `<dt>` and the following indented block becomes the `<dd>`.
+
+```
+term:
+    the definition of the term
+```
+
+```html
+<dl>
+  <dt>term</dt>
+<dd>    the definition of the term
+</dd></dl>
+```
+
+The one-line form `term: definition` on a single line stays a paragraph, on
+purpose: a colon is ordinary prose, and the same delimiter already starts an
+ordered list (`1: two`, `a: one`), so turning every `Word: rest` into a
+definition would rewrite what a sentence means.
+
 ### HTML5 output
 
 By default the prolog matches the Perl original: an XHTML 1.0 Strict doctype

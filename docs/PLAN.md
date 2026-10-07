@@ -172,7 +172,7 @@ parity framing never surfaced them. Full reproductions in
 | 2.1 | ~~Recognise an ordered list that does not start at 1~~ **withdrawn** | Low. Currently the structure is simply not found. Must not renumber `3.`/`7.` into `1.`/`2.` — the original numerals have to survive, so this needs `<li value>` or a stated policy. See "Items 2.1–2.2, withdrawn". |
 | 2.2 | ~~A blank-line-separated ordered list after a bullet list stays a sibling~~ **withdrawn** | Low. Needs a corpus case that fails before the fix. See "Items 2.1–2.2, withdrawn". |
 | 2.3 | ~~`--template` vs `--document_template`~~ **done** | Docs first: the names promise almost the same thing. Renamed: the body wrap is now `--body_template`; the legacy `--template` name still works and warns. See "Item 2.3, resolved". |
-| 2.4 | Definition lists need a real trigger | `term : definition` produces a plain paragraph today. Decide whether to document the existing trigger or make the obvious form work. |
+| 2.4 | ~~Definition lists need a real trigger~~ **done** | `term : definition` produces a plain paragraph today. Decide whether to document the existing trigger or make the obvious form work. Done: documented, and pinned against the reference. See "Item 2.4, resolved". |
 
 ### Items 2.1–2.2, withdrawn
 
@@ -209,6 +209,28 @@ Gates: `optionstest` asserts the alias resolves to the renamed option and that
 the help text names the pair and the deprecation; `templatetest` asserts the
 alias still converts byte-identically and warns. The accepted-spelling count
 moved 121 → 122, and `make verify` is green.
+
+### Item 2.4, resolved
+
+**The definition list has a trigger, and it is now a documented, pinned shape.**
+A line that is exactly `term:` — a name of two or more word characters, a colon,
+nothing after it — opens a `<dl>`, with the name as `<dt>` and the following
+indented block as `<dd>`. It has worked since the first port and diverges from
+the reference nowhere: both tools emit identical bytes for it. What was missing
+was a decision and a record.
+
+The one-line form `term : definition` stays a paragraph, deliberately. The
+alternative — turning the obvious form into a definition list — is a
+core-conversion *content* divergence: the reference emits `<p>term: definition</p>`,
+and the same colon already marks an ordered-list item (`1: two`, `a: one`), so
+every `Word: rest` line in real prose would change meaning, and the fuzzer
+would flag it — the exact wall that withdrew 2.1–2.2. Documented in the
+README's Lists section and in `CAPABILITIES.md` §4.6.
+
+Gates: the `definitions` corpus case pins the emitted `<dl>` bytes and the
+`<p>` boundary against the reference (differential, fixture-driven). Its
+sabotage was observed: with the term trigger disabled, the case fails with
+`ref : '<dl>'` / `mine: '<p>dpi:'`. `make verify` is green.
 
 ## Phase 3 — HTML5 by default
 
@@ -345,10 +367,18 @@ Baseline for every step: `make verify` (fmt, clippy, tests, corpus, fuzz); `make
 proof` too, wherever the offer's numbers are on the line. Each step adds its own
 oracle on top of the baseline.
 
+One constraint on every step: the Perl reference is a *parity oracle*, not a
+design authority. textrill documents its own semantics — a feature is introduced
+or explained in textrill's own terms, with its own justification, and the
+reference is cited only where it constrains the bytes (as it did for 2.4's
+one-line boundary). Behaviour that diverges still has to clear the differential
+gates on the reference's terms, but the rationale is textrill's, never "the
+original does it too".>
+
 | step | item | why here | check (beyond the baseline) |
 |---|---|---|---|
 | S1 | ~~Phase 2.3 — `--template` vs `--document_template`~~ **done** | The surviving "fix what is wrong" items; still correct to do next | renamed: `--body_template` is the body wrap, the legacy `--template` warns; `optionstest` + `templatetest` assert it; verify green |
-| S2 | Phase 2.4 — definition-list trigger | Same | document the existing trigger, or implement and pin it with a corpus case + oracle (per the decision); verify green |
+| S2 | ~~Phase 2.4 — definition-list trigger~~ **done** | Same | documented, and pinned: the `definitions` corpus case (term trigger + `<p>` boundary) fails against the reference when the trigger breaks; verify green |
 | S3 | Phase 4.1 — `--var` | Highest user-visible value; OFFERING §5 row 2 | template tests extended for `{{textrill:var:name}}`; the 4.4 unknown-slot guard stays green |
 | S4 | Phase 4.2 — shipped templates | "templates people could use" | a conversion test per shipped template; 4.4 guard green |
 | S5 | Phase 3 — HTML5 default | A deliberate *option-default* divergence; the doctype interacts with the differential | precondition first: corpus and fuzz differentials pin the doctype explicitly on both sides (fuzz's `--xhtml`/`--no-xhtml` pair is optional per case — make it mandatory), and the HTML4 corpus asserts are exempted, not deleted; then flip the default; provenance asserts the HTML5 charset meta; sabotage — a default that reverts to XHTML must fail a gate |
