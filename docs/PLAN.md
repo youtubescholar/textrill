@@ -169,10 +169,30 @@ parity framing never surfaced them. Full reproductions in
 
 | # | item | risk |
 |---|---|---|
-| 2.1 | Recognise an ordered list that does not start at 1 | Low. Currently the structure is simply not found. Must not renumber `3.`/`7.` into `1.`/`2.` — the original numerals have to survive, so this needs `<li value>` or a stated policy. |
-| 2.2 | A blank-line-separated ordered list after a bullet list stays a sibling | Low. Needs a corpus case that fails before the fix. |
+| 2.1 | ~~Recognise an ordered list that does not start at 1~~ **withdrawn** | Low. Currently the structure is simply not found. Must not renumber `3.`/`7.` into `1.`/`2.` — the original numerals have to survive, so this needs `<li value>` or a stated policy. See "Items 2.1–2.2, withdrawn". |
+| 2.2 | ~~A blank-line-separated ordered list after a bullet list stays a sibling~~ **withdrawn** | Low. Needs a corpus case that fails before the fix. See "Items 2.1–2.2, withdrawn". |
 | 2.3 | `--template` vs `--document_template` | Docs first: the names promise almost the same thing. Then rename or warn. |
 | 2.4 | Definition lists need a real trigger | `term : definition` produces a plain paragraph today. Decide whether to document the existing trigger or make the obvious form work. |
+
+### Items 2.1–2.2, withdrawn
+
+Both fixes were implemented and validated — non-1 starts via `<li value>`, blank-line
+siblings via a close-before-restart — against an oracle test and two corpus
+NOGOLDEN cases, with the parity tier still green under the stated policy. They
+were reverted because a Tier 2 *content* divergence and the fuzz gate are
+mutually exclusive by design: `fuzz.py` is a strict byte differential over the
+upstream `tfiles` seeds and has no mechanism to declare a content divergence
+(its own comment explains why, citing E3). Every one of the 64 fuzz mismatches
+(seed 1, from list-2/3, list-styles, list-advanced, list-custom, mixed, pre,
+sample and heading1 mutations) traced to the two new list shapes, so `make
+verify` cannot pass with a core-conversion divergence of this kind.
+
+The outcome is a shrunken deliverable, not a lost one: the reference's behaviour
+is confirmed and still recorded in `CAPABILITIES.md` §4.1–§4.2, and the
+constraint on `<li value>` (numerals must survive, so a non-1 start needs an
+explicit value) is documented there too. A future attempt at either item has to
+come back with a gate that can declare a content divergence: the corpus already
+can, via required-failure NOGOLDEN cases; the fuzzer cannot, by design.
 
 ## Phase 3 — HTML5 by default
 
@@ -299,17 +319,36 @@ the documents its users actually have. Worth adding, in rough order of value:
 
 ## Sequencing
 
-Phase 1 first: it is small, it is uncontroversial, and it is embarrassing to ship
-anything else while it is true. Phase 2 next, with corpus cases that fail before
-each fix. Phase 4 is the largest chunk of user-visible value. Phase 5 is the
-research-shaped one and must not be rushed into a behaviour change.
+The phase sections above are topical; this section is the only ordering. One
+list, and each step names the check that proves the change did not destabilise
+the application. Every step starts `make verify`-green and ends the same way,
+and each step's new gate is broken once, on purpose, before it is believed
+(Standing rule).
 
-Relative to the *offer* rather than the engine, `docs/OFFERING.md` §5 gives the
-order a first-time reader meets things in: the positioning proof (gated by
-`make proof`), then Phase 4.1–4.2's templates, then Phase 5's measurement before
-any heading behaviour changes, then Phase 6 packaging, then Phase 7 corpus
-growth, with Phase 4.3 conditional blocks last. The two orderings agree; one is
-ordered by what is wrong, the other by what a reader notices.
+Baseline for every step: `make verify` (fmt, clippy, tests, corpus, fuzz); `make
+proof` too, wherever the offer's numbers are on the line. Each step adds its own
+oracle on top of the baseline.
+
+| step | item | why here | check (beyond the baseline) |
+|---|---|---|---|
+| S1 | Phase 2.3 — `--template` vs `--document_template` | The surviving "fix what is wrong" items; still correct next | name/warn decision settled; `--help` states it; `optionstest` asserts the line |
+| S2 | Phase 2.4 — definition-list trigger | Same | document the existing trigger, or implement and pin it with a corpus case + oracle (per the decision); verify green |
+| S3 | Phase 4.1 — `--var` | Highest user-visible value; OFFERING §5 row 2 | template tests extended for `{{textrill:var:name}}`; the 4.4 unknown-slot guard stays green |
+| S4 | Phase 4.2 — shipped templates | "templates people could use" | a conversion test per shipped template; 4.4 guard green |
+| S5 | Phase 3 — HTML5 default | A deliberate *option-default* divergence; the doctype interacts with the differential | precondition first: corpus and fuzz differentials pin the doctype explicitly on both sides (fuzz's `--xhtml`/`--no-xhtml` pair is optional per case — make it mandatory), and the HTML4 corpus asserts are exempted, not deleted; then flip the default; provenance asserts the HTML5 charset meta; sabotage — a default that reverts to XHTML must fail a gate |
+| S6 | Phase 5.0 — `--report` | Report-only instrument; prerequisite to any heading change | CLI test asserts the counts on stderr; they match what `make examples` reports |
+| S7 | Phase 7 — grow `examples/` | 5.1 measures over real documents; one document cannot support a false-positive rate | each added document's recovered-structure counts are recorded in `make examples`; verify green |
+| S8 | Phase 5.1 — measure candidate rules | Required before any Phase 5 behaviour change | measurement table updated with per-rule false-positive counts; no behaviour change this step |
+| S9 | Phase 5.2 — decide `-H` block-start | The only Phase 5 behaviour change, once the measurement allows it | document the condition in `--help`/README, or change it with new corpus cases + oracle; verify green |
+| S10 | Phase 6 — packaging | Independent; blocked only on the GitHub owner decision | a Flatpak build from `make cargo-sources` succeeds; app-id matches the `Cargo.toml` `repository` once the owner exists |
+| S11 | Phase 4.3 — `{{textrill:if:…}}` | After S4's library gives it something to condition on | template tests extended; 4.4 guard green |
+
+`OFFERING.md` §5 is the same work ordered the way a first-time reader meets it
+(proof, 4.1–4.2, 5.0, headings, packaging, corpus, `if`) — not a second
+authority, which is exactly where the old sequencing slipped: it claimed the two
+orders "agree", but it skipped Phase 2's survivors and Phase 3 (engine items,
+not offer rows) and could not see that Phase 5's measurement needs Phase 7's
+growth first. Where the reader order and this list differ, this list governs.
 
 ## Standing rule
 

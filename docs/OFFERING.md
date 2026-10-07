@@ -157,6 +157,12 @@ item; this document's contribution is the order and the reason.
 | 6 | `PLAN.md` Phase 7 — grow `examples/` | One document is not evidence of trustworthiness on *your* document. The growth list is already written. |
 | 7 | Phase 4.3 — `{{textrill:if:…}}` | One template serving documents with and without a TOC. Valuable, and after the library exists rather than before it. |
 
+A reader meets the work in this order; it is not a second authority. The build
+order — which additionally schedules Phase 2.3–2.4 and Phase 3, and which runs
+this row 6 (corpus growth) *before* Phase 5's measurement because that
+measurement is over `examples/` — is `PLAN.md`'s Sequencing, one step per item
+with its verification check, and that governs.
+
 ### 5.1 The `homer.txt` path, worked
 
 The shape of real use, and the reason items 2–4 are ordered as they are: a user
