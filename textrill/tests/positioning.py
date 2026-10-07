@@ -88,8 +88,21 @@ def paragraphs(html):
     The measure that matters for the soft-wrap claim is the largest paragraph:
     markdown joining lines the author meant to keep apart shows up as one very
     long <p>, not as a smaller count elsewhere.
+
+    Accepts both serialisations: XHTML closes every `<p>`, while the HTML5
+    default (PLAN Phase 3) never does -- so a block runs until either `</p>`
+    or the next paragraph opens, whichever comes first, and `</body>` bounds
+    the last one (otherwise it would swallow the document end). The match is
+    case-insensitive with a lookahead after `p` so an upper-case HTML4 `<P>`
+    counts and a `<pre>` does not. A paragraph in an unclosed serialisation
+    carries the blank-line separator with it, which is where HTML5's +1 over
+    the XHTML measure comes from; the claim is asserted as measured.
     """
-    blocks = re.findall(r"<p[^>]*>(.*?)</p>", html, re.S)
+    blocks = re.findall(
+        r"<p(?=[ >])[^>]*>(.*?)(?=</p>|<p(?=[ >])[^>]*>|</body>|\Z)",
+        html,
+        re.S | re.I,
+    )
     text = [re.sub(r"<[^>]+>", "", b) for b in blocks]
     return len(blocks), max((len(t) for t in text), default=0)
 
@@ -143,12 +156,15 @@ def main():
     t_paras, t_max = paragraphs(t)
     p_paras, p_max = paragraphs(p)
     check("P4", "textrill on homer.txt: <strong> recovered", 39, t.count("<strong>"))
-    check("P5", "textrill on homer.txt: <br/> line breaks", 34, t.count("<br/>"))
+    # P5 counts the break itself, not its serialisation: the default emits
+    # `<br>` (HTML5) where it used to emit `<br/>` (XHTML), and the claim is
+    # that N line breaks reach the output, not which spelling does.
+    check("P5", "textrill on homer.txt: <br line breaks", 34, t.count("<br"))
     check("P6", "textrill on homer.txt: headings (none in the document)",
           0, len(re.findall(r"<h[1-6]>", t)))
-    check("P7", "textrill on homer.txt: paragraphs / largest", (64, 3029),
+    check("P7", "textrill on homer.txt: paragraphs / largest", (64, 3030),
           (t_paras, t_max))
-    check("P8", "textrill on homer.txt: bytes out", 38882, len(t.encode()))
+    check("P8", "textrill on homer.txt: bytes out", 38477, len(t.encode()))
 
     check("P9", "pandoc -f markdown on homer.txt: <strong>", 0, p.count("<strong>"))
     check("P10", "pandoc -f markdown on homer.txt: line breaks", 0, p.count("<br"))
@@ -164,8 +180,8 @@ def main():
         f.write_text(FIXTURE)
         tf_html = run([str(MINE), "--infile", str(f), "--outfile", "-"]).stdout
         pf_html = run([PANDOC, "-f", "markdown", "-t", "html", str(f)]).stdout
-    check("P14", "textrill keeps indented lines apart (<br/> present)",
-          True, "<br/>" in tf_html)
+    check("P14", "textrill keeps indented lines apart (<br> present)",
+          True, "<br" in tf_html)
     joined = re.sub(r"<[^>]+>", " ", pf_html)
     merged = "Things to buy: milk, two pints eggs, a dozen"
     check("P15", "pandoc joins those lines into one paragraph",
