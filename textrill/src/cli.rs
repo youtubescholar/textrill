@@ -312,7 +312,7 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
             continue;
         };
 
-        let (spec, negated) = resolve(name).map_err(&at)?;
+        let (spec, negated) = resolve(name).map_err(at)?;
         if negated && !matches!(spec.kind, Kind::Flag) {
             return Err(at(format!("Unknown option `{name}`")));
         }
@@ -330,7 +330,7 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
         match spec.kind {
             Kind::Flag => {
                 let value = match inline.take() {
-                    Some(v) => parse_bool(&v).map_err(&at)?,
+                    Some(v) => parse_bool(&v).map_err(at)?,
                     None => true,
                 };
                 set_bool(opts, spec, if negated { !value } else { value });
@@ -338,14 +338,14 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
             Kind::Str => {
                 let v = match inline.take() {
                     Some(v) => v,
-                    None => take_value(&mut it, name).map_err(&at)?,
+                    None => take_value(&mut it, name).map_err(at)?,
                 };
-                set_str(opts, spec, &v).map_err(&at)?;
+                set_str(opts, spec, &v).map_err(at)?;
             }
             Kind::Int => {
                 let v = match inline.take() {
                     Some(v) => v,
-                    None => take_value(&mut it, name).map_err(&at)?,
+                    None => take_value(&mut it, name).map_err(at)?,
                 };
                 let n: i64 = v
                     .parse()
@@ -355,14 +355,14 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
             Kind::StrArray => {
                 let v = match inline.take() {
                     Some(v) => v,
-                    None => take_value(&mut it, name).map_err(&at)?,
+                    None => take_value(&mut it, name).map_err(at)?,
                 };
-                push_array(opts, spec, &v).map_err(&at)?;
+                push_array(opts, spec, &v).map_err(at)?;
             }
             Kind::TableType => {
                 let v = match inline.take() {
                     Some(v) => v,
-                    None => take_value(&mut it, name).map_err(&at)?,
+                    None => take_value(&mut it, name).map_err(at)?,
                 };
                 // See reset_table_type: the command line names the whole set of
                 // table types, so the defaults are dropped on the first
@@ -371,7 +371,7 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
                     reset_table_type(opts);
                     table_type_seen = true;
                 }
-                set_table_type(opts, &v).map_err(&at)?;
+                set_table_type(opts, &v).map_err(at)?;
             }
         }
     }

@@ -45,7 +45,7 @@ licensing is a deliberate boundary:
 
 - **CC0 or clearly public domain only.** CC-BY and CC-BY-SA candidates are
   rejected on sight and recorded as rejected in `examples/README.md`. This is
-  what keeps the corpus clean alongside the GPLv3 code.
+  what keeps the corpus clean alongside the GPL-3.0-or-later code.
 - Record in the register: source, edition, licence basis, and the pinned
   counts. Then run `make examples` and pin the new document in
   `reporttest.rs` so the counts cannot silently drift.

@@ -49,7 +49,7 @@ a GitHub runner, and yours. See `textrill/tests/corpus/README.md` — including
 | `DOCS.md` | The document register: exactly one status per document, decided by a test. Start here for orientation. |
 | `examples/` | Real documents the tool is exercised and measured against, with a provenance register. |
 | `tests/` | The differential harness staging ground (`ref/` is derived by `make ref`). |
-| `packaging/` | The Flatpak manifest and its two deliberate blockers. |
+| `packaging/` | The Flatpak manifest; one remaining blocker (generate-vs-vendor for `cargo-sources.json`). |
 | `competition-files/` | The pandoc 3.12 source, tracked as tarballs so the studies re-run offline. |
 | `legacy-archive/` | Superseded work, kept for the decisions it records. |
 
@@ -63,7 +63,9 @@ what the licence bar for corpus documents is, and where to start are in
 ## Licence
 
 GPL-3.0-or-later. The corpus of example documents is CC0 / public domain and is
-kept that way deliberately — see `examples/README.md`.
+kept that way deliberately — see `examples/README.md`. The GUI bundles Noto Sans
+and Noto Sans CJK TC under the SIL Open Font License 1.1; the notices travel
+with the fonts in `textrill-gui-rs/assets/fonts/`.
 
 Upstream `txt2html` licenses itself "under the same terms as Perl itself"
 (Artistic License 1.0 or the GPL); this fork is a derivative work distributed

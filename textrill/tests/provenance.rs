@@ -8,9 +8,9 @@
 //! generator is named, so this file is the other half of the gate: it pins the
 //! exact expected value.
 //!
-//! Attribution and provenance are separate claims. The GPLv3 credit for
-//! HTML::TextToHTML lives in LICENSE and is deliberately not asserted here --
-//! asserting it in output would be the mistake P1.1 removed.
+//! Attribution and provenance are separate claims. The GPL-3.0-or-later
+//! credit for HTML::TextToHTML lives in LICENSE and is deliberately not
+//! asserted here -- asserting it in output would be the mistake P1.1 removed.
 
 use std::process::Command;
 

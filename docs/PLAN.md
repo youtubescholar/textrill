@@ -18,9 +18,9 @@ textrill converts **plain text** to HTML. The input is not required to carry any
 markup language; structure is inferred from layout, and the result is placed
 into HTML through templates the user controls.
 
-**Licensing is settled and not revisited.** GPLv3, with the Perl original
-credited to Seth Golub, Kathryn Andersen and Joao Eriberto Mota Filho. That text
-in `textrill/LICENSE` is correct and stays.
+**Licensing is settled and not revisited.** GPL-3.0-or-later, with the Perl
+original credited to Seth Golub, Kathryn Andersen and Joao Eriberto Mota Filho.
+That text in `textrill/LICENSE` is correct and stays.
 
 **The Perl reference stays available** at `ref/` as an oracle for the parity
 tier of the test harness and as a historical artifact. It is no longer the

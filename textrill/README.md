@@ -23,8 +23,9 @@ Early. `0.1.0` is the first release of the fork.
 What is **done**:
 
 - The conversion engine is byte-verified against the upstream reference across a
-  differential corpus of 61 cases and 33 upstream golden files.
-- 364 Rust tests, a fuzzer, and a 74-test native GUI suite.
+  differential corpus of 61 cases and 33 golden comparisons against upstream's
+  own golden files.
+- 365 Rust tests, a fuzzer, and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the differential corpus against that binary, so it runs on Alpine and
   other glibc-less distros with the same output as the reference.
@@ -573,7 +574,7 @@ GPL-3.0-or-later.
 Upstream `txt2html` licenses itself "under the same terms as Perl itself", which
 is the Artistic License 1.0 or the GPL. This fork is a derivative work and is
 distributed under the GPL branch of that grant. The reasoning, including why
-GPLv3 was chosen over the available LGPL option, is in `LICENSE`.
+the GPL (not the available LGPL option) was chosen, is in `LICENSE`.
 
 Upstream copyright is preserved:
 

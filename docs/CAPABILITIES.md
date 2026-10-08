@@ -193,9 +193,9 @@ const VERSION: &str = "3.0";
 
 Every file textrill wrote stated in its own metadata that the Perl module
 produced it. That is a false provenance claim, distinct from licensing — the
-GPLv3 credit to Seth Golub, Kathryn Andersen and Joao Eriberto Mota Filho in
-`textrill/LICENSE` is correct and stays exactly as it is. The problem is the
-`generator` field, which is a statement about what ran.
+GPL-3.0-or-later credit to Seth Golub, Kathryn Andersen and Joao Eriberto Mota
+Filho in `textrill/LICENSE` is correct and stays exactly as it is. The problem
+is the `generator` field, which is a statement about what ran.
 
 Now `<meta name="generator" content="textrill v0.1.0"/>`, with the version taken
 from `CARGO_PKG_VERSION` so a bump cannot leave it stale. Cost: 18 differential
@@ -320,7 +320,7 @@ mention Perl:
 7. Templates are the user's; the tool does not impose a page.
 8. Generated `href`s are scheme-checked and escaped.
 9. No network, no telemetry, no phone-home.
-10. GPLv3, with the Perl original credited. Unchanged.
+10. GPL-3.0-or-later, with the Perl original credited. Unchanged.
 
 Clause 3 is the one that justifies the §4.1 fix: declining to infer is fine,
 but it must be visible.

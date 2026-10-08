@@ -26,7 +26,7 @@ Measured 2026-10-06, not described. This is the inventory the offer rests on.
 | Encoding | BOM → UTF-16 evidence → UTF-8 → CP1252, with explicit overrides for what cannot be detected |
 | GUI | `textrill-gui-rs`, native `egui`; an options panel over the engine's own options; settings at `$XDG_CONFIG_HOME/textrill-gui/textrill.conf` (QSettings-compatible, hand-editable) |
 | Binary | static `x86_64-unknown-linux-musl`, no runtime dependencies |
-| Checks | `make verify`: fmt, clippy, 364 engine tests, 74 GUI tests, proptest, alloctest, 61 differential cases, 33 goldens, 16 000 fuzz cases |
+| Checks | `make verify`: fmt, clippy, 365 engine tests, 74 GUI tests, proptest, alloctest, 61 differential cases, 33 golden comparisons, 16 000 fuzz cases |
 | Packaging | Flatpak manifest drafted, deliberately unbuildable: `cargo-sources.json` needs the generate-vs-vendor decision (`docs/PACKAGING.md`) |
 | Docs | the register in `DOCS.md`, `CAPABILITIES.md` (measured), `LANDSCAPE.md` (measured), `PLAN.md` (what is next) |
 
