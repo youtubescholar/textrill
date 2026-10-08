@@ -312,6 +312,98 @@ fn homer_reports_the_numbers_make_examples_prints() {
     assert_eq!(c, recount(&r.stdout));
 }
 
+/// The rest of `examples/`: the CC0/PD documents S7 brought in, pinned the
+/// same way as homer so that `make examples` and `make verify` agree on every
+/// corpus file. The counts come from the report of the produced output, and the
+/// recount-of-output assertion keeps the instrument from agreeing with itself.
+#[test]
+fn the_example_corpus_reports_its_counts() {
+    let corpus: [(&str, Counts); 7] = [
+        (
+            "blake.txt",
+            Counts {
+                bytes: 16903,
+                headings: 0,
+                paragraphs: 466,
+                strong: 26,
+                br: 10,
+            },
+        ),
+        (
+            "calli.txt",
+            Counts {
+                bytes: 123429,
+                headings: 0,
+                paragraphs: 2814,
+                strong: 164,
+                br: 3,
+            },
+        ),
+        (
+            "erya.txt",
+            Counts {
+                bytes: 51304,
+                headings: 0,
+                paragraphs: 41,
+                strong: 0,
+                br: 1028,
+            },
+        ),
+        (
+            "gelbenhuegel.txt",
+            Counts {
+                bytes: 44199,
+                headings: 16,
+                paragraphs: 171,
+                strong: 1,
+                br: 312,
+            },
+        ),
+        (
+            "mohe_zhiguan_vol001.txt",
+            Counts {
+                bytes: 48433,
+                headings: 0,
+                paragraphs: 1,
+                strong: 0,
+                br: 7,
+            },
+        ),
+        (
+            "septuagint_swete_genesis.txt",
+            Counts {
+                bytes: 378854,
+                headings: 0,
+                paragraphs: 50,
+                strong: 0,
+                br: 50,
+            },
+        ),
+        (
+            "talmud.txt",
+            Counts {
+                bytes: 13601,
+                headings: 0,
+                paragraphs: 78,
+                strong: 0,
+                br: 3,
+            },
+        ),
+    ];
+    for (name, expected) in corpus {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/").to_owned() + name;
+        let r = run(&["--infile", &path, "--report"]);
+        assert_eq!(r.code, 0, "{name}: {}", r.stderr);
+        let c = report_of(&r);
+        assert_eq!(c, expected, "{name} regressed from its recorded counts");
+        assert_eq!(
+            c,
+            recount(&r.stdout),
+            "{name}: the report lied about the output"
+        );
+    }
+}
+
 /// The refusal is the same class the other whole-body passes share: a
 /// streaming run never assembles the document, so there is nothing to count,
 /// and a report of zeros would be a lie about the input.

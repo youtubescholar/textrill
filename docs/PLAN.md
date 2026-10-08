@@ -498,14 +498,16 @@ Details in `docs/PACKAGING.md`.
 
 ## Phase 7 — The example corpus
 
-`examples/` holds one document. `make examples` reports recovered structure for
-each. Grow it, and the growth is the point: a converter is only trustworthy on
-the documents its users actually have. Worth adding, in rough order of value:
+`examples/` now holds eight documents; `make examples` reports recovered
+structure for each (the counts are recorded in the same pass and pinned in
+`reporttest`). The provenance and licence of every file, checked at
+acquisition time, live in `examples/README.md`. Still worth adding, in rough
+order of value:
 
-- a document with real markup headings (`====`/`----`)
+- a document with real punctuation-run headings, to exercise `-H` on non-markup
+  structure with a different sign than `====`/`----`
 - a document with tables, to exercise `--make_tables` on real data
 - an email thread, for `--mailmode`
-- a non-English document, to exercise encoding beyond UTF-8
 - a deliberately hostile document, to confirm the URL-scheme policy
 
 ---
@@ -551,7 +553,7 @@ original does it too".
 | S4 | ~~Phase 4.2 — shipped templates~~ **done** | "templates people could use" | a conversion test per shipped template; 4.4 guard green; the Item 4.2 gates |
 | S5 | ~~Phase 3 — HTML5 default~~ **done** | A deliberate *option-default* divergence; the doctype interacts with the differential | precondition pins (corpus both sides, fuzz pair mandatory) made the exemptions unnecessary and the flip moved no case; provenance asserts the HTML5 charset meta; sabotage observed — old defaults fail html5test/provenance/P8 while the pinned corpus stays green |
 | S6 | ~~Phase 5.0 — `--report`~~ **done** | Report-only instrument; prerequisite to any heading change | `--report` prints the five counts on stderr `key=value`; `make examples` reads them from that line instead of `grep`ping, so the two cannot drift; `reporttest` recounts the output with an independent implementation; sabotage observed — a naive `<p` prefix overcounts `<pre>` blocks, and a report on stdout pollutes the output (see "Item 5.0, resolved") |
-| S7 | Phase 7 — grow `examples/` | 5.1 measures over real documents; one document cannot support a false-positive rate | each added document's recovered-structure counts are recorded in `make examples`; verify green |
+| S7 | ~~Phase 7 — grow `examples/`~~ **done** | 5.1 measures over real documents; one document cannot support a false-positive rate | eight documents, each CC0/PD-confirmed with source and edition in `examples/README.md`; all recovered-structure counts recorded by `make examples` and pinned in `reporttest`; verify green |
 | S8 | Phase 5.1 — measure candidate rules | Required before any Phase 5 behaviour change | measurement table updated with per-rule false-positive counts; no behaviour change this step |
 | S9 | Phase 5.2 — decide `-H` block-start | The only Phase 5 behaviour change, once the measurement allows it | document the condition in `--help`/README, or change it with new corpus cases + oracle; verify green |
 | S10 | Phase 6 — packaging | Independent; blocked only on the GitHub owner decision | a Flatpak build from `make cargo-sources` succeeds; app-id matches the `Cargo.toml` `repository` once the owner exists |
