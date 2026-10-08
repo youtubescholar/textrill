@@ -23,3 +23,23 @@ B/H/P/S/br = bytes / headings / paragraphs / `<strong>` / `<br>`, as printed by
 
 Note: the Wikisource pages themselves are CC-BY-SA as a transcription layer over
 the PD underlying text; cite the page permalink for anything more than test use.
+
+### Capture notes (invisible Unicode)
+
+The rendered-capture transcriptions carry what a plain copy of the page carries,
+and it is part of the counted bytes. Calligrammes' concrete-poetry shapes are
+encoded by the transcribers as non-breaking-space runs (U+00A0, 3 461
+occurrences) plus the standard French no-break space before `! ? : ; »`; the
+Blake page carries 20 zero-width spaces (U+200B, Wikisource `{{zwsp}}`
+line-wrap aids); Gelbenhügel's author markdown uses U+00A0 around links (13) and
+one trailing U+200B; the Talmud page has 2 U+00A0 in commentary spacing. None
+were introduced by the capture itself.
+
+### Rejected candidates (checked 2026-10-08)
+
+| game | verdict | reason |
+| --- | --- | --- |
+| Searchers of the Unknown | rejected | freeware, explicit "not to be sold"; not open |
+| Basic Fantasy RPG | rejected | CC-BY-SA |
+| D&D 5.1 / 5.2 SRD | rejected | CC-BY |
+| Tunnel Goons (Nate Treme / Highland Paranormal Society) | rejected | CC BY 4.0 per the author's clarification on the itch.io community thread; CC0/PD-only bar kept the corpus attribution-free |

@@ -399,6 +399,42 @@ Every simple formulation is empty or half false on the motivating document, so
 the measurement this phase already required has effectively started, and its
 first result is that the rule as written would not fix what it was written for.
 
+**Measured over `examples/`, 2026-10-08 (S8), `make measure`.** The three
+candidate rules applied to the whole eight-document corpus — all-caps lines that
+are alone between blanks (R2a), blocks whose every line is short and caps (R2b),
+blocks that start with a caps line (R2c) — plus the setext-underline rule as the
+baseline the engine already has. Truth labels: homer's three genuine section
+starts (lines 38/78/102), Gelbenhügel's ten literal markdown headings (the tool
+cannot see them, which is itself a result), and zero for the six no-structure
+documents, so every hit there is a false positive. Cells are catches/false
+positives:
+
+| doc | setext | R2a | R2b | R2c |
+|---|---|---|---|---|
+| homer.txt | 0/0 | 2/2 | 2/2 | 6/3 |
+| gelbenhuegel.txt | 16/16 | 0/0 | 0/0 | 0/0 |
+| blake.txt | 0/0 | 27/27 | 27/27 | 27/27 |
+| calli.txt | 0/0 | 158/158 | 158/158 | 159/159 |
+| erya.txt | 0/0 | 0/0 | 0/0 | 0/0 |
+| mohe_zhiguan_vol001.txt | 0/0 | 0/0 | 0/0 | 0/0 |
+| septuagint_swete_genesis.txt | 0/0 | 0/0 | 0/0 | 0/0 |
+| talmud.txt | 0/0 | 0/0 | 0/0 | 0/0 |
+
+The table corrects the plan's own first pass: **R2b was published as 3, measured
+it is 2** — the title block has a long third line (`THE GODS IN COUNCIL—…`), so
+it fails "every line short and caps", and both hits are the two signatures.
+R2a confirms the earlier read (both hits false); R2c reproduces 6/3 exactly.
+
+**The result the measurement exists for:** on prose that is not structured,
+every candidate rule's false-positive count is its full hit count — 100% on
+Blake and Calligrammes, 100% on the signatures, and the setext baseline is
+already finding 16 things Gelbenhügel's author never wrote (markdown `---`
+separators read as underline rules; the tool also misses all ten real `##`
+headings). The phase gates matter here: no rule is near zero false positives on
+real documents, so this stays a proposal. R2b's disqualification is not noise —
+the "every line short and caps" unit was what made it *look* less noisy than
+R2a.
+
 **The candidate rule, restated for the next pass:** the unit is probably the
 *block* rather than the line — a title block, a contents run and a signature are
 all caps runs, and what separates them is position (does a section follow?)
@@ -423,7 +459,7 @@ decision; Phase 7 grows the corpus for exactly this reason.
 | # | item | note |
 |---|---|---|
 | 5.0 | ~~`--report`: the inference counts on stderr~~ **resolved (S6)** | Report-only, and first. The counts exist today only in `make examples`, which greps the output itself; the CLI offers no `--report`, `--verbose` or summary (verified in `--help`). A user whose `--toc` came out empty, and this phase's own measurement harness, both need "what did you see?" before anything is allowed to change. See "Item 5.0, resolved". |
-| 5.1 | Measure candidate rules over `examples/` | The table above is the first data point. Required before any behaviour change, as below. |
+| 5.1 | ~~Measure candidate rules over `examples/`~~ **resolved (S8)** | The table above is the first data point. Required before any behaviour change, as below. | `make measure` pins the per-rule false-positive table over the eight documents; the verdict is recorded above — no rule is near zero false positives, so Phase 5's heading change stays a proposal. |
 | 5.2 | Decide what `-H`'s block-start condition should be | Either document it in `--help` and the README, or change it — measured, not silently. Changing it means a heading rule can consume a line from the middle of a paragraph, which is the same hazard as 5.1's false positives. |
 
 Before writing any of it: build the measurement set over `examples/` — how many
@@ -554,7 +590,7 @@ original does it too".
 | S5 | ~~Phase 3 — HTML5 default~~ **done** | A deliberate *option-default* divergence; the doctype interacts with the differential | precondition pins (corpus both sides, fuzz pair mandatory) made the exemptions unnecessary and the flip moved no case; provenance asserts the HTML5 charset meta; sabotage observed — old defaults fail html5test/provenance/P8 while the pinned corpus stays green |
 | S6 | ~~Phase 5.0 — `--report`~~ **done** | Report-only instrument; prerequisite to any heading change | `--report` prints the five counts on stderr `key=value`; `make examples` reads them from that line instead of `grep`ping, so the two cannot drift; `reporttest` recounts the output with an independent implementation; sabotage observed — a naive `<p` prefix overcounts `<pre>` blocks, and a report on stdout pollutes the output (see "Item 5.0, resolved") |
 | S7 | ~~Phase 7 — grow `examples/`~~ **done** | 5.1 measures over real documents; one document cannot support a false-positive rate | eight documents, each CC0/PD-confirmed with source and edition in `examples/README.md`; all recovered-structure counts recorded by `make examples` and pinned in `reporttest`; verify green |
-| S8 | Phase 5.1 — measure candidate rules | Required before any Phase 5 behaviour change | measurement table updated with per-rule false-positive counts; no behaviour change this step |
+| S8 | ~~Phase 5.1 — measure candidate rules~~ **done** | Required before any Phase 5 behaviour change | `make measure` re-derives the R2a/R2b/R2c and setext-baseline counts over all eight documents and pins the table; verdict written into Phase 5 (no rule near zero false positives; R2b corrected from 3 to 2); no behaviour change this step; verify green |
 | S9 | Phase 5.2 — decide `-H` block-start | The only Phase 5 behaviour change, once the measurement allows it | document the condition in `--help`/README, or change it with new corpus cases + oracle; verify green |
 | S10 | Phase 6 — packaging | Independent; blocked only on the GitHub owner decision | a Flatpak build from `make cargo-sources` succeeds; app-id matches the `Cargo.toml` `repository` once the owner exists |
 | S11 | Phase 4.3 — `{{textrill:if:…}}` | After S4's library gives it something to condition on | template tests extended; 4.4 guard green |

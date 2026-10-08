@@ -47,7 +47,7 @@ FUZZ_JOBS ?= $(shell nproc 2>/dev/null || echo 8)
 # other's evidence -- see fuzz.py --fail-dir.
 FUZZ_FAILDIR ?= $(RS)/tests/corpus/fuzz-fail
 
-.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale musl corpus-musl examples proof clean
+.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale musl corpus-musl examples proof measure clean
 
 all: verify
 
@@ -365,6 +365,15 @@ scale: build
 # -- positioning.py exits 2 with pandoc's name when the oracle is missing.
 proof: build
 	$(PYTHON) $(RS)/tests/positioning.py
+
+# Phase 5.1 — the candidate-heading-rule measurement over `examples/` (S8).
+# `measure.py` re-derives each rule's hits, labels them against a per-document
+# truth set, and asserts the frozen table; a drift fails the same way `proof`
+# fails on a drifted OFFERING claim. Like `proof`, it calls the release binary
+# (for the setext-baseline row) and is deliberately not part of `verify`, which
+# must stay runnable with only Rust and perl installed.
+measure: build
+	$(PYTHON) $(RS)/tests/measure.py
 
 clean:
 	cd $(RS) && $(CARGO) clean
