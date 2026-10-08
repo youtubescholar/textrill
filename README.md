@@ -45,12 +45,12 @@ a GitHub runner, and yours. See `textrill/tests/corpus/README.md` — including
 |---|---|
 | `textrill/` | The engine and CLI. The user-facing contract is `textrill/README.md`. |
 | `textrill-gui-rs/` | The native GUI (`egui`/`eframe`). A frozen behavioural contract lives in `legacy-archive/textrill-gui/SURFACE.md`. |
-| `docs/` | The authoritative plan: `PLAN.md`, `CAPABILITIES.md`, `LANDSCAPE.md`, `OFFERING.md`, `PACKAGING.md`. |
+| `docs/` | The authoritative plan: `PLAN.md`, `CAPABILITIES.md`, `LANDSCAPE.md`, `OFFERING.md`, `PACKAGING.md` — plus the GUI findings and template research. |
 | `DOCS.md` | The document register: exactly one status per document, decided by a test. Start here for orientation. |
 | `examples/` | Real documents the tool is exercised and measured against, with a provenance register. |
-| `tests/` | The differential harness staging ground (`ref/` is derived by `make ref`). |
+| `research/` | Source archives for the offline studies: pandoc 3.12 (full + stripped) and the txt2html reference tar/zip. |
+| `stubs/` | The canonical Perl stub `make ref` installs into the derived `ref/` tree. |
 | `packaging/` | The Flatpak manifest; one remaining blocker (generate-vs-vendor for `cargo-sources.json`). |
-| `competition-files/` | The pandoc 3.12 source, tracked as tarballs so the studies re-run offline. |
 | `legacy-archive/` | Superseded work, kept for the decisions it records. |
 
 ## Contributing
@@ -69,7 +69,8 @@ with the fonts in `textrill-gui-rs/assets/fonts/`.
 
 Upstream `txt2html` licenses itself "under the same terms as Perl itself"
 (Artistic License 1.0 or the GPL); this fork is a derivative work distributed
-under the GPL branch of that grant. The reasoning is in `LICENSE`.
+under the GPL branch of that grant. The reasoning is in
+[`LICENSE-NOTICE.md`](LICENSE-NOTICE.md).
 
 Upstream copyright is preserved:
 

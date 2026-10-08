@@ -574,7 +574,8 @@ GPL-3.0-or-later.
 Upstream `txt2html` licenses itself "under the same terms as Perl itself", which
 is the Artistic License 1.0 or the GPL. This fork is a derivative work and is
 distributed under the GPL branch of that grant. The reasoning, including why
-the GPL (not the available LGPL option) was chosen, is in `LICENSE`.
+the GPL (not the available LGPL option) was chosen, is in
+[`../LICENSE-NOTICE.md`](../LICENSE-NOTICE.md).
 
 Upstream copyright is preserved:
 
