@@ -29,7 +29,7 @@ import xml.etree.ElementTree as ET
 from html.entities import name2codepoint
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_BIN = os.path.join(HERE, "..", "target", "release", "txt2html")
+DEFAULT_BIN = os.path.join(HERE, "..", "target", "release", "textrill")
 
 # A word for property 1: a run of characters that carries content and that the
 # converter is not expected to split, reflow or reorder. Deliberately excludes
