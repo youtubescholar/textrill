@@ -412,7 +412,7 @@ These are general, not egui-specific.
 ## 8. Consequences for textrill Phase 6
 
 - The frozen behavioural contract (option inventory, generation counter, queue
-  drop, max-two-workers, panic capture) was ported from `textrill-gui/SURFACE.md`
+  drop, max-two-workers, panic capture) was ported from `legacy-archive/SURFACE.md`
   as `egui_kittest` acceptance tests rather than as a re-drawn widget mapping.
 - A native GUI crate (`textrill-gui-rs`) depending only on `egui`/`eframe` and
   the engine crate was added, and the Python/PySide6 GUI and the `pyo3` layer

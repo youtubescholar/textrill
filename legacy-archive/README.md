@@ -6,22 +6,30 @@ CI. `DOCS.md` at the repository root is the register of what is current.
 
 ## What is here, and why
 
-| path | what it was |
+| path | what it is |
 |---|---|
-| `textrill-gui/` | The Python + PySide6 front end (`textrill_gui`, 1,365 lines) and its 58-test suite. It was the GUI until the native `egui` rewrite in `textrill-gui-rs/` passed the ported acceptance suite. |
-| `textrill-gui/SURFACE.md` | The frozen GUI/engine surface used to drive the port. Still the written record of the behavioural contract. |
-| `python-bindings-python.rs` | The pyo3 bindings (`textrill/src/python.rs`), exposed as `textrill._native`. They existed only to cross into Python; the native GUI links the engine directly, so nothing needs them. |
-| `python-bindings-pyproject.toml` | The maturin build config for the extension (`textrill/pyproject.toml`). |
-| `python/` | The thin Python wrapper package (`textrill/python/textrill/__init__.py`). |
-| `TOOL-SURVEY.md` | The 2026-09-29 feature-gap survey. Archived 2026-10-06 because its matrix had gone stale — it still called the port `txt2html-rs` and reported TOC, HTML5 output, rc files, `charset` and a built-in stylesheet as missing, all of which now exist. A *document*, retired for the same reason as the code above: it no longer describes what exists. |
+| `REMEDIATION-PLAN.md` | The long-form reconstruction of the project at four points in its life: the tiered parity policy, the Phase 0b gate-integrity findings, and the decisions including the ones that turned out wrong. |
+| `ADVERSARIAL-FINDINGS.md` | The attack pass that judged the port against the Perl module; findings A1–A12, all implemented and verified. |
+| `TOOL-SURVEY.md` | The 2026-09-29 feature-gap survey. Archived because its matrix went stale — it still called the port `txt2html-rs` and reported TOC, HTML5 output, rc files, `charset` and a built-in stylesheet as missing. Its upstream TOC disclaimer is still cited by live documents. |
+| `SURFACE.md` | The frozen GUI/engine surface that the native `egui` GUI was ported from (moved here from `textrill-gui/` on 2026-10-08). A specification, and specifications outlive implementations. |
+| `quicknote1.txt` | Agent residue from the abandoned prior attempt — a transcript of a session reasoning about its own todo list. Concrete evidence for the note in `docs/template-research/FINDINGS.md` that the prior project's process apparatus became its failure mode. |
 
-Two different things are archived here, and the distinction matters. The Python
-GUI is retired **code**: it is gone from every build and test path.
-`TOOL-SURVEY.md` is a retired **document**: the code it describes is still
-running, but the document's claims about that code are no longer true. Neither
-is ever read as current.
+Two different things are archived here, and the distinction matters.
+`REMEDIATION-PLAN.md`, `ADVERSARIAL-FINDINGS.md` and `TOOL-SURVEY.md` are
+retired **documents**: the code they describe is still running, but their
+claims about it are no longer current. Nothing here is ever read as current.
 
-## Why it was retired
+## Removed on 2026-10-08
+
+`level-gate.py`, the Python + PySide6 GUI implementation (`textrill-gui/`), and
+the pyo3 bindings plus Python wrapper (`python-bindings-*`, `python/`) were
+deleted outright rather than kept archived: nothing references them, they made
+up most of the archive's bulk, and a fresh clone does not need a dead GUI and a
+dead generator. All of it is recoverable from git history (`git log --follow
+-- <path>`), and the register below records why each existed. `SURFACE.md` was
+kept because live documents cite it.
+
+## Why the GUI was retired
 
 The native GUI reproduces the Python front end's behaviour byte-for-byte where
 it matters. The side-by-side differential run (2026-10-03) showed:
@@ -33,7 +41,7 @@ it matters. The side-by-side differential run (2026-10-03) showed:
 
 The duplicated encoding rule — the one reason the Python GUI had to be kept in
 step with the engine — is gone. See `REMEDIATION-PLAN.md` Phase 6 and
-`RUST-GUI-FINDINGS.md`.
+`docs/RUST-GUI-FINDINGS.md`.
 
 ## Restoring it
 
