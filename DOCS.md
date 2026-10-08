@@ -24,7 +24,7 @@ A document with no status is the failure mode this file exists to end.
 |---|---|
 | [`docs/PLAN.md`](docs/PLAN.md) | **What we do next.** Every item traces to a measurement in one of the two documents below. |
 | [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) | What textrill does, measured by running it. Defects, strengths, and the ten-clause output contract. |
-| [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) | Who else does this, and the three-part niche. Grounded in `competition-files/` and the installed pandoc. |
+| [`docs/LANDSCAPE.md`](docs/LANDSCAPE.md) | Who else does this, and the three-part niche. Grounded in `research/pandoc/` and the installed pandoc. |
 | [`docs/OFFERING.md`](docs/OFFERING.md) | How the tool is offered against pandoc: the claim, its measurement (`make proof`), what must be built first, and what pandoc does better. |
 | [`docs/PACKAGING.md`](docs/PACKAGING.md) | The Flatpak manifest, its two deliberate blockers, and how to clear them. |
 | `textrill/README.md` | The user-facing contract. The only document a user reads. |
@@ -35,8 +35,8 @@ A document with no status is the failure mode this file exists to end.
 
 | Document | What it is |
 |---|---|
-| `RUST-GUI-FINDINGS.md` | The `egui` decision and the evidence for it: why `cxx-qt` failed, the dependency measurements, the licence and privacy audit, the "verify the published crate version, not the docs" rule. §8's Phase 6 to-do list is finished. |
-| `template-research1/FINDINGS.md` | Reusable designs from a deleted prior attempt. Its §3, "Hazards found in our own engine", is still the sharpest description of what the tool does to plain text before you add anything else that touches it. |
+| `docs/RUST-GUI-FINDINGS.md` | The `egui` decision and the evidence for it: why `cxx-qt` failed, the dependency measurements, the licence and privacy audit, the "verify the published crate version, not the docs" rule. §8's Phase 6 to-do list is finished. |
+| `docs/template-research/FINDINGS.md` | Reusable designs from a deleted prior attempt. Its §3, "Hazards found in our own engine", is still the sharpest description of what the tool does to plain text before you add anything else that touches it. |
 | `lexicon` — none exists yet | A naming document would help: `textrill` vs `txt2html` vs `Textrill`, and which is which. `docs/PLAN.md` Phase 1 is the place it would come from. |
 
 ### Archived — `legacy-archive/`
@@ -49,7 +49,7 @@ A document with no status is the failure mode this file exists to end.
 | `TOOL-SURVEY.md` | The 2026-09-29 feature-gap survey. Archived because its matrix went *false*: it reported TOC, HTML5, rc files, `charset` and a stylesheet as absent, and all five exist. Its upstream TOC disclaimer and its option-abbreviation rationale are still cited by live documents. |
 | `textrill-gui/` | The retired Python + PySide6 front end, 1 365 lines and its 58-test suite. |
 | `textrill-gui/SURFACE.md` | The frozen GUI/engine contract the native GUI was ported from. A specification, and specifications outlive implementations. |
-| `quicknote1.txt` | Agent residue from the abandoned prior attempt — a transcript of a session reasoning about its own todo list. The concrete evidence for the note in `template-research1/FINDINGS.md` that the prior project's process apparatus became its failure mode. |
+| `quicknote1.txt` | Agent residue from the abandoned prior attempt — a transcript of a session reasoning about its own todo list. The concrete evidence for the note in `docs/template-research/FINDINGS.md` that the prior project's process apparatus became its failure mode. |
 | `python*` | The pyo3 bindings and the thin Python wrapper, retired with the GUI. |
 
 `legacy-archive/README.md` is the archive's own index.
@@ -57,12 +57,15 @@ A document with no status is the failure mode this file exists to end.
 ### Deliberately not documents
 
 - `ref/` — the Perl reference. Ignored by git, derived by `make ref` from the
-  tracked `txt2html-3.0.tar.gz`. **Kept, and this is not a half-measure.** It is
+  tracked `research/txt2html-3.0.tar.gz`. **Kept, and this is not a half-measure.** It is
   the oracle for the parity tier of the harness — the only thing that found
   A1–A12 — and it is available for historical artifact investigation. It is an
   oracle now, not a specification.
-- `competition-files/` — the pandoc 3.12 source, tracked as tarballs so the
-  studies can be re-run offline. The extracted tree is ignored.
+- `research/` — source archives for the offline studies: the pandoc 3.12
+  release (+ stripped) tarballs and the txt2html reference archives. Tracked so
+  the studies re-run offline; a tree extracted from them is ignored.
+- `stubs/` — the single canonical Perl stub that `make ref` installs into the
+  derived `ref/` tree, kept reviewable in git.
 - `examples/` — real documents, not prose about documents. `homer.txt` for now.
 - `packaging/` — the manifest and its generator target.
 - `textrill/`, `textrill-gui-rs/` — the code.
@@ -96,7 +99,7 @@ A document with no status is the failure mode this file exists to end.
    that turned out wrong.
 
 **"I want to work on the GUI."**
-1. `RUST-GUI-FINDINGS.md` §4–6 and §7.
+1. `docs/RUST-GUI-FINDINGS.md` §4–6 and §7.
 2. `legacy-archive/textrill-gui/SURFACE.md` for the frozen behavioural contract.
 
 ---
@@ -114,7 +117,7 @@ A document with no status is the failure mode this file exists to end.
 ## What was read
 
 To produce the two studies, on 2026-10-06: `textrill --help` and the engine
-source for the capability claims; `competition-files/pandoc-3.12.tar.gz` and
+source for the capability claims; `research/pandoc/pandoc-3.12-full.tar.gz` and
 `/usr/bin/pandoc` 3.1.3 for the landscape; `examples/homer.txt` converted by
 both tools for the comparison; `textrill/LICENSE` for the licensing position;
 `legacy-archive/TOOL-SURVEY.md` for the category survey and the upstream TOC

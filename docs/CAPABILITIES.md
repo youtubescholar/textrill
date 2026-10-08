@@ -261,7 +261,7 @@ feature with a test that fails when it breaks, not a discovery.
 
 ## 5. Against pandoc
 
-pandoc 3.1.3 is installed here; `competition-files/` has the 3.12 source. Same
+pandoc 3.1.3 is installed here; `research/pandoc/` has the 3.12 source. Same
 input, `examples/homer.txt`.
 
 |  | textrill | pandoc, forced to markdown |

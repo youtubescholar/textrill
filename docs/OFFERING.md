@@ -99,7 +99,7 @@ textrill --title "The Odyssey" --infile examples/homer.txt --outfile - \
 
 | # | Claim | Measured |
 |---|---|---|
-| P0 | pandoc measured against | 3.1.3 (`competition-files/` holds the 3.12 source) |
+| P0 | pandoc measured against | 3.1.3 (`research/pandoc/` holds the 3.12 sources) |
 | P1 | pandoc has no plain-text reader | `plain` absent from `--list-input-formats`; 43 readers |
 | P2 | `pandoc -f plain` | rejected, non-zero exit |
 | P3 | the 3.12 source registers no plain reader | no `"plain"` entry in `Readers.hs` |

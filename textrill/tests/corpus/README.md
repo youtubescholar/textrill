@@ -39,7 +39,7 @@ Both halves of the default `PERL5LIB` live under `ref/` in the repo on purpose.
 `ref/stubs/YAML/Syck.pm` is a stub for a module `TextToHTML.pm` `use`s at load
 time but never calls; the real `YAML::Syck` is long superseded and not
 installable on a current perl. The canonical copy is tracked at
-`tests/refstub/YAML/Syck.pm` and `make ref` copies it into place, so the
+`stubs/YAML/Syck.pm` and `make ref` copies it into place, so the
 reasoning for the stub is reviewable rather than living on one machine. Keeping
 these in `/tmp` was tried and a reboot wiped them mid-run — see "Two ways this
 reports success wrongly" below.

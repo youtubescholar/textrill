@@ -62,8 +62,9 @@ modules:
           - target
           - ref
           - legacy-archive
-          - template-research1
-          - tests
+          - docs/template-research
+          - research
+          - stubs
           - packaging
           - .git
       - type: file
@@ -88,8 +89,9 @@ modules:
           - target
           - ref
           - legacy-archive
-          - template-research1
-          - tests
+          - docs/template-research
+          - research
+          - stubs
           - packaging
           - .git
       - type: file

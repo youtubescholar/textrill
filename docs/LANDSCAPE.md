@@ -1,6 +1,6 @@
 # Landscape — where textrill sits
 
-Written 2026-10-06. Research material is in `competition-files/`: the pandoc
+Written 2026-10-06. Research material is in `research/pandoc/`: the pandoc
 3.12 source (full release tarball with docs and tests) and a stripped build
 tarball of the same version. pandoc 3.1.3 is installed on this machine and is
 what the comparisons below were run against.
@@ -125,8 +125,8 @@ What is missing is narrower and more valuable:
 
 ## 5. Sources
 
-- `competition-files/pandoc-3.12.tar.gz` — full release tarball, 3 091 files,
-  including `doc/` and the test suite. `competition-files/the_pandoc-3.12.tar.gz`
+- `research/pandoc/pandoc-3.12-full.tar.gz` — full release tarball, 3 091 files,
+  including `doc/` and the test suite. `research/pandoc/pandoc-3.12-stripped.tar.gz`
   is a stripped build tarball of the same version: 262 files fewer, no docs, no
   `cabal.project`, no CI. Same version, different packaging; the full one is
   what to read.

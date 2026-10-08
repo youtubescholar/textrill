@@ -264,10 +264,10 @@ fuzz: build
 #
 # The stub is a tracked file copied into place rather than a heredoc here, so
 # its provenance and reasoning live in a file you can read and diff.
-REF_TARBALL := $(ROOT)/txt2html-3.0.tar.gz
+REF_TARBALL := $(ROOT)/research/txt2html-3.0.tar.gz
 REF_SRC     := $(ROOT)/ref/txt2html-3.0
 REF_STUB    := $(ROOT)/ref/stubs/YAML/Syck.pm
-STUB_SOURCE := $(ROOT)/tests/refstub/YAML/Syck.pm
+STUB_SOURCE := $(ROOT)/stubs/YAML/Syck.pm
 
 # Phony, deliberately. A directory target that make considers "up to date" is a
 # trap here: delete ref/stubs but leave ref/txt2html-3.0 and a non-phony `ref`
@@ -299,7 +299,7 @@ ref:
 # one test wants it. `make test` runs without it and reports the skip; this is
 # for when that test is the thing being worked on.
 REF_LARGE_DIR := $(ROOT)/ref/txt2html-master
-LARGE_ZIP     := $(ROOT)/txt2html-master.zip
+LARGE_ZIP     := $(ROOT)/research/txt2html-master.zip
 
 .PHONY: ref-large
 ref-large:

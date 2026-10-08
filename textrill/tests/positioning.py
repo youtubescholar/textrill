@@ -44,7 +44,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MINE = Path(os.environ.get("MINE") or ROOT / "textrill/target/release/textrill")
 PANDOC = os.environ.get("PANDOC") or "pandoc"
-TARBALL = ROOT / "competition-files/pandoc-3.12.tar.gz"
+TARBALL = ROOT / "research/pandoc/pandoc-3.12-full.tar.gz"
 EXAMPLE = ROOT / "examples/homer.txt"
 
 # docs/OFFERING.md §3 records the pandoc the numbers were measured against.
