@@ -101,12 +101,15 @@ A document with no status is the failure mode this file exists to end.
 
 ---
 
-## Two open decisions
+## Decisions
 
-1. **The GitHub owner.** Blocks the app-id, both `Cargo.toml` `repository` TODOs,
-   and packaging. Everything else can proceed without it.
+1. ~~**The GitHub owner.**~~ **Resolved** 2026-10-08. The repo is
+   https://github.com/youtubescholar/textrill; both `Cargo.toml` `repository`
+   fields and the Flatpak app-id `io.github.youtubescholar.Textrill` follow
+   from it (`docs/PACKAGING.md`).
 2. **`flatpak-cargo-generator` or `cargo vendor`.** `docs/PACKAGING.md` §
-   "Undecided" argues for vendoring; not decided.
+   "Undecided" argues for vendoring; not decided. This is the remaining
+   blocker on a buildable Flatpak.
 
 ## What was read
 

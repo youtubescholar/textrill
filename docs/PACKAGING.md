@@ -1,22 +1,18 @@
 # Packaging
 
-The Flatpak manifest is `packaging/io.github.example.Textrill.yml`. It is
-complete and **deliberately not buildable**, for two reasons recorded below.
+The Flatpak manifest is `packaging/io.github.youtubescholar.Textrill.yml`. It is
+complete and **deliberately not buildable**, for one reason recorded below.
 
-## The app-id is a placeholder, on purpose
+## The app-id
 
 ```
-app-id: io.github.example.Textrill
+app-id: io.github.youtubescholar.Textrill
 ```
 
-Flatpak requires a reverse-DNS identifier, and only the leaf is settled: the
-tool is `textrill`. The domain half is the GitHub account, which is exactly the
-`<you>` still sitting in the `repository = "https://github.com/<you>/textrill"`
-TODO in both `Cargo.toml` files.
-
-`example` was chosen because it is not a real owner, so the id cannot be
-published by accident. Replacing it later means changing three places at once:
-both `Cargo.toml` files and the manifest's filename.
+Flatpak requires a reverse-DNS identifier. The leaf is the tool (`Textrill`);
+the domain half is the GitHub account, resolved 2026-10-08 to `youtubescholar`,
+the same owner as `repository` in both `Cargo.toml` files. The manifest's
+filename matches the id, as the format requires.
 
 ## `cargo-sources.json` is generated, not committed
 
@@ -56,7 +52,9 @@ looks for them.
 
 ## To make it buildable
 
-1. Get the GitHub owner; set `repository` in both `Cargo.toml` files.
-2. Replace `io.github.example.Textrill` in the manifest and rename the file.
+1. ~~Get the GitHub owner; set `repository` in both `Cargo.toml` files.~~ Done
+   2026-10-08: owner is `youtubescholar`.
+2. ~~Replace `io.github.example.Textrill` in the manifest and rename the file.~~
+   Done 2026-10-08: the id is `io.github.youtubescholar.Textrill`.
 3. Decide generate-vs-vendor, then run `make cargo-sources` or `cargo vendor`.
-4. `flatpak-builder build packaging/io.github.<owner>.Textrill.yml`
+4. `flatpak-builder build packaging/io.github.youtubescholar.Textrill.yml`

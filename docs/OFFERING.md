@@ -27,7 +27,7 @@ Measured 2026-10-06, not described. This is the inventory the offer rests on.
 | GUI | `textrill-gui-rs`, native `egui`; an options panel over the engine's own options; settings at `$XDG_CONFIG_HOME/textrill-gui/textrill.conf` (QSettings-compatible, hand-editable) |
 | Binary | static `x86_64-unknown-linux-musl`, no runtime dependencies |
 | Checks | `make verify`: fmt, clippy, 364 engine tests, 74 GUI tests, proptest, alloctest, 61 differential cases, 33 goldens, 16 000 fuzz cases |
-| Packaging | Flatpak manifest drafted, deliberately unbuildable: the app-id needs a GitHub owner that does not exist yet |
+| Packaging | Flatpak manifest drafted, deliberately unbuildable: `cargo-sources.json` needs the generate-vs-vendor decision (`docs/PACKAGING.md`) |
 | Docs | the register in `DOCS.md`, `CAPABILITIES.md` (measured), `LANDSCAPE.md` (measured), `PLAN.md` (what is next) |
 
 `--var` shipped (S3) and a five-template library shipped embedded in the
@@ -155,7 +155,7 @@ item; this document's contribution is the order and the reason.
 | 3 | `PLAN.md` Phase 4.2 — a shipped template library | **Built (S4).** Five templates ship embedded in the binary and as files under `textrill/templates/` (`article`, `book`, `manpage`, `slide`, `bare`), selected with `--template_library NAME`. All use only the fixed slots, so each works with zero required arguments and produces no silent-empty frames; someone with no template now has actual ones to start from. |
 | 4 | `PLAN.md` Phase 5.0 — `--report`, the counts on stderr | **Built (S6).** `--report` prints the five inference counts on stderr once the output is written — bytes, headings, paragraphs, capitalised runs, line breaks — and `make examples` reads them from that line instead of re-computing them, so a user whose `--toc` came out empty can now see what the engine saw. |
 | 5 | `PLAN.md` Phase 5 — headings in documents that have none | `homer.txt` yields no headings at all: 39 capitalised runs become `<strong>`, `--toc` lists nothing, `--chunk` writes one 38 477-byte file. This is the capability claim a reader will test first ("it found my chapter headings, or it did not"), and the corpus-wide measurement is done (`make measure`, S8): every candidate heading rule is at or near 100% false positives on the no-structure documents — Blake and Calligrammes are all hits, Homer is the two signatures, and Gelbenhügel's `---` lines read as 16 headings its author never wrote. Research before behaviour: the Phase 5 change stays a proposal. |
-| 6 | `PLAN.md` Phase 6 — packaging, blocked on the GitHub owner | A static binary is already buildable; an installable app is not. The owner decision is the same one that blocks `Cargo.toml` `repository` and the app-id, so it is one decision, not three. |
+| 6 | `PLAN.md` Phase 6 — packaging | A static binary is already buildable; an installable app is not. The GitHub owner is resolved (`youtubescholar`): both `repository` fields and the app-id `io.github.youtubescholar.Textrill` follow from it. The remaining blocker is `docs/PACKAGING.md`'s generate-vs-vendor decision. |
 | 7 | `PLAN.md` Phase 7 — grow `examples/` | **Built (S7).** One document is not evidence of trustworthiness on *your* document. The corpus is now eight: Greek Septuagint (Swete), Hebrew/Aramaic Talmud (Vilna text), two Classical Chinese works, William Blake, Apollinaire's *Calligrammes*, a CC0 tabletop-RPG setting, and the Odyssey. Every file's source, edition and CC0/PD confirmation are recorded in `examples/README.md`, and `reporttest` pins each one's recovered counts. |
 | 8 | Phase 4.3 — `{{textrill:if:…}}` | One template serving documents with and without a TOC. Valuable, and after the library exists rather than before it. |
 
@@ -217,8 +217,10 @@ than a gap.
 `0.1.0` is the first release of the fork and is not published. What publishing
 it needs, in order:
 
-1. **The GitHub owner.** One decision clearing the app-id, both `repository`
-   TODOs, and release artifacts. Everything else in this list can precede it.
+1. ~~**The GitHub owner.**~~ **Resolved** 2026-10-08: the repo is
+   https://github.com/youtubescholar/textrill. Both `repository` fields are set
+   and the Flatpak app-id is `io.github.youtubescholar.Textrill`. What remains
+   to publish, in order:
 2. **The README's opening, rewritten against §2** — the current opening still
    spends its second paragraph on upstream provenance, which is the right fact
    in the wrong place for a reader deciding whether to use the tool.
@@ -228,8 +230,8 @@ it needs, in order:
    tests that binary.
 5. **CHANGELOG** starting at 0.1.0. The git history is detailed enough to
    summarise, not to replace.
-6. Flatpak, after 1 and only if the owner wants a desktop store presence; the
-   manifest and its blockers are in `docs/PACKAGING.md`.
+6. Flatpak, only if a desktop store presence is wanted; the manifest's
+   remaining blocker (generate-vs-vendor) is in `docs/PACKAGING.md`.
 
 ## 7. What pandoc does better — publish this
 

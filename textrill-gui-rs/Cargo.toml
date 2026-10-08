@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Native GUI for textrill, built with egui/eframe."
 license = "GPL-3.0-or-later"
-# TODO: set repository = "https://github.com/<you>/textrill" once the host account exists.
+repository = "https://github.com/youtubescholar/textrill"
 
 [dependencies]
 textrill = { path = "../textrill" }

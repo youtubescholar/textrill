@@ -89,7 +89,7 @@ otherwise `~/.txt2html.dict` (`./.textrill.dict` / `./.txt2html.dict` when
 ### The CLI
 
 ```sh
-cargo install --git https://github.com/<you>/textrill
+cargo install --git https://github.com/youtubescholar/textrill
 ```
 
 Or build from a checkout:
