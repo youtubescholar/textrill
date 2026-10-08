@@ -12,7 +12,6 @@ CI. `DOCS.md` at the repository root is the register of what is current.
 | `ADVERSARIAL-FINDINGS.md` | The attack pass that judged the port against the Perl module; findings A1–A12, all implemented and verified. |
 | `TOOL-SURVEY.md` | The 2026-09-29 feature-gap survey. Archived because its matrix went stale — it still called the port `txt2html-rs` and reported TOC, HTML5 output, rc files, `charset` and a built-in stylesheet as missing. Its upstream TOC disclaimer is still cited by live documents. |
 | `SURFACE.md` | The frozen GUI/engine surface that the native `egui` GUI was ported from (moved here from `textrill-gui/` on 2026-10-08). A specification, and specifications outlive implementations. |
-| `quicknote1.txt` | Agent residue from the abandoned prior attempt — a transcript of a session reasoning about its own todo list. Concrete evidence for the note in `docs/template-research/FINDINGS.md` that the prior project's process apparatus became its failure mode. |
 
 Two different things are archived here, and the distinction matters.
 `REMEDIATION-PLAN.md`, `ADVERSARIAL-FINDINGS.md` and `TOOL-SURVEY.md` are
@@ -21,13 +20,14 @@ claims about it are no longer current. Nothing here is ever read as current.
 
 ## Removed on 2026-10-08
 
-`level-gate.py`, the Python + PySide6 GUI implementation (`textrill-gui/`), and
-the pyo3 bindings plus Python wrapper (`python-bindings-*`, `python/`) were
-deleted outright rather than kept archived: nothing references them, they made
-up most of the archive's bulk, and a fresh clone does not need a dead GUI and a
-dead generator. All of it is recoverable from git history (`git log --follow
--- <path>`), and the register below records why each existed. `SURFACE.md` was
-kept because live documents cite it.
+`level-gate.py`, the Python + PySide6 GUI implementation (`textrill-gui/`), the
+pyo3 bindings plus Python wrapper (`python-bindings-*`, `python/`), and
+`quicknote1.txt` (an agent transcript, cited nowhere in the tree) were deleted
+outright rather than kept archived: nothing references them, they made up most
+of the archive's bulk, and a fresh clone does not need a dead GUI, a dead
+generator, or a session transcript. All of it is recoverable from git history
+(`git log --follow -- <path>`), and the register below records why each
+existed. `SURFACE.md` was kept because live documents cite it.
 
 ## Why the GUI was retired
 

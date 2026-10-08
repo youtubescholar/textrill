@@ -48,12 +48,12 @@ A document with no status is the failure mode this file exists to end.
 | `ADVERSARIAL-FINDINGS.md` | An attack pass that judged the port "against the Perl module as the specification". Findings A1–A12 are all implemented and verified, so it is evidence about a finished job. |
 | `TOOL-SURVEY.md` | The 2026-09-29 feature-gap survey. Archived because its matrix went *false*: it reported TOC, HTML5, rc files, `charset` and a stylesheet as absent, and all five exist. Its upstream TOC disclaimer and its option-abbreviation rationale are still cited by live documents. |
 | `SURFACE.md` | The frozen GUI/engine contract the native GUI was ported from, moved up from `textrill-gui/` on 2026-10-08. A specification, and specifications outlive implementations. |
-| `quicknote1.txt` | Agent residue from the abandoned prior attempt — a transcript of a session reasoning about its own todo list. The concrete evidence for the note in `docs/template-research/FINDINGS.md` that the prior project's process apparatus became its failure mode. |
 
 Removed from the archive on 2026-10-08, recoverable from git history:
 `level-gate.py` (the plan's generator, nothing used it), the retired
-`textrill-gui/` implementation, and the `python-bindings-*` / `python/` pyo3
-layer. See `legacy-archive/README.md`.
+`textrill-gui/` implementation, the `python-bindings-*` / `python/` pyo3 layer,
+and `quicknote1.txt` (an agent transcript, cited nowhere in the tree). See
+`legacy-archive/README.md`.
 
 `legacy-archive/README.md` is the archive's own index.
 
