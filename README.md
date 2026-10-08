@@ -27,24 +27,41 @@ phases) is tracked in `docs/PLAN.md`.
 
 ## Build and verify
 
+Prerequisites: a Rust toolchain (`rustup default stable` with `rustfmt` and
+`clippy`) and a system `perl` — the only mandatory tooling; the reference
+oracle is built offline from the tracked tarball and needs no CPAN.
+
+Try it:
+
 ```sh
-make build      # the CLI, static musl
+make build            # the CLI (single static musl binary)
+printf 'Hello *world*.\n' | ./textrill/target/release/textrill
+```
+
+The gates you need as a contributor:
+
+```sh
+make build      # the CLI
+make ref        # materialise the Perl reference oracle, once
 make verify     # fmt, clippy, unit/property/allocation tests, corpus, fuzz
 make proof      # the pandoc-facing claims (docs/OFFERING.md)
 make measure    # the heading-rule measurements (docs/PLAN.md Phase 5)
 ```
 
-The differential oracle is built from a tracked tarball (`make ref`), offline
-and identical everywhere, so a green run means the same thing on this machine,
-a GitHub runner, and yours. See `textrill/tests/corpus/README.md` — including
-"Six ways this reported success wrongly" — before changing the harness.
+Full `make verify` runs the fuzzer at 2 000 cases and takes roughly a quarter
+of an hour; CI runs the same set on every push, so sending a PR does not
+require running it locally first. `make verify` is reproducible — the same
+command means the same thing on a GitHub runner and on your machine, which is
+the guarantee the project stands on. See `textrill/tests/corpus/README.md`,
+including "Six ways this reported success wrongly", before changing the
+harness.
 
 ## Repo layout
 
 | Path | What it is |
 |---|---|
 | `textrill/` | The engine and CLI. The user-facing contract is `textrill/README.md`. |
-| `textrill-gui-rs/` | The native GUI (`egui`/`eframe`). A frozen behavioural contract lives in `legacy-archive/textrill-gui/SURFACE.md`. |
+| `textrill-gui-rs/` | The native GUI (`egui`/`eframe`). A frozen behavioural contract lives in `legacy-archive/SURFACE.md`. |
 | `docs/` | The authoritative plan: `PLAN.md`, `CAPABILITIES.md`, `LANDSCAPE.md`, `OFFERING.md`, `PACKAGING.md` — plus the GUI findings and template research. |
 | `DOCS.md` | The document register: exactly one status per document, decided by a test. Start here for orientation. |
 | `examples/` | Real documents the tool is exercised and measured against, with a provenance register. |

@@ -11,10 +11,14 @@ reviewed against it.
    or a document must be reproducible by running the target that produced them
    (`make examples`, `make measure`, `make proof`), or the change does not
    contain them.
-2. **Break a gate on purpose before trusting it.** Every gate in this repo has
-   shipped a false pass at least once (the two famous ones are documented in
-   `.github/workflows/ci.yml`). A check you have not observed failing is not a
-   check. If you change a gate, demonstrate it can fail.
+2. **A harness change is proven by being broken.** Every gate here has shipped
+   a false pass at least once (A1: a stale binary; P1: a fuzz pipeline that
+   could not fail). So when you change the *harness* — the runners, the corpus
+   tables, the fuzzer, the Makefile gates — demonstrate on purpose that the
+   changed check can fail before trusting it. The two built-in sabotage
+   commands are in `textrill/tests/corpus/README.md` (the closing rule of "Six
+   ways this reported success wrongly"). Feature and behaviour work needs no
+   such ritual: the differential corpus is how *its* difference is pinned.
 3. **The test corpus comes first.** Change behaviour, then extend
    `textrill/tests/corpus/` so the difference is pinned by the differential
    harness and the corpus README records why.

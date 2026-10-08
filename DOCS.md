@@ -45,13 +45,15 @@ A document with no status is the failure mode this file exists to end.
 | Path | What it was |
 |---|---|
 | `REMEDIATION-PLAN.md` | 3 653 lines, built by `level-gate.py` to reconstruct the project at four points in its life. Asked "what does Perl do that we do not?", and its 65-option inventory existed to produce a list of gaps. Kept because it records *why* decisions went the way they did, including the ones that turned out wrong. |
-| `level-gate.py` | The script that generated the plan above. Same reason. Nothing uses it now. |
 | `ADVERSARIAL-FINDINGS.md` | An attack pass that judged the port "against the Perl module as the specification". Findings A1–A12 are all implemented and verified, so it is evidence about a finished job. |
 | `TOOL-SURVEY.md` | The 2026-09-29 feature-gap survey. Archived because its matrix went *false*: it reported TOC, HTML5, rc files, `charset` and a stylesheet as absent, and all five exist. Its upstream TOC disclaimer and its option-abbreviation rationale are still cited by live documents. |
-| `textrill-gui/` | The retired Python + PySide6 front end, 1 365 lines and its 58-test suite. |
-| `textrill-gui/SURFACE.md` | The frozen GUI/engine contract the native GUI was ported from. A specification, and specifications outlive implementations. |
+| `SURFACE.md` | The frozen GUI/engine contract the native GUI was ported from, moved up from `textrill-gui/` on 2026-10-08. A specification, and specifications outlive implementations. |
 | `quicknote1.txt` | Agent residue from the abandoned prior attempt — a transcript of a session reasoning about its own todo list. The concrete evidence for the note in `docs/template-research/FINDINGS.md` that the prior project's process apparatus became its failure mode. |
-| `python*` | The pyo3 bindings and the thin Python wrapper, retired with the GUI. |
+
+Removed from the archive on 2026-10-08, recoverable from git history:
+`level-gate.py` (the plan's generator, nothing used it), the retired
+`textrill-gui/` implementation, and the `python-bindings-*` / `python/` pyo3
+layer. See `legacy-archive/README.md`.
 
 `legacy-archive/README.md` is the archive's own index.
 
@@ -67,7 +69,8 @@ A document with no status is the failure mode this file exists to end.
   the studies re-run offline; a tree extracted from them is ignored.
 - `stubs/` — the single canonical Perl stub that `make ref` installs into the
   derived `ref/` tree, kept reviewable in git.
-- `examples/` — real documents, not prose about documents. `homer.txt` for now.
+- `examples/` — real documents, not prose about documents. Eight licence-clean
+  texts with a register and pinned counts in `examples/README.md`.
 - `packaging/` — the manifest and its generator target.
 - `textrill/`, `textrill-gui-rs/` — the code.
 
@@ -91,8 +94,10 @@ A document with no status is the failure mode this file exists to end.
 
 **"I want to change how it is tested."**
 1. `textrill/tests/corpus/README.md`, including § "Six ways this reported
-   success wrongly". Break the gate on purpose before trusting it.
-2. `docs/PLAN.md` § Standing rule — the same rule, and why it exists.
+   success wrongly" — with the two sabotage commands that prove the harness can
+   fail.
+2. `CONTRIBUTING.md` house rule 2 — when a harness change needs proving.
+3. `docs/PLAN.md` § Standing rule — the same rule, scoped to the plan's own gates.
 
 **"I want to understand a decision."**
 1. `docs/PLAN.md` — every item links to its measurement.
@@ -101,7 +106,7 @@ A document with no status is the failure mode this file exists to end.
 
 **"I want to work on the GUI."**
 1. `docs/RUST-GUI-FINDINGS.md` §4–6 and §7.
-2. `legacy-archive/textrill-gui/SURFACE.md` for the frozen behavioural contract.
+2. `legacy-archive/SURFACE.md` for the frozen behavioural contract.
 
 ---
 
