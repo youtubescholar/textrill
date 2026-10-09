@@ -8,7 +8,8 @@ the things that were actually wrong.
 
 This plan is built from `docs/CAPABILITIES.md` (what the tool does, measured) and
 `docs/LANDSCAPE.md` (who else does it). Every item below traces to a measurement
-in one of those two documents.
+in one of those two documents — except Phase 8, which traces to the oracle
+census in `docs/ORACLE-ARCHAEOLOGY.md`.
 
 ---
 
@@ -25,7 +26,8 @@ That text in `textrill/LICENSE` is correct and stays.
 **The Perl reference stays available** at `ref/` as an oracle for the parity
 tier of the test harness and as a historical artifact. It is no longer the
 specification. Where the two disagree, the question is now "which is right",
-answered per input class, and answered by us.
+answered per input class, and answered by us. Phase 8 retires it as a **gate**
+once reference-free acceptance exists (S12); it remains an optional cross-check.
 
 ---
 
@@ -548,6 +550,70 @@ order of value:
 
 ---
 
+## Phase 8 — Independence: retire the reference as a gate
+
+`docs/ORACLE-ARCHAEOLOGY.md` measured the question this phase answers: of every
+bug the project found in itself, the Perl differential was the *unique*
+discoverer of three semantic cases — E3's blank lines, `delim_retry`, and the
+non-ASCII delimiter predicate — and every one is now frozen as a corpus case or
+regression test. The differential's remaining job is regression, and a frozen
+golden or a property does that without its limitation: it can say *different*,
+never *wrong*.
+
+The gate also has a cost that is easy to forget because it is quiet. The fuzz
+stage is a strict byte differential with no way to declare a *content*
+divergence; Phase 2.1–2.2 recorded the wall (64 mismatches, all from two correct
+list shapes). It is why those items were withdrawn and why Phase 5's heading
+change is pinned behind a measurement. A gate that forbids improvement is not
+only a gate.
+
+This is the bootstrap compiler being retired. The ancestor built the descendant
+and found the three things only it could see; once those are frozen, it is not
+needed to decide pass/fail.
+
+### What the differential guards, and its replacement
+
+Removing the oracle before a replacement exists turns a real gate into a green
+gate that checks less, so S12 builds the replacement first.
+
+| guarded today | replacement | note |
+|---|---|---|
+| 61 byte-identical `tfiles` cases | hand-reviewed self-goldens | reviewed, not blindly frozen: a frozen bug is not a gate |
+| 33 author `good_*.html` goldens | unchanged | already reference-free |
+| 10 `differential must fail:` cases | plain expected-output tests | the "declared divergence" category then has nothing to declare |
+| E3, `delim_retry`, non-ASCII delimiter semantics | frozen self-goldens | the three cases Perl alone found |
+| random option combinations (fuzz, 8 seeds) | **partially lost** | see below |
+
+The fuzzer is the honest gap: it samples real options at random and compares
+fresh Perl output, so no fixed golden replaces it one-for-one. The property
+suite (`proptest.py`, `alloctest.rs`) covers the failure classes — no data loss,
+well-formedness, determinism, resource bounds — but the random-option *content*
+coverage shrinks. That is accepted deliberately and recorded here rather than
+discovered later.
+
+Desired end state: `make verify` no longer invokes Perl; `make diff` runs the
+same differential and fuzz runs as a non-gating cross-check; `ref/`, the
+`YAML::Syck` stub and the `perl` CI job become an archived historical tool,
+dropped in a later change if nothing needs them.
+
+### Steps
+
+- **S12 — build reference-free acceptance.** Freeze reviewed self-goldens for
+  `tfiles/` and `examples/`; convert the ten `differential must fail:` cases to
+  plain expected-output tests; grow the truth sets (`measure.py`'s per-document
+  counts, `encodingtest.rs`'s decoded code points). The differential runs in
+  parallel throughout as a cross-check: a new self-golden that disagrees with
+  fresh Perl is a finding to review, never an edit to make green.
+- **S13 — flip the gate.** Only after S12 is complete and reviewed: drop the
+  `perl` differential and fuzz stages from `make verify`, add the non-gating
+  `make diff`, retire the `perl` CI job. `make verify` is green with no Perl
+  installed.
+
+Until both land, the reference remains a parity oracle exactly as "What this
+is" and "Sequencing" describe. Phase 8 is the plan to stop citing it as one.
+
+---
+
 ## Not doing
 
 - **Footnotes.** Every mature converter has them. Rejected: footnotes need
@@ -579,7 +645,9 @@ or explained in textrill's own terms, with its own justification, and the
 reference is cited only where it constrains the bytes (as it did for 2.4's
 one-line boundary). Behaviour that diverges still has to clear the differential
 gates on the reference's terms, but the rationale is textrill's, never "the
-original does it too".
+original does it too". Phase 8 (S12–S13) ends this constraint: it replaces the
+parity oracle with reference-free acceptance and demotes the reference to an
+optional cross-check.
 
 | step | item | why here | check (beyond the baseline) |
 |---|---|---|---|
@@ -594,6 +662,8 @@ original does it too".
 | S9 | Phase 5.2 — decide `-H` block-start | The only Phase 5 behaviour change, once the measurement allows it | document the condition in `--help`/README, or change it with new corpus cases + oracle; verify green |
 | S10 | Phase 6 — packaging | Independent; owner resolved (`youtubescholar` 2026-10-08), remaining blocker is generate-vs-vendor | a Flatpak build from `make cargo-sources` (or `cargo vendor`) succeeds; app-id `io.github.youtubescholar.Textrill` |
 | S11 | Phase 4.3 — `{{textrill:if:…}}` | After S4's library gives it something to condition on | template tests extended; 4.4 guard green |
+| S12 | Phase 8 — build reference-free acceptance | The replacement must exist before the gate it replaces is removed | self-goldens for `tfiles/`+`examples/`, the ten declared-divergence cases as plain tests, truth sets grown; differential still runs in parallel; verify green |
+| S13 | Phase 8 — retire the reference as a gate | Only once S12 is complete and reviewed | `make verify` green with no `perl`; `make diff` present and non-gating; the `perl` CI job retired |
 
 `OFFERING.md` §5 is the same work ordered the way a first-time reader meets it
 (proof, 4.1–4.2, 5.0, headings, packaging, corpus, `if`) — not a second
