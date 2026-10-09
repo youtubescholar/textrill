@@ -369,18 +369,23 @@ So the rule matches the corpus's own: a divergence is a failing gate, and it
 becomes a passing gate by being fixed, in the same change. A defect that needs
 tracking goes in `cases.sh`, as a case that currently fails.
 
-Nine cases are *expected* to fail the differential comparison, by design rather
+Ten cases are *expected* to fail the differential comparison, by design rather
 than by neglect, and all are recorded as `differential must fail:` in `cases.sh`
 so the alignment guard holds them to it. Eight share a shape: the reference's
 output is wrong, or the reference has no way to be right, and the port's is
-right — so there is no byte sequence the port could emit to match it. The ninth,
-`opt_injection`, is a deliberate Tier 2 security divergence (A8).
+right — so there is no byte sequence the port could emit to match it. The other
+two are deliberate Tier 2 security divergences, `opt_injection` (A8) and
+`url_scheme` (A11).
 
 * `opt_injection` (A8) — `--title` / `--style_url` containing `</title>`,
   `<script>` and a quote-breaking attribute. The reference interpolates them
   into the document unescaped, which is a live XSS; the port escapes them, so a
   byte comparison cannot match by design. Its oracle is the XML well-formedness
   check in `proptest.py`, not `encodingtest.rs`.
+* `url_scheme` (A11) — a `<URL:…>` naming `javascript:` and `data:`. The
+  reference emits it as a live `href`; the port refuses every scheme outside
+  `--allowed_url_schemes`, unwraps the anchor and keeps the text, so a byte
+  comparison cannot match by design. Its oracle is `tests/urlschemetest.rs`.
 * `cp1252_smart` (P7.1) — a CP1252 file with smart quotes and dashes. The
   reference emits the raw bytes and depends on the browser guessing CP1252; the
   port decodes CP1252 and demoronize rewrites the punctuation to ASCII. Same
