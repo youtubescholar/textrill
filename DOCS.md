@@ -37,6 +37,7 @@ A document with no status is the failure mode this file exists to end.
 |---|---|
 | `docs/RUST-GUI-FINDINGS.md` | The `egui` decision and the evidence for it: why `cxx-qt` failed, the dependency measurements, the licence and privacy audit, the "verify the published crate version, not the docs" rule. §8's Phase 6 to-do list is finished. |
 | `docs/template-research/FINDINGS.md` | Reusable designs from a deleted prior attempt. Its §3, "Hazards found in our own engine", is still the sharpest description of what the tool does to plain text before you add anything else that touches it. |
+| [`docs/ORACLE-ARCHAEOLOGY.md`](docs/ORACLE-ARCHAEOLOGY.md) | For every bug the project found in itself, which oracle found it and whether a reference-free oracle would have. Concludes the Perl differential's unique contribution was three frozen semantic cases, and frames Perl as a bootstrap compiler rather than a gate. |
 | [`docs/DEVLOG.md`](docs/DEVLOG.md) | The verbatim development log, oldest first, back to the txt2html-rs import. Commit messages now point here instead of carrying walls of body text. Read it for *what happened when*; PLAN/CAPABILITIES are *why* and *what now*. |
 | `lexicon` — none exists yet | A naming document would help: `textrill` vs `txt2html` vs `Textrill`, and which is which. `docs/PLAN.md` Phase 1 is the place it would come from. |
 
