@@ -61,10 +61,14 @@ and `quicknote1.txt` (an agent transcript, cited nowhere in the tree). See
 ### Deliberately not documents
 
 - `ref/` — the Perl reference. Ignored by git, derived by `make ref` from the
-  tracked `research/txt2html-3.0.tar.gz`. **Kept, and this is not a half-measure.** It is
-  the oracle for the parity tier of the harness — the only thing that found
-  A1–A12 — and it is available for historical artifact investigation. It is an
-  oracle now, not a specification.
+  tracked `research/txt2html-3.0.tar.gz`. **Kept, and this is not a
+  half-measure.** It is the oracle for the parity tier of the harness and is
+  available for historical artifact investigation. It is *not* what found
+  A1–A12: the reference-free attack pass did. What it alone found are the silent
+  semantic divergences a reference-free oracle cannot judge — E3, `delim_retry`,
+  the non-ASCII delimiter predicate — see `docs/ORACLE-ARCHAEOLOGY.md`. It is an
+  oracle now, not a specification. Phase 8 (`docs/PLAN.md`) plans to retire it
+  as a gate once reference-free acceptance exists.
 - `research/` — source archives for the offline studies: the pandoc 3.12
   release (+ stripped) tarballs and the txt2html reference archives. Tracked so
   the studies re-run offline; a tree extracted from them is ignored.

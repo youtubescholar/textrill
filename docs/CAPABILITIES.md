@@ -350,6 +350,6 @@ but it must be visible.
 ```sh
 make examples                                  # the smoke run over examples/
 textrill --help                                # the 68-option surface
-cargo test --manifest-path textrill/Cargo.toml # 364 tests
+cargo test --manifest-path textrill/Cargo.toml # 365 tests
 bash textrill/tests/corpus/run.sh              # 61 differential cases, 33 goldens
 ```

@@ -554,11 +554,11 @@ order of value:
 
 `docs/ORACLE-ARCHAEOLOGY.md` measured the question this phase answers: of every
 bug the project found in itself, the Perl differential was the *unique*
-discoverer of three semantic cases — E3's blank lines, `delim_retry`, and the
-non-ASCII delimiter predicate — and every one is now frozen as a corpus case or
-regression test. The differential's remaining job is regression, and a frozen
-golden or a property does that without its limitation: it can say *different*,
-never *wrong*.
+discoverer of the semantic cases a reference-free oracle cannot judge — E3's
+blank lines, `delim_retry`, and the non-ASCII delimiter predicate — and every
+one is now frozen as a corpus case or regression test. The differential's
+remaining job is regression, and a frozen golden or a property does that
+without its limitation: it can say *different*, never *wrong*.
 
 The gate also has a cost that is easy to forget because it is quiet. The fuzz
 stage is a strict byte differential with no way to declare a *content*
@@ -603,14 +603,35 @@ dropped in a later change if nothing needs them.
   plain expected-output tests; grow the truth sets (`measure.py`'s per-document
   counts, `encodingtest.rs`'s decoded code points). The differential runs in
   parallel throughout as a cross-check: a new self-golden that disagrees with
-  fresh Perl is a finding to review, never an edit to make green.
-- **S13 — flip the gate.** Only after S12 is complete and reviewed: drop the
-  `perl` differential and fuzz stages from `make verify`, add the non-gating
-  `make diff`, retire the `perl` CI job. `make verify` is green with no Perl
-  installed.
+  fresh Perl is a finding to review, never an edit to make green. S12 changes
+  the harness, so every new gate is broken on purpose before it is believed —
+  CONTRIBUTING.md rule 2 and the Standing rule, not an exception to them.
+- **S13 — flip the gate and sweep the documents.** Only after S12 is complete
+  and reviewed: drop the `perl` differential and fuzz stages from `make verify`,
+  add the non-gating `make diff`, retire the `perl` CI job — and rework the
+  `musl` job, which also runs `corpus-musl` against the reference. Then sweep
+  the documents below, because the tree would otherwise document a gate it no
+  longer has. `make verify` is green with no Perl installed.
 
 Until both land, the reference remains a parity oracle exactly as "What this
 is" and "Sequencing" describe. Phase 8 is the plan to stop citing it as one.
+
+### Documentation sweep (S13)
+
+The differential is not just a target; several documents describe it as the
+load-bearing gate. When S13 removes it, each of these has to move in the same
+change or it becomes documentation for a mechanism that is gone:
+
+| file | what stops being true |
+|---|---|
+| `CONTRIBUTING.md` | rules 2–3 name the differential corpus as *the* pinning mechanism; the gates block lists corpus/fuzz in `make verify` |
+| `README.md` (root) | `make ref` as required setup, "the only thing that gets to say behaves like upstream", `perl` as a prerequisite |
+| `textrill/README.md` | the byte-parity contract in "Status" and "Relationship to upstream"; `make ref` in the build steps |
+| `docs/OFFERING.md` | §9's gate table and the §1 "Checks" row list corpus/fuzz inside `make verify` |
+| `docs/CAPABILITIES.md` | the appendix's corpus command and "pinned against the reference" phrasing |
+| `DOCS.md` | the `ref/` entry's "oracle for the parity tier" framing |
+| `.github/workflows/ci.yml` | the `differential` job, the upstream canary, and `musl`'s `corpus-musl` step |
+| `textrill/tests/corpus/README.md` | the whole document is written around the differential; reduce it to the advisory `make diff` and the reference-free acceptance |
 
 ---
 
@@ -662,8 +683,8 @@ optional cross-check.
 | S9 | Phase 5.2 — decide `-H` block-start | The only Phase 5 behaviour change, once the measurement allows it | document the condition in `--help`/README, or change it with new corpus cases + oracle; verify green |
 | S10 | Phase 6 — packaging | Independent; owner resolved (`youtubescholar` 2026-10-08), remaining blocker is generate-vs-vendor | a Flatpak build from `make cargo-sources` (or `cargo vendor`) succeeds; app-id `io.github.youtubescholar.Textrill` |
 | S11 | Phase 4.3 — `{{textrill:if:…}}` | After S4's library gives it something to condition on | template tests extended; 4.4 guard green |
-| S12 | Phase 8 — build reference-free acceptance | The replacement must exist before the gate it replaces is removed | self-goldens for `tfiles/`+`examples/`, the ten declared-divergence cases as plain tests, truth sets grown; differential still runs in parallel; verify green |
-| S13 | Phase 8 — retire the reference as a gate | Only once S12 is complete and reviewed | `make verify` green with no `perl`; `make diff` present and non-gating; the `perl` CI job retired |
+| S12 | Phase 8 — build reference-free acceptance | The replacement must exist before the gate it replaces is removed | self-goldens for `tfiles/`+`examples/`, the ten declared-divergence cases as plain tests, truth sets grown; differential still runs in parallel; each new gate broken on purpose (Standing rule); verify green |
+| S13 | Phase 8 — retire the reference as a gate, and sweep the documents | Only once S12 is complete and reviewed | `make verify` green with no `perl`; `make diff` present and non-gating; `differential`/`perl` CI gone and `musl` reworked; the Documentation sweep table clear |
 
 `OFFERING.md` §5 is the same work ordered the way a first-time reader meets it
 (proof, 4.1–4.2, 5.0, headings, packaging, corpus, `if`) — not a second

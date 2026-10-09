@@ -74,8 +74,9 @@ test could have found it; Perl is where the *discovery* came from. E2 was also
 a differential discovery, but P12's no-data-loss property would have caught it
 on its own.
 
-So among the correctness divergences, **three** justify Perl as a *discovery*
-device, and each is now pinned as a corpus case or regression test — the
+So the correctness divergences that justify Perl as a *discovery* device are the
+table's "only Perl" rows — E3, `delim_retry`, and the non-ASCII delimiter
+predicate — and each is now pinned as a corpus case or regression test. The
 frozen artifact does the future work, not Perl.
 
 **Perl is sometimes the wrong oracle.** On genuine UTF-8 input Perl emits
@@ -95,7 +96,7 @@ Byte-parity served four jobs: (1) *bootstrap conformance* — prove the port
 understood the original; (2) *regression* — freeze behaviour so a refactor
 cannot drift; (3) *discovery* — find divergences the author never enumerated;
 (4) *identity*. Jobs 1 and 3 are spent — the port understands the original, and
-the three semantic discoveries are frozen. Job 2 is now done better by
+the discoveries it alone made (above) are frozen. Job 2 is now done better by
 self-goldens and properties, which cannot rot into a false pass the way a
 suppressed comparison can. Job 4 was always wrong: naming itself `textrill` and
 emitting its own generator string already broke parity on purpose.
