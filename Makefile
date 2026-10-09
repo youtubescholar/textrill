@@ -1,17 +1,24 @@
 # Single entry point for the project's checks. Everything is one command:
 #
-#   make verify      fmt-check, clippy, Rust tests (engine and GUI), the
-#                    differential corpus, fuzzer
+#   make verify      fmt-check, clippy, Rust tests (engine and GUI),
+#                    reference-free acceptance, real-document frozen outputs
 #   make proof       re-measure docs/OFFERING.md §3 (needs pandoc)
 #   make fix         what is safe to apply automatically: cargo fmt
 #   make test        just the Rust tests
-#   make corpus      the Perl differential corpus
+#   make corpus      the Perl differential corpus (needs `make ref`)
+#   make fuzz        the Perl differential fuzzer (needs `make ref`)
+#   make diff        the differential + fuzzer, as a non-gating cross-check
+#   make accept      reference-free acceptance against frozen self-goldens
+#   make examples    real-document frozen outputs (reference-free)
 #   make scale       the 1 MB paragraph probes, timed against Perl
 #
-# Individual targets build first and pass the binary path explicitly. The
-# corpus runner defaults MINE to target/debug/textrill, and a stale debug
-# binary is what made it report a false green twice during A1; exporting MINE
-# from here means no invocation can pick up a binary that was not just built.
+# `make verify` is green with no Perl installed (Phase 8 S13). The parity
+# oracle remains available on demand as `make diff`, but nothing that gates
+# depends on it. Individual targets build first and pass the binary path
+# explicitly. The acceptance runner defaults MINE to target/debug/textrill, and
+# a stale debug binary is what made the differential report a false green twice
+# during A1; exporting MINE from here means no invocation can pick up a binary
+# that was not just built.
 
 TIME   ?= /usr/bin/time -f "  %es"
 CARGO  ?= cargo
@@ -47,11 +54,15 @@ FUZZ_JOBS ?= $(shell nproc 2>/dev/null || echo 8)
 # other's evidence -- see fuzz.py --fail-dir.
 FUZZ_FAILDIR ?= $(RS)/tests/corpus/fuzz-fail
 
-.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz scale musl corpus-musl examples proof measure clean
+.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest accept corpus fuzz diff scale musl corpus-musl accept-musl examples proof measure clean
 
 all: verify
 
-verify: fmt-check clippy test test-gui-rs proptest alloctest corpus fuzz
+# S13 final form: no Perl anywhere in the gate. The differential and the fuzzer
+# moved to the non-gating `make diff`; `make accept` (frozen self-goldens plus
+# the upstream author goldens) and `make examples` (frozen real-document
+# outputs) now carry the work those two used to do.
+verify: fmt-check clippy test test-gui-rs proptest alloctest accept examples
 	@echo
 	@echo "verify: OK"
 
@@ -66,10 +77,12 @@ build:
 # including Alpine and other musl distros where a glibc build does not. That
 # claim is only as good as a target that actually builds it -- and a target that
 # builds but silently produces different bytes would look green. So `musl`
-# builds and asserts the result really is static; `corpus-musl` then runs the
-# differential gate against the static binary. `rustup target add
-# $(MUSL_TARGET)` is the only prerequisite: this crate has no C dependencies, so
-# the target's self-contained musl links it without musl-gcc.
+# builds and asserts the result really is static; `accept-musl` then runs the
+# reference-free acceptance against the static binary. `corpus-musl` does the
+# same against the Perl reference, for a parity cross-check on the shipping
+# binary. `rustup target add $(MUSL_TARGET)` is the only prerequisite: this
+# crate has no C dependencies, so the target's self-contained musl links it
+# without musl-gcc.
 #
 # Deliberately not part of `verify`: most dev machines have no musl target
 # installed, and a gate that fails for a missing toolchain rather than a defect
@@ -83,9 +96,12 @@ musl:
 	  || { echo "ERROR: $(MUSL_BIN) is not a static binary" >&2; exit 1; }
 
 # MINE is passed on the command line, not exported, so it overrides the glibc
-# path this Makefile exports above. The warning in run.sh about MINE being older
-# than the sources cannot fire here: `musl` depends on nothing stale because it
-# is a phony rebuild, and the static target's sources are the same files.
+# path this Makefile exports above.
+accept-musl: musl
+	cd $(RS) && MINE=$(MUSL_BIN) ./tests/corpus/accept.sh
+
+# The parity cross-check on the static binary. Optional, like `make diff`: it
+# needs the Perl reference and is not part of any gate.
 corpus-musl: musl
 	cd $(RS) && MINE=$(MUSL_BIN) ./tests/corpus/run.sh
 
@@ -145,7 +161,16 @@ alloctest: build
 corpus: build
 	cd $(RS) && ./tests/corpus/run.sh
 
-# --- real-document smoke run -------------------------------------------------
+# --- reference-free acceptance (Phase 8 S12) ---------------------------------
+
+# The replacement for the differential as the gate: frozen self-goldens per
+# corpus case, plus the upstream author goldens as an independent check. No
+# Perl, no `make ref`; `tests/corpus/accept.sh --write` recaptures the goldens,
+# and each one is only believed after review + the differential beside it.
+accept: build
+	cd $(RS) && MINE=$(RELEASE_BIN) ./tests/corpus/accept.sh
+
+# --- real-document frozen outputs --------------------------------------------
 # The corpus and fuzzer both use short synthetic inputs, because a differential
 # harness needs inputs whose expected output is known. That leaves the opposite
 # question unanswered: does the tool hold up on a document a person actually
@@ -155,38 +180,17 @@ corpus: build
 # examples/homer.txt is the Project Gutenberg Odyssey: 37 KB of running prose
 # whose section titles ("PREFACE TO FIRST EDITION", "BOOK I." .. "BOOK XXIV.")
 # are set in capitals with no underline and no markup at all. Nothing in the
-# file tells a converter the structure is there. This target reports what the
-# engine recovered, so a regression in layout inference shows up as a changed
-# count rather than as a shrug.
+# file tells a converter the structure is there. The conversion is now frozen:
+# tests/examples.py re-converts each document and compares byte-for-byte against
+# tests/golden/examples/<name>.html, so a regression in layout inference shows
+# up as a byte diff, not as a shrug. `tests/examples.py --write` recaptures.
 #
-# The counts come from the tool itself: `--report` (P5.0) prints the same five
-# numbers -- bytes, headings, paragraphs, capitalised runs, line breaks -- that
-# this target used to compute with `grep`, and a single implementation cannot
-# drift. `tests/reporttest.rs` keeps that instrument honest by recounting the
-# output independently.
-#
-# This target does not compare against anything. There is no oracle for "did you
-# read this document the way a person would"; the counts below are the record.
-EXAMPLES_DIR ?= examples
-
+# The counts printed are the tool's own `--report` (P5.0) -- bytes, headings,
+# paragraphs, capitalised runs, line breaks -- which `tests/reporttest.rs` keeps
+# honest by recounting the output independently. A single implementation cannot
+# drift between the two readers.
 examples: build
-	@rc=0; \
-	for f in $(EXAMPLES_DIR)/*.txt; do \
-	  [ -e "$$f" ] || { echo "no examples in $(EXAMPLES_DIR)/"; exit 1; }; \
-	  out=$$(mktemp); \
-	  rep=$$($(RELEASE_BIN) --infile "$$f" --outfile "$$out" --report 2>&1); \
-	  if [ $$? -ne 0 ]; then \
-	    echo "FAIL  $$(basename $$f): converter exited non-zero"; rc=1; rm -f "$$out"; continue; \
-	  fi; \
-	  case $$rep in \
-	    textrill:\ report\ bytes=*) ;; \
-	    *) echo "FAIL  $$(basename $$f): no report line ($$rep)"; rc=1; rm -f "$$out"; continue ;; \
-	  esac; \
-	  rep=$${rep#textrill: report }; \
-	  printf '%-22s %s\n' "$$(basename "$$f")" "$$rep"; \
-	  rm -f "$$out"; \
-	done; \
-	exit $$rc
+	cd $(RS) && MINE=$(RELEASE_BIN) $(PYTHON) tests/examples.py
 
 # Each seed's exit status must reach make. This target used to end the fuzz.py
 # invocation in `| tail -1` to print just the summary line, and a pipeline
@@ -246,10 +250,21 @@ fuzz: build
 	if [ $$rc -ne 0 ]; then echo "fuzz: FAILED"; exit 1; fi; \
 	echo "fuzz: OK"
 
+# The parity oracle, demoted (Phase 8 S13). `make verify` no longer invokes
+# Perl; this target re-runs the full differential -- corpus, author goldens,
+# all fixed fuzz seeds -- against the reference as a non-gating cross-check.
+# Nothing depends on it. `ref` is a phony rebuild so a fresh clone can run this
+# without a separate `make ref`.
+.PHONY: diff
+diff: ref corpus fuzz
+	@echo
+	@echo "diff: OK (non-gating parity cross-check)"
+
 # --- the reference checkout (P22) ---------------------------------------------
 
-# The differential corpus compares this port against the Perl original, so the
-# gate needs that original. It is not in version control -- `ref/` is gitignored
+# The differential corpus compares this port against the Perl original; since
+# S13 it is the non-gating `make diff`, but the cross-check still needs that
+# original. It is not in version control -- `ref/` is gitignored
 # because it is derived -- which until now meant a fresh clone had no way to
 # produce it: the two tarballs are tracked but nothing extracted them, and the
 # stub module the reference `use`s at load time existed only on the machine that
@@ -271,7 +286,7 @@ STUB_SOURCE := $(ROOT)/stubs/YAML/Syck.pm
 
 # Phony, deliberately. A directory target that make considers "up to date" is a
 # trap here: delete ref/stubs but leave ref/txt2html-3.0 and a non-phony `ref`
-# does nothing at all, silently reinstating the unreproducible gate. The recipe
+# does nothing at all, silently leaving the reference broken. The recipe
 # is already idempotent and cheap -- a tar test and one perl -e -- so running it
 # unconditionally is the honest default. Every other target in this Makefile is
 # a real file, which is why this needs saying out loud.

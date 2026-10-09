@@ -26,7 +26,7 @@ Measured 2026-10-06, not described. This is the inventory the offer rests on.
 | Encoding | BOM → UTF-16 evidence → UTF-8 → CP1252, with explicit overrides for what cannot be detected |
 | GUI | `textrill-gui-rs`, native `egui`; an options panel over the engine's own options; settings at `$XDG_CONFIG_HOME/textrill-gui/textrill.conf` (QSettings-compatible, hand-editable) |
 | Binary | static `x86_64-unknown-linux-musl`, no runtime dependencies |
-| Checks | `make verify`: fmt, clippy, 365 engine tests, 74 GUI tests, proptest, alloctest, 61 differential cases, 33 golden comparisons, 16 000 fuzz cases |
+| Checks | `make verify`: fmt, clippy, 367 engine tests, 74 GUI tests, proptest, alloctest, 61 frozen corpus outputs, 33 upstream golden comparisons, 8 frozen example documents — all reference-free; the Perl differential and fuzzer remain as the non-gating `make diff` |
 | Packaging | Flatpak manifest drafted, deliberately unbuildable: `cargo-sources.json` needs the generate-vs-vendor decision (`docs/PACKAGING.md`) |
 | Docs | the register in `DOCS.md`, `CAPABILITIES.md` (measured), `LANDSCAPE.md` (measured), `PLAN.md` (what is next) |
 
@@ -123,7 +123,7 @@ that dies at the format boundary would be worth nothing to anyone, so the
 pipeline claim is gated rather than asserted.
 
 `make proof` requires pandoc and is deliberately **not** part of `make verify`
-— verify must stay runnable on a machine with only Rust and perl. Drift in this
+— verify must stay runnable on a machine with only Rust. Drift in this
 table is the failure mode `legacy-archive/TOOL-SURVEY.md` had: a matrix that
 went false while still looking authoritative. The gate is how this document
 avoids the same end.
@@ -136,7 +136,7 @@ avoids the same end.
 | Someone who already has markdown/pandoc | "You already have the better tool for that file." | Nothing — and that answer is part of the credibility |
 | Someone who needs `.epub`, `.docx`, `.pdf`, `.man`, markdown | "We read the file; pandoc writes the format." | `textrill notes.txt --outfile - \| pandoc -f html -t epub` — and the structure we inferred is still in it (§3, P17–P20) |
 | A writer with a draft | structure recovered and *counted*, so they can see what was inferred | `--toc`, `--number_headings`, `--section`, a shipped article/book template (§5) |
-| Someone packaging or scripting | a single static binary, no runtime, no network, no telemetry | `make musl`, CI already runs the corpus against that binary |
+| Someone packaging or scripting | a single static binary, no runtime, no network, no telemetry | `make musl`, CI already runs the acceptance against that binary |
 | A reviewer asking "what does it actually do" | `make examples` prints the counts; `docs/CAPABILITIES.md` reproduces each weak point | the ten-clause output contract |
 
 The two things that make this offer credible rather than asserted: the counts
@@ -273,7 +273,8 @@ recovering structure from layout is not a feature it plans to add.
 | Gate | Command | Fails on |
 |---|---|---|
 | this document's numbers | `make proof` (needs pandoc) | any drift in §3 |
-| behaviour | `make verify` | fmt, clippy, tests, corpus, fuzz |
+| behaviour | `make verify` | fmt, clippy, tests, reference-free acceptance (frozen corpus + example outputs, upstream goldens) |
+| parity cross-check | `make diff` | the same 61 differential cases and 8 fuzz seeds, against the Perl reference; a finding here is a review, never a blocker |
 
 `make proof` was broken on purpose before it was believed: pinning an option
 surface of 65 against a measured 64 exits 1 and names the claim; pinning the

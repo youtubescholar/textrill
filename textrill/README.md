@@ -9,8 +9,8 @@ link labels, and so on. No markup language is required or assumed.
 
 It began as a Rust port of
 [`HTML::TextToHTML`](https://metacpan.org/pod/HTML::TextToHTML) 3.0 and its
-`txt2html` script, originally written by Seth Golub, and the two can still be
-compared byte for byte — see
+`txt2html` script, originally written by Seth Golub. Byte-parity with that
+reference across the upstream test corpus is preserved and frozen; see
 [Relationship to upstream](#relationship-to-upstream).
 
 This is a fork. It is not endorsed by, and carries no affiliation with, the
@@ -22,13 +22,14 @@ Early. `0.1.0` is the first release of the fork.
 
 What is **done**:
 
-- The conversion engine is byte-verified against the upstream reference across a
-  differential corpus of 61 cases and 33 golden comparisons against upstream's
-  own golden files.
-- 365 Rust tests, a fuzzer, and a 74-test native GUI suite.
+- The conversion engine is pinned by reference-free acceptance: a reviewed,
+  frozen output for every one of the 61 corpus cases, 33 golden comparisons
+  against upstream's own `good_*.html` files, and 8 frozen real-document
+  examples. The Perl differential remains available as `make diff`.
+- 367 Rust tests and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
-  runs the differential corpus against that binary, so it runs on Alpine and
-  other glibc-less distros with the same output as the reference.
+  runs the reference-free acceptance against that binary, so it runs on Alpine
+  and other glibc-less distros with the same output it produces everywhere.
 - Encoding detection was reworked: BOM → UTF-16 evidence → UTF-8 → CP1252, with
   explicit overrides for the encodings that cannot be detected.
 - Opt-in `--citations` and `--glossary` collect namespaced markers into an
@@ -199,11 +200,11 @@ element with no namespace, a forced `<meta charset="utf-8">`, and lower-case
 tags. The Perl original's modes are all still one flag away: `--xhtml` gives
 the XHTML 1.0 Strict doctype with the XHTML namespace, and `--no-html5` (or
 `--no-xhtml`) gives the HTML 4.01 prolog with upper-case tags, byte for byte
-what the reference produces. The corpus and the fuzzer pin those modes
-explicitly on both sides of the differential, so the default change never
-touches the parity gate. Tag case is governed by `--lower_case_tags` as
-usual, and each mode flag sets it as part of entering its mode — an explicit
-`--lower_case_tags` after the flag wins.
+what the reference produces. The frozen corpus cases, and the differential's
+cases when `make diff` is run, pin those modes explicitly, so the default
+change never touches the parity record. Tag case is governed by
+`--lower_case_tags` as usual, and each mode flag sets it as part of entering
+its mode — an explicit `--lower_case_tags` after the flag wins.
 
 ### Sectioning, TOC and multi-file output
 
@@ -502,8 +503,8 @@ approach:
   `utf-32be`.
 
 The upstream Perl has no encoding handling at all, so this is an addition. For
-Western European input the two agree, which is why the corpus treats them as
-matching by default.
+Western European input the two agree, which is why the differential treats them
+as matching by default.
 
 ## Using it as a library
 
@@ -526,22 +527,26 @@ match conv.try_convert() {
 
 `txt2html` 3.0 is a Perl module plus a wrapper script by Seth Golub, later
 maintained by Kathryn Andersen and Joao Eriberto Mota Filho. textrill began as
-a Rust port of it. That reference is still the oracle for the differential tier
-of the test suite — the only thing that can say "this document converts the way
-it did before" — and it is a historical artifact, not the specification. Where
-the two disagree the question is which is right, and textrill decides; see
-`../docs/PLAN.md`.
-
-Behaviour was pinned by differential testing against the real implementation
-rather than guessed from documentation, which is why the option names are the
-upstream ones and a document can be converted by either tool and compared —
-with the doctype pinned explicitly on both sides (see below):
+a Rust port of it. The port was restored to byte-parity with that reference by
+differential testing against the real implementation rather than guessed from
+documentation, which is why the option names are the upstream ones and a
+document can be converted by either tool and compared:
 
 - `tests/corpus/` runs 61 cases through both implementations and requires
   byte-identical output.
 - The 33 upstream golden files are compared byte for byte.
-- The fuzzer hunts for divergences in Unicode handling, delimiter recovery and
-  encoding detection.
+
+That parity is now **frozen, not re-proved every build**. `make accept` compares
+textrill against its own reviewed self-goldens for every one of those 61 cases
+plus the 33 upstream goldens and the 8 example documents, and it is part of
+`make verify`. The differential itself became `make diff`, a non-gating
+cross-check for when a fresh comparison against Perl is worth having — the
+reference is a historical artifact, not the specification, and it no longer
+sits on the path of either `make verify` or CI. Where the two disagree the
+question is which is right, and textrill decides; see `../docs/PLAN.md`.
+
+The fuzzer hunts for divergences in Unicode handling, delimiter recovery and
+encoding detection; like `run.sh` it is part of `make diff` (Phase 8 S13).
 
 Where textrill deliberately differs from upstream, the divergence is declared
 and explained in `tests/corpus/README.md` rather than left to be discovered.
@@ -551,10 +556,9 @@ Known differences:
   XHTML 1.0 Strict; textrill emits HTML5 with a charset meta and lower-case
   tags unless told otherwise. `--xhtml` selects the reference's XHTML mode and
   `--no-html5` its HTML 4.01 mode, both byte-identical to the reference — and
-  every corpus case and every fuzz case pins one of them explicitly on both
-  sides of the comparison, so the differential never compares a default
-  against a pinned mode. See "The doctype is pinned on both sides" in the
-  corpus README.
+  every frozen corpus case pins one of the modes explicitly, so no acceptance
+  output is ever compared against a default the run did not declare. See "The
+  doctype is pinned on both sides" in the corpus README.
 
 - **Input encoding detection** does not exist upstream. See `--encoding` above.
 - User-supplied regular expressions are validated before use. An invalid

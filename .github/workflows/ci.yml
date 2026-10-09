@@ -8,18 +8,21 @@
 # What runs, and why each step is here:
 #
 #   fmt / clippy  -D warnings / test --release. The lints and the unit tests.
-#   corpus        - the differential comparison against the Perl reference,
-#                   which is the only thing that can say "behaves like upstream".
-#   fuzz          - randomised input against the same reference, fixed seeds so
-#                   a failure is reproducible and a pass is a real statement.
-#   upstream canary - the reference's own t/*.t. This is the step that is easy
-#                   to leave out and expensive to miss: if the Perl side breaks,
-#                   every differential comparison above is comparing against
-#                   something wrong, and they would all still pass.
+#   accept        - reference-free acceptance: the port against its own frozen
+#                   self-goldens (61 corpus cases) plus upstream's 33 good_*.html
+#                   goldens. This is the gate, and it needs no Perl.
+#   examples      - the 8 frozen real-document outputs, also reference-free.
+#   musl          - the distribution claim: a single static binary, re-accepted
+#                   with the same frozen outputs so a musl build that silently
+#                   produced different bytes would fail.
 #
-# The reference is built here from the tracked tarball by `make ref` rather than
-# cloned or downloaded, so the job needs no network and no CPAN and the oracle
-# is the same bytes on every machine (P22).
+# The parity oracle is deliberately *not* here. Since Phase 8 S13, the Perl
+# differential and fuzzer run only on demand as `make diff` (materialised
+# offline from the tracked tarball by `make ref`); nothing but that target
+# depends on Perl, and a regression found there is a review, never a blocker.
+# The upstream t/*.t suite was part of the retired differential job, kept as
+# a canary for the oracle itself; with the oracle off the gate, the canary
+# leaves with it.
 
 name: CI
 
@@ -38,9 +41,9 @@ permissions:
 
 jobs:
   # The Rust crate on its own. Split out from the slow jobs so a lint failure
-  # reports in under a minute instead of after the fuzzer.
+  # reports in under a minute.
   rust:
-    name: rust (fmt, clippy, tests)
+    name: rust (fmt, clippy, tests, acceptance)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,81 +85,28 @@ jobs:
           make proptest
           make alloctest
 
-  # The differential gate. This is the job that would have caught A1 and P1.
-  differential:
-    name: differential (corpus, goldens, fuzz)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install the toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          sudo apt-get update && sudo apt-get install -y perl
-          perl --version | head -2
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            textrill/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('textrill/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
-      # The oracle. Built from the tracked tarball and stub, offline, so the
-      # reference is identical on every runner and a green run is comparable
-      # with a green run anywhere else.
-      - name: Materialise the reference
-        run: make ref
-
-      # A clean RUNDIR, not a leftover. Phase 0 made this meaningful: the runner
-      # compares against whatever is in its output directory, so a stale file
-      # from a previous run is a comparison against the wrong thing. Pointing
-      # it at a fresh path under the job's workspace is stronger than relying
-      # on the runner to have cleaned it.
-      - name: Differential corpus and goldens
+      # The reference-free gate (Phase 8 S12/S13). A clean RUNDIR, not a
+      # leftover: the runner compares against whatever is in its output
+      # directory, so a stale file from a previous run is a comparison against
+      # the wrong thing. Pointing it at a fresh path under the job's workspace
+      # is stronger than relying on the runner to have cleaned it.
+      - name: Reference-free acceptance (frozen corpus + upstream goldens)
         env:
-          RUNDIR: ${{ runner.temp }}/textrill-corpus
-        run: make corpus
+          RUNDIR: ${{ runner.temp }}/textrill-accept
+        run: make accept
 
-      # Fixed seeds, and the fuzzer's own exit status reaches make (P1 fixed the
-      # `| tail -1` that made this target incapable of failing). The case count
-      # is reduced from the local 2000: 8 seeds x 2000 takes ~13 minutes on 20
-      # cores, and a GitHub runner has 4. The seeds are the same ones the local
-      # gate uses, so a divergence found here reproduces locally.
-      - name: Fuzzer against the reference
-        env:
-          FUZZ_CASES: ${{ github.event_name == 'push' && 2000 || 500 }}
-        run: make fuzz
-
-      # P8 also asks for upstream's own suite. Without this, a break in the Perl
-      # side turns every comparison above into a comparison against something
-      # wrong, and they would all still be green.
-      #
-      # PERL5LIB is set explicitly rather than inherited from the Makefile: this
-      # step runs `prove` directly in the reference directory, not through a make
-      # target, so nothing exports it. Verified locally -- without it, `prove t/`
-      # fails with "Bad plan. You planned 16 tests but ran 0", because the
-      # reference cannot load without the stub. That is the failure mode a
-      # silently missing oracle would produce.
-      - name: Upstream test suite as a canary
-        working-directory: ref/txt2html-3.0
-        env:
-          PERL5LIB: ${{ github.workspace }}/ref/stubs:${{ github.workspace }}/ref/txt2html-3.0/lib
-        run: prove t/
+      - name: Frozen real-document outputs
+        run: make examples
 
   # The distribution binary. The CLI ships as one static musl executable so it
   # runs on Alpine and other distros without glibc. Building it is the only
-  # thing that keeps that claim true, and running the differential corpus
-  # against the result is the part that matters: a build-only check would pass
-  # on a musl target whose output differed from the glibc one, which is exactly
-  # the class of silent divergence the rest of this file exists to catch. The
-  # target is self-contained, so no musl-gcc is needed for this crate.
+  # thing that keeps that claim true, and re-running the reference-free
+  # acceptance against the result is the part that matters: a build-only check
+  # would pass on a musl target whose output differed from the glibc one, which
+  # is exactly the class of silent divergence the rest of this file exists to
+  # catch. The target is self-contained, so no musl-gcc is needed.
   musl:
-    name: musl (static CLI, differential)
+    name: musl (static CLI, acceptance)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -166,7 +116,6 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup target add x86_64-unknown-linux-musl
-          sudo apt-get update && sudo apt-get install -y perl
           rustc --version
           cargo --version
 
@@ -184,11 +133,7 @@ jobs:
       - name: Build the static binary
         run: make musl
 
-      - name: Materialise the reference
-        run: make ref
-
-      - name: Differential corpus against the static binary
+      - name: Reference-free acceptance against the static binary
         env:
-          RUNDIR: ${{ runner.temp }}/textrill-corpus-musl
-        run: make corpus-musl
-
+          RUNDIR: ${{ runner.temp }}/textrill-accept-musl
+        run: make accept-musl

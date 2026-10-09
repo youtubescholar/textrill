@@ -18,10 +18,12 @@ reviewed against it.
    changed check can fail before trusting it. The two built-in sabotage
    commands are in `textrill/tests/corpus/README.md` (the closing rule of "Six
    ways this reported success wrongly"). Feature and behaviour work needs no
-   such ritual: the differential corpus is how *its* difference is pinned.
+   such ritual: the change is pinned by re-capturing the affected frozen
+   outputs, and the diff of that recapture is the review.
 3. **The test corpus comes first.** Change behaviour, then extend
-   `textrill/tests/corpus/` so the difference is pinned by the differential
-   harness and the corpus README records why.
+   `textrill/tests/corpus/` so the difference is pinned by the reference-free
+   acceptance (a reviewed self-golden and a legitimate corpus case, with the
+   Perl differential as a cross-check) and the corpus README records why.
 4. **A document with no status is the failure mode.** If your change affects a
    document, update its status in `DOCS.md` in the same change.
 5. **No affiliation with upstream is implied, and none is claimed.** This is a
@@ -32,15 +34,17 @@ reviewed against it.
 ```sh
 make build      # the CLI, static musl
 make verify     # fmt-check, clippy (-D warnings), unit/property/allocation
-                #   tests, differential corpus, fixed-seed fuzz
+                #   tests, reference-free acceptance
 make test-gui-rs
 make proof      # the pandoc-facing claims (docs/OFFERING.md §3)
 make measure    # heading-rule measurement pins (docs/PLAN.md Phase 5)
 ```
 
-Full `make verify` runs the fuzzer at 2000 cases and takes a while; CI runs it
-on push and a 500-case fuzz on pull requests. The oracle is materialised
-offline from the tracked tarball by `make ref` — never clone or download it.
+`make verify` is green with no Perl installed. The parity oracle is still
+available as `make diff` — the same differential corpus and fixed-seed fuzzer
+against the Perl reference, materialised offline from the tracked tarball by
+`make ref` (never clone or download it). Nothing that gates depends on it, and
+nothing schedules it: on demand, a cross-check.
 
 ## Adding a document to `examples/`
 

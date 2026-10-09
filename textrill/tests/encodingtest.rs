@@ -1041,3 +1041,105 @@ fn a_lone_surrogate_is_a_replacement_not_half_a_character() {
     let (text, _) = decode_bytes_with(raw, Encoding::Auto);
     assert_eq!(text, "\u{FFFD}A");
 }
+
+// ---------------------------------------------------------------------------
+// The corpus fixtures, decoded end to end (Phase 8 S12 truth set).
+//
+// The corpus cases `cp1251_named`, `koi8r_named`, `cp1253_named` and the three
+// UTF-16 cases are reference-free self-goldens: accept.sh freezes the port's
+// byte output for each fixture. These tests are the *independent* half of that
+// truth set, the way the encoding machinery is asserted everywhere else in this
+// file: the file is read from the corpus with the encoding the case names, and
+// the recovered text must contain the expected words. A golden captures bytes
+// without explaining them; if a future refactor starts decoding correctly to
+// different words whose bytes happen to match, only an assertion on the text
+// would notice.
+//
+// The fixture files are textrill's own, tracked at tests/corpus/inputs/, with
+// contents pinned at the bottom of this block.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_corpus_encoding_fixtures_recover_their_expected_text() {
+    let cases: &[(&str, Encoding, &str, &str)] = &[
+        (
+            "tests/corpus/inputs/cp1251_cyrillic.txt",
+            Encoding::Cp1251,
+            "Привет, мир!",
+            "cp1251",
+        ),
+        (
+            "tests/corpus/inputs/koi8r_cyrillic.txt",
+            Encoding::Koi8R,
+            "Привет, мир!",
+            "koi8-r",
+        ),
+        (
+            "tests/corpus/inputs/cp1253_greek.txt",
+            Encoding::Cp1253,
+            "Γειά σου Κόσμε!",
+            "cp1253",
+        ),
+        (
+            "tests/corpus/inputs/utf16le_ascii.txt",
+            Encoding::Utf16Le,
+            "Hello world.",
+            "utf-16le",
+        ),
+        (
+            "tests/corpus/inputs/utf16be_ascii.txt",
+            Encoding::Utf16Be,
+            "Hello world.",
+            "utf-16be",
+        ),
+        (
+            "tests/corpus/inputs/utf16le_bom.txt",
+            Encoding::Utf16Le,
+            "Привет, мир!",
+            "utf-16le",
+        ),
+    ];
+    for (path, enc, want, name) in cases {
+        let (text, resolved) = textrill::convert::read_with(path, *enc).unwrap();
+        assert!(text.contains(want), "{path}: expected {want:?} in {text:?}");
+        assert_eq!(resolved.name(), *name, "{path}");
+        assert!(
+            !text.contains('\0'),
+            "{path}: a NUL survived the decode: {text:?}"
+        );
+        if enc != &Encoding::Utf16Le {
+            continue;
+        }
+        // The BOM fixture carries explicit Cyrillic; the BOM-less one must not
+        // start with U+FEFF even when it had one, and neither may leak it.
+        assert!(
+            !text.contains('\u{feff}'),
+            "{path}: the byte-order mark reached the text"
+        );
+    }
+}
+
+#[test]
+fn the_corpus_fixtures_are_not_autodetected_against_their_real_encoding() {
+    // The corpus also contains the same Cyrillic and Greek fixtures read under
+    // the *default*, and those cases are deliberately differential PASSes: the
+    // port and the reference are equally wrong, both guess CP1252. Pin that the
+    // default did not start guessing, so the mojibake stays the pinned default.
+    let cases: &[(&str, u32)] = &[
+        ("tests/corpus/inputs/cp1251_cyrillic.txt", 0x041f), // П
+        ("tests/corpus/inputs/koi8r_cyrillic.txt", 0x041f),  // П
+        ("tests/corpus/inputs/cp1253_greek.txt", 0x0393),    // Γ
+    ];
+    for (path, cyrillic_or_greek) in cases {
+        let (text, resolved) = textrill::convert::read_with(path, Encoding::Auto).unwrap();
+        assert_eq!(
+            resolved.name(),
+            "cp1252",
+            "{path}: the default changed, and the corpus PASSes above mean nothing"
+        );
+        assert!(
+            !text.contains(char::from_u32(*cyrillic_or_greek).unwrap()),
+            "{path}: auto-detected the real encoding, which the corpus pins it NOT to do"
+        );
+    }
+}

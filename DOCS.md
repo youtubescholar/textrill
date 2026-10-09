@@ -28,7 +28,7 @@ A document with no status is the failure mode this file exists to end.
 | [`docs/OFFERING.md`](docs/OFFERING.md) | How the tool is offered against pandoc: the claim, its measurement (`make proof`), what must be built first, and what pandoc does better. |
 | [`docs/PACKAGING.md`](docs/PACKAGING.md) | The Flatpak manifest, its two deliberate blockers, and how to clear them. |
 | `textrill/README.md` | The user-facing contract. The only document a user reads. |
-| `textrill/tests/corpus/README.md` | How the differential harness decides pass/fail — and how to prove it can fail. |
+| `textrill/tests/corpus/README.md` | How the reference-free acceptance and the advisory `make diff` cross-check each decide pass/fail — and how to prove either can fail. |
 | `DOCS.md` (this file) | Statuses and reading order. |
 
 ### Background
@@ -62,13 +62,13 @@ and `quicknote1.txt` (an agent transcript, cited nowhere in the tree). See
 
 - `ref/` — the Perl reference. Ignored by git, derived by `make ref` from the
   tracked `research/txt2html-3.0.tar.gz`. **Kept, and this is not a
-  half-measure.** It is the oracle for the parity tier of the harness and is
-  available for historical artifact investigation. It is *not* what found
-  A1–A12: the reference-free attack pass did. What it alone found are the silent
-  semantic divergences a reference-free oracle cannot judge — E3, `delim_retry`,
-  the non-ASCII delimiter predicate — see `docs/ORACLE-ARCHAEOLOGY.md`. It is an
-  oracle now, not a specification. Phase 8 (`docs/PLAN.md`) plans to retire it
-  as a gate once reference-free acceptance exists.
+  half-measure.** Phase 8 (S13) retired it as a gate: `make verify` is green
+  with no Perl installed, and `make diff` re-runs the differential corpus and
+  the fuzzer against it as a non-gating cross-check. It remains available for
+  historical artifact investigation, and it is *not* what found A1–A12: the
+  reference-free attack pass did. What it alone found are the silent semantic
+  divergences a reference-free oracle cannot judge — E3, `delim_retry`, the
+  non-ASCII delimiter predicate — see `docs/ORACLE-ARCHAEOLOGY.md`.
 - `research/` — source archives for the offline studies: the pandoc 3.12
   release (+ stripped) tarballs and the txt2html reference archives. Tracked so
   the studies re-run offline; a tree extracted from them is ignored.

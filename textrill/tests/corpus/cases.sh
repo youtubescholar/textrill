@@ -12,6 +12,15 @@ declare -A GOLDEN
 # match it byte for byte.
 declare -A NOGOLDEN
 
+# Tracked copies of the upstream fixtures these cases read. Both runners -- the
+# Perl differential (run.sh) and the reference-free acceptance runner
+# (accept.sh) -- read from here, so a case has exactly one input and moving a
+# fixture cannot make the two runners disagree. They are copies of
+# ref/txt2html-3.0/tfiles and .github/workflows, which are derived from the
+# tracked research/txt2html-3.0.tar.gz; see tfiles/PROVENANCE.md.
+FIX="${FIX:-$HERE/tfiles}"
+WF="${WF:-$HERE/workflows}"
+
 NOGOLDEN[custom-headers2]='golden records section_3..5: upstream t/20tfiles.t reuses one $conv for all cases and never resets the heading-anchor counter, so custom-headers consumed 1..2. This runner builds a fresh converter per case, which is what a fresh Perl run does, and the port matches that exactly'
 NOGOLDEN[pre2]='golden is 141 bytes, converter output is 140: the only difference is a trailing newline the converter never emits. Upstream compare() strips CR/LF per line and cannot see it'
 # The heading patterns must match t/20tfiles.t:87 exactly --
@@ -121,11 +130,11 @@ GOLDEN[empty4]='good_empty.html'
 # t/20tfiles.t, which still passes it to the module.  Passing it on the Rust
 # side made the binary exit 1 with "Unknown option `system_link_dict`".
 CTOR[sample]='xhtml=>0'
-EXTRA[sample]='system_link_dict=>"txt2html.dict",titlefirst=>1,mailmode=>1,custom_heading_regexp=>['"'"'^ *--[\\w\\s]+-- *$'"'"'],make_tables=>1,append_file=>"tfiles/sample.foot"'
-CLI[sample]='--no-xhtml --titlefirst --mailmode --custom_heading_regexp "^ *--[\\w\\s]+-- *$" --make_tables --append_file "tfiles/sample.foot"'
+EXTRA[sample]='system_link_dict=>"txt2html.dict",titlefirst=>1,mailmode=>1,custom_heading_regexp=>['"'"'^ *--[\\w\\s]+-- *$'"'"'],make_tables=>1,append_file=>"'"$FIX"'/sample.foot"'
+CLI[sample]='--no-xhtml --titlefirst --mailmode --custom_heading_regexp "^ *--[\\w\\s]+-- *$" --make_tables --append_file "'"$FIX"'/sample.foot"'
 
-EXTRA[xhtml_sample]='system_link_dict=>"txt2html.dict",titlefirst=>1,mailmode=>1,custom_heading_regexp=>['"'"'^ *--[\\w\\s]+-- *$'"'"'],make_tables=>1,make_anchors=>1,xhtml=>1,append_file=>"tfiles/sample.foot2"'
-CLI[xhtml_sample]='--xhtml --titlefirst --mailmode --custom_heading_regexp "^ *--[\\w\\s]+-- *$" --make_tables --make_anchors --append_file "tfiles/sample.foot2"'
+EXTRA[xhtml_sample]='system_link_dict=>"txt2html.dict",titlefirst=>1,mailmode=>1,custom_heading_regexp=>['"'"'^ *--[\\w\\s]+-- *$'"'"'],make_tables=>1,make_anchors=>1,xhtml=>1,append_file=>"'"$FIX"'/sample.foot2"'
+CLI[xhtml_sample]='--xhtml --titlefirst --mailmode --custom_heading_regexp "^ *--[\\w\\s]+-- *$" --make_tables --make_anchors --append_file "'"$FIX"'/sample.foot2"'
 
 EXTRA[robo]='make_tables=>1'
 CLI[robo]='--make_tables'
@@ -162,23 +171,30 @@ INPUT[multi-file]=custom-headers.txt,custom-headers2.txt
 # the --links_dictionaries fix.  These use the upstream fixture files.
 EXTRA[ci_simple]='extract=>1'
 CLI[ci_simple]='--extract'
-INPUT[ci_simple]=../.github/workflows/test1.txt
+INPUT[ci_simple]="$WF/test1.txt"
 
 EXTRA[ci_links]='extract=>1'
 CLI[ci_links]='--extract'
-INPUT[ci_links]=../.github/workflows/test2.txt
+INPUT[ci_links]="$WF/test2.txt"
 
 EXTRA[ci_dict]='extract=>1'
-CLI[ci_dict]='--extract --links_dictionaries .github/workflows/xyz.dict'
-INPUT[ci_dict]=../.github/workflows/test3.txt
-DICT[ci_dict]=.github/workflows/xyz.dict
+CLI[ci_dict]="--extract --links_dictionaries $WF/xyz.dict"
+INPUT[ci_dict]="$WF/test3.txt"
+DICT[ci_dict]="$WF/xyz.dict"
 
 # A URL that contains a word the system dictionary also links.  Perl guards the
 # substitution with in_link_context over the text emitted so far; without that
 # the inner word is linked again and the output nests <a> inside <a href>.
+# Note (audit 2026-10-09): ci_links and link_in_url share identical
+# INPUT/CLI (both test2.txt, --extract, no dictionaries, empty default dict),
+# so their outputs are byte-identical and their SELF goldens collide by
+# design. The historical prose claimed to exercise in_link_context; that
+# property is not exercised here (no dictionary rules fire). The real guard
+# is covered by unit tests (linktest.rs::no_nested_anchors_when_a_url_contains_a_dictionary_word)
+# and by ci_dict (which loads xyz.dict).
 EXTRA[link_in_url]='extract=>1'
 CLI[link_in_url]='--extract'
-INPUT[link_in_url]=../.github/workflows/test2.txt
+INPUT[link_in_url]="$WF/test2.txt"
 
 # --- regressions pinned by the P3 fuzzer ---------------------------------
 #

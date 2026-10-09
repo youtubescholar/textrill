@@ -1,15 +1,69 @@
 # Corpus tests
 
-`run.sh` converts every `tfiles/*.txt` of the upstream distribution with both
-the Perl reference (`HTML::TextToHTML` 3.0) and textrill, then compares the two
-outputs byte for byte. The reference is an oracle for this tier, not the
-specification — see `docs/PLAN.md` § "What this is".
+This directory is the project's behavioural harness. Two runners share the
+recipes in `cases.sh` and the local fixtures tracked at `tfiles/` and
+`workflows/`:
+
+- **`accept.sh`** — the gate, since Phase 8 S12/S13. It converts every case
+  with textrill alone and compares the output byte for byte against a
+  hand-reviewed **self-golden** (`tests/golden/corpus/<stem>.html`), then
+  checks the upstream author goldens (the `good_*.html` files in `tfiles/`)
+  on top, honouring `NOGOLDEN[]`. `make accept` runs it; nothing about it
+  needs Perl.
+- **`run.sh`** — the differential harness. It converts every `tfiles/*.txt`
+  with both the Perl reference (`HTML::TextToHTML` 3.0) and textrill, and
+  compares the two outputs byte for byte. It is now *advisory*: `make diff`
+  runs it (plus `fuzz.py`, below) as a non-gating cross-check. A fresh Perl
+  run that disagrees with a frozen output is a finding to review, never an
+  edit to make green.
+
+The reference remains an oracle for the differential tier, not the
+specification — see `docs/PLAN.md` § "What this is". Its job is historical:
+it found the three silent semantic divergences a reference-free oracle cannot
+judge, and it stays available to check the frozen outputs against a fresh
+original. That is all it does now.
+
+## Reference-free acceptance (`accept.sh`)
+
+`accept.sh` has three modes:
+
+```sh
+tests/corpus/accept.sh                 # full run: SELF + AUTHOR checks
+tests/corpus/accept.sh --write         # (re)capture every self-golden
+tests/corpus/accept.sh definitions     # a single case
+```
+
+A full run converts all 61 cases with the port, normalises the one generator
+line (see below), and compares:
+
+- **SELF** — against the frozen self-goldens in `tests/golden/corpus/`. This
+  is the gate most cases actually hang on; it is the replacement for the 61
+  byte-identical differential comparisons.
+- **AUTHOR** — against the tracked author goldens in `tests/corpus/tfiles/`
+  (`good_*.html`), skipping the `NOGOLDEN[]` entries. Each AUTHOR line prints
+  the golden pass/fail outcome; the summary reports them as compared counts.
+
+`--write` captures and freezes the port's current output. That must be a
+reviewed act, not the ironing of a regression: a newly captured self-golden is
+believed only after it has been read by a person and cross-checked — by the
+differential when the case is a parity case, by the case's own unit tests when
+it is one of the declared divergences (the encoding fixtures are asserted in
+`tests/encodingtest.rs`). The `PROVENANCE.md` next to the `tfiles/` copies
+records where the fixtures came from and how to refresh them.
+
+`accept.sh` and `run.sh` share the shared-guard library `lib.sh`
+(`duplicate_key_check`, `alignment_check`), exercise the same cases, and print
+the same `NORMALISED` counter. Either runner returns non-zero on the first
+problem; both were broken on purpose before the other was believed.
+
+## The differential side (`run.sh`, `fuzz.py` — `make diff`)
 
 The reference is not in version control. `make ref` builds it from the tracked
 `txt2html-3.0.tar.gz` plus a tracked stub, offline:
 
 ```sh
 make ref                      # extract the reference; run this first
+make diff                     # corpus + goldens + all 8 fuzz seeds
 cd textrill
 cargo build
 tests/corpus/run.sh          # all cases
@@ -87,13 +141,16 @@ one:
 With the pins in place the flip moved no case: PASS stays 61/61 and all 33
 goldens stay byte-identical, because no case reads the default doctype.
 
-Current status: **61/61 cases byte-identical**, and all 33 upstream golden
-checks reproduce byte for byte across 29 distinct files (the `empty1`–`empty4`
-cases all compare against the one `good_empty.html`, which is why the count of
-checks exceeds the count of files; the other skipped cases are the `NOGOLDEN`
-ones above). `tests/paratest.rs` additionally mirrors `t/10para.t`,
-`t/25handles.t`, `t/30sample.t`, `t/50xsample.t` and `t/70bugs.t` from the
-reference distribution for the string-level API.
+Current status of the differential side: **61/61 cases byte-identical**, and
+all 33 upstream golden checks reproduce byte for byte across 29 distinct files
+(the `empty1`–`empty4` cases all compare against the one `good_empty.html`,
+which is why the count of checks exceeds the count of files; the other skipped
+cases are the `NOGOLDEN` ones above). Since S13 that is the state of `make
+diff`, not of the gate: the gate is the frozen outputs, which `make accept`
+reports as `SELF: 61/61` and `AUTHOR: 33/33` and `make examples` as 8/8.
+`tests/paratest.rs` additionally mirrors `t/10para.t`, `t/25handles.t`,
+`t/30sample.t`, `t/50xsample.t` and `t/70bugs.t` from the reference
+distribution for the string-level API.
 
 ## Six ways this reported success wrongly
 
@@ -228,11 +285,14 @@ rendering.
 
 ## Fuzzer
 
-`fuzz.py` is a seeded differential fuzzer over the same pair of converters. It
-builds each case by taking a seed from `tfiles/`, mutating it, and choosing a
-random subset of the real options, then compares the two outputs strictly —
-after the single-line generator canonicalisation described above, and nothing
-else.
+`fuzz.py` is a seeded **differential** fuzzer over the same pair of converters.
+Like `run.sh`, it is now advisory: `make diff` runs all eight fixed seeds, and
+the honest gap in the reference-free cut-over (recorded in `docs/PLAN.md` S12)
+is that its random-option coverage is only partly replaced by the property
+suite. It builds each case by taking a seed from `tfiles/`, mutating it, and
+choosing a random subset of the real options, then compares the two outputs
+strictly — after the single-line generator canonicalisation described above,
+and nothing else.
 
 ```sh
 tests/corpus/fuzz.py                          # 300 cases, default seed
@@ -270,7 +330,7 @@ Exit status and hangs, both found 2026-10-01 (`P14`, `P16`):
   reported a crashed or mismatching run to `make verify` as a pass. This is why
   the "16 000 cases, 0 mismatches" figure in the remediation plan is marked void.
 - The full 8-seed sweep runs **concurrently** — 5m30s wall for 39m18s of CPU, so
-  it is now short enough to sit in `make verify`. `FUZZ_JOBS` sets the width
+  it is short enough to sit in `make diff`. `FUZZ_JOBS` sets the width
   (default 8) and the run echoes it.
 - Each seed reports through its own status file, read back in seed order so the
   output is stable however the seeds interleave. A **missing status file is a
@@ -479,10 +539,13 @@ the divergences above were pinned down.
 
 ## What this harness can and cannot judge
 
-`run.sh` is a **Tier 1** oracle: it asserts byte-identity with the Perl module,
-which is the correct and strict rule for ASCII input and the documented output
-format. It is not a universal correctness oracle, and two of its limits are worth
-knowing before trusting a green run:
+`accept.sh` and `run.sh` are both **Tier 1** oracles in the old sense: strict
+byte-identity, which is the correct and strict rule for ASCII input and the
+documented output format. `run.sh` asserts it against the Perl module, which
+since S13 makes it the cross-check rather than the gate; `accept.sh` asserts
+the same identity against the frozen record of the same runs, which is the
+gate. Neither is a universal correctness oracle, and two of the differential's
+limits are worth knowing before trusting a green run:
 
 - **The reference is broken on genuine UTF-8 input.** It decodes bytes as
   Latin-1, so `tfiles/utf8.txt` produces mojibake and a spurious `<sup>TM</sup>`
@@ -497,4 +560,6 @@ The tiers and the reasoning are in `legacy-archive/REMEDIATION-PLAN.md`, "Compat
 The non-Tier-1 oracles — the author's goldens, the property suite
 (`tests/proptest.py`) and the allocation-budget suite (`tests/alloctest.rs`) that
 do not reference Perl at all — are P12 and are implemented (`make proptest`,
-`make alloctest`).
+`make alloctest`). The frozen self-goldens and the frozen example outputs are
+the same kind of oracle, applied to the whole corpus (`make accept`,
+`make examples`).

@@ -253,8 +253,8 @@ term:
 ```
 
 but nothing told a user it existed. Now the README's Lists section documents
-the shape, and the `definitions` corpus case pins the emitted bytes against the
-reference — including the `<p>` boundary — so the trigger is a documented
+the shape, and the `definitions` case pins the emitted bytes — including the
+`<p>` boundary — in the frozen acceptance output, so the trigger is a documented
 feature with a test that fails when it breaks, not a discovery.
 
 ---
@@ -331,8 +331,8 @@ but it must be visible.
 
 - Should XHTML 1.0 Strict remain the default? It is the Perl default. In 2026 the
   answer for a new tool is HTML5 — **answered in S5**: HTML5 is now the default,
-  and `--xhtml` selects the Perl original's mode for the differential and for
-  anyone who wants the old bytes back.
+  and `--xhtml` selects the Perl original's mode for anyone who wants the old
+  bytes back.
 - Is `--chunk` on a document with no headings a useful feature or a silent
   no-op? Today it writes one file named after the input.
 - The options with no Perl equivalent are not gaps; they are features Perl does
@@ -348,8 +348,9 @@ but it must be visible.
 ## Appendix — commands
 
 ```sh
-make examples                                  # the smoke run over examples/
+make examples                                  # the frozen example outputs
 textrill --help                                # the 68-option surface
-cargo test --manifest-path textrill/Cargo.toml # 365 tests
-bash textrill/tests/corpus/run.sh              # 61 differential cases, 33 goldens
+cargo test --manifest-path textrill/Cargo.toml # 367 tests
+make accept                                    # 61 frozen corpus outputs, 33 upstream goldens
+make diff                                      # optional: the Perl differential + fuzzer
 ```

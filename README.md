@@ -9,18 +9,21 @@ link labels, and so on. No markup language is required or assumed.
 
 It began as a Rust port of
 [`HTML::TextToHTML`](https://metacpan.org/pod/HTML::TextToHTML) 3.0 and its
-`txt2html` script, originally written by Seth Golub, and the two can still be
-compared byte for byte — the differential harness against the Perl reference is
-the only thing that gets to say "behaves like upstream".
+`txt2html` script, originally written by Seth Golub, and it has been restored
+to byte-parity with it across the upstream test corpus — the reference-free
+acceptance suite is now the gate, with the Perl reference demoted to an
+optional cross-check (`make diff`).
 
 **This is a fork.** It is not endorsed by, and carries no affiliation with, the
 upstream `txt2html` project or its authors.
 
 ## Status
 
-Early. `0.1.0`. The conversion engine is byte-verified against the reference
-across a 61-case differential corpus and 33 upstream goldens; the CLI ships as
-a single static musl binary; encoding detection, sectioning/TOC/chunk,
+Early. `0.1.0`. The conversion engine is pinned by reference-free acceptance —
+a frozen output for every one of the 61 corpus cases, the 33 upstream
+`good_*.html` goldens, and all 8 real-document examples — with the Perl
+differential still available as `make diff`, a non-gating cross-check. The CLI
+ships as a single static musl binary; encoding detection, sectioning/TOC/chunk,
 citations and glossary, templates, reporting, and a native GUI are implemented
 and tested. What remains (Flatpak, distro packaging, the planned harness
 phases) is tracked in `docs/PLAN.md`.
@@ -28,8 +31,9 @@ phases) is tracked in `docs/PLAN.md`.
 ## Build and verify
 
 Prerequisites: a Rust toolchain (`rustup default stable` with `rustfmt` and
-`clippy`) and a system `perl` — the only mandatory tooling; the reference
-oracle is built offline from the tracked tarball and needs no CPAN.
+`clippy`). That is the only mandatory tooling. The Perl reference used by the
+optional `make diff` cross-check is built offline from the tracked tarball and
+needs no CPAN, but `make verify` does not touch it.
 
 Try it:
 
@@ -42,19 +46,20 @@ The gates you need as a contributor:
 
 ```sh
 make build      # the CLI
-make ref        # materialise the Perl reference oracle, once
-make verify     # fmt, clippy, unit/property/allocation tests, corpus, fuzz
+make verify     # fmt, clippy, unit/property/allocation tests, plus reference-free
+                #   acceptance: frozen corpus+examples outputs and upstream goldens
+make diff       # optional: the Perl differential + fuzzer, as a cross-check
 make proof      # the pandoc-facing claims (docs/OFFERING.md)
 make measure    # the heading-rule measurements (docs/PLAN.md Phase 5)
 ```
 
-Full `make verify` runs the fuzzer at 2 000 cases and takes roughly a quarter
-of an hour; CI runs the same set on every push, so sending a PR does not
-require running it locally first. `make verify` is reproducible — the same
-command means the same thing on a GitHub runner and on your machine, which is
-the guarantee the project stands on. See `textrill/tests/corpus/README.md`,
-including "Six ways this reported success wrongly", before changing the
-harness.
+`make verify` is reproducible — the same command means the same thing on a
+GitHub runner and on your machine, which is the guarantee the project stands on.
+CI runs the same set on every push, so sending a PR does not require running it
+locally first. `make diff` runs the 8 fuzz seeds at 2 000 cases and takes
+roughly a quarter of an hour; it is deliberate that nothing schedules it. See
+`textrill/tests/corpus/README.md`, including "Six ways this reported success
+wrongly", before changing the harness.
 
 ## Repo layout
 

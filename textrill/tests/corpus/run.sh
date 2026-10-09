@@ -20,6 +20,11 @@ REPO="$(cd "$ROOT/.." && pwd)"
 REFDIR="${REFDIR:-$REPO/ref/txt2html-3.0}"
 STUBS="${STUBS:-$REPO/ref/stubs}"
 MINE="${MINE:-$ROOT/target/debug/textrill}"
+# The author goldens are tracked copies under tests/corpus/tfiles, not the
+# derived `ref/tfiles`, so the golden half of this run needs no `make ref` and
+# cannot drift from the copy the reference-free acceptance runner reads. The
+# reference *module* still does: it is the oracle, and it comes from REFDIR.
+GOLDEN_AUTHOR="${GOLDEN_AUTHOR:-$HERE/tfiles}"
 # Scratch directory for the two output sets. Derived from TMPDIR rather than
 # hardcoded, so it works on a machine that keeps its temporary files elsewhere.
 RUNDIR="${RUNDIR:-${TMPDIR:-/tmp}/textrill-corpus}"
@@ -153,7 +158,7 @@ run_case() {
   for f in "${infiles[@]}"; do
     # An absolute path is used as-is, so a regression fixture can live in the
     # port's own tree instead of being dropped into the reference distribution.
-    local path="tfiles/$f"
+    local path="$FIX/$f"
     case "$f" in /*) path="$f" ;; esac
     t2h_in="${t2h_in:+$t2h_in,}$path"
     mine_infile+=(--infile "$path")
@@ -240,7 +245,7 @@ golden_check() {
   [ -n "${NOGOLDEN[$stem]+x}" ] && { echo "  GOLDEN skipped (${NOGOLDEN[$stem]})"; return; }
   # GOLDEN[stem] names the golden explicitly where upstream scores more than
   # one conversion against the same file; otherwise it is derived from the stem.
-  local g="$REFDIR/tfiles/${GOLDEN[$stem]:-good_$stem.html}"
+  local g="$GOLDEN_AUTHOR/${GOLDEN[$stem]:-good_$stem.html}"
   # An explicitly named golden that does not exist is a broken case, not a case
   # without one. The derived name cannot fail this way (a stem with no good_
   # file simply has no golden), so a missing file here means GOLDEN[stem] is
@@ -262,10 +267,10 @@ golden_check() {
   fi
   # P1.1. The upstream golden names itself as the generator, for the same
   # reason the reference output does, so it needs the same canonicalisation as
-  # $RUNDIR/mine/$stem.html -- which run_case already did. The golden itself
-  # lives in ref/tfiles/ and must not be rewritten: ref/ is derived by `make
-  # ref` from the tracked tarball, and mutating it would make the next run
-  # disagree with the tarball for no visible reason. Normalise a copy.
+  # $RUNDIR/mine/$stem.html -- which run_case already did. The golden itself is
+  # a tracked copy and must not be rewritten: mutating it would make the tree
+  # disagree with the tarball it was copied from for no visible reason.
+  # Normalise a copy.
   local gn="$RUNDIR/golden/$stem.html"
   cp "$g" "$gn"
   local _gn_n
@@ -286,123 +291,12 @@ CASES="${CASES:-$HERE/cases.sh}"
 # shellcheck disable=SC1091
 . "$CASES"
 
-# P20. The full run iterates "${!EXTRA[@]}" and reads CLI[$stem] for each, so
-# the two arrays have to name the same cases. They do today -- 46 and 46 -- but
-# that was a fact about the file, not something the harness checked, and the way
-# it breaks is the P2 shape exactly: a case is written, wired up on one side, and
-# never runs. It fails silently in the direction that matters, because a case
-# that does not run cannot fail.
-#
-# The two directions are not symmetric, which is why this cannot be a count
-# comparison. A stem in CLI[] but not EXTRA[] is skipped without a word.
-# A stem in EXTRA[] but not CLI[] trips `set -u` on "${CLI[$stem]}" and kills
-# the script mid-run -- loud, but only because of an unrelated line of shell,
-# and the message names a variable rather than a case. So both directions are
-# checked by name.
-duplicate_key_check() {
-  # P21. `alignment_check` compares key *sets*, so it cannot see a key that was
-  # assigned twice: by the time it runs, the second assignment has already won
-  # and the array looks perfectly consistent. That is not a hypothetical. A8 added
-  # a new `pre_explicit_blank` case without noticing the stem was taken, and the
-  # older case it displaced vanished -- silently, because both happened to agree
-  # with the reference, so the corpus stayed at 47/47 with one case never running.
-  # A case that does not run cannot fail, which is the P2 shape one level down.
-  #
-  # So the check has to run against the *source text*, where both assignments are
-  # still visible, not against the sourced arrays where one has been lost. Any
-  # array a case is defined in, not just CLI[]: a duplicate EXTRA[] or INPUT[] is
-  # the same silent loss.
-  local f line arr stem seen dups
-  dups=0
-  for f in "$@"; do
-    seen=$(grep -oE '^(CLI|EXTRA|INPUT|GOLDEN|NOGOLDEN)\[[A-Za-z0-9_-]+\]=' "$f" \
-           | sort | uniq -d)
-    if [ -n "$seen" ]; then
-      while read -r line; do
-        [ -n "$line" ] || continue
-        arr="${line%%[*}"; stem="${line#*[}"; stem="${stem%%]*}"
-        echo "ALIGN: ${arr}[${stem}] is assigned more than once in $(basename "$f")"
-        echo "      bash keeps the last assignment, so an earlier case for this"
-        echo "      stem never runs -- and the run still reports a clean pass."
-        dups=$((dups + 1))
-      done <<< "$seen"
-    fi
-  done
-  if [ "$dups" -gt 0 ]; then
-    echo "ALIGN: $dups duplicate case key(s); every one is a case that silently"
-    echo "      stopped running. Give each case its own stem."
-    return 1
-  fi
-  return 0
-}
-
-alignment_check() {
-  local only_cli only_extra n=0
-  mapfile -t only_cli < <(
-    comm -23 <(printf '%s\n' "${!CLI[@]}"   | sort) <(printf '%s\n' "${!EXTRA[@]}" | sort)
-  )
-  mapfile -t only_extra < <(
-    comm -13 <(printf '%s\n' "${!CLI[@]}"   | sort) <(printf '%s\n' "${!EXTRA[@]}" | sort)
-  )
-  for stem in "${only_cli[@]}"; do
-    echo "ALIGN: '$stem' is in CLI[] but not EXTRA[] -- it would never run"
-    n=$((n+1))
-  done
-  for stem in "${only_extra[@]}"; do
-    echo "ALIGN: '$stem' is in EXTRA[] but not CLI[] -- it would die on set -u"
-    n=$((n+1))
-  done
-  if [ "$n" -gt 0 ]; then
-    echo "ALIGN: $n case(s) declared on one side only"
-    return 1
-  fi
-  # A NOGOLDEN entry is a suppression, and a suppression that suppresses nothing
-  # is a lie in a file whose whole job is being believed. Each one has to name
-  # a case that exists, and it has to be honest about *which* oracle it is
-  # standing in for.
-  #
-  # Two kinds, distinguished by NOGOLDEN_REASON[], which the entry must use:
-  #
-  #   * "golden differs for a stated reason" -- the case HAS a golden, the
-  #     reference does not match it, and the reason says why. The differential
-  #     comparison against the reference is still the oracle and still runs.
-  #   * "differential must fail: <reason>" -- the case has NO golden, because
-  #     upstream ships none, and the port deliberately diverges from the
-  #     reference, so a byte comparison cannot be the oracle at all. The entry
-  #     has to say so explicitly, and the differential comparison for that case
-  #     is then expected to fail rather than being silently tolerated.
-  #
-  # Without the second kind, "opt_injection" would have had to be written as a
-  # golden-shaped NOGOLDEN entry to get past the check below, which is exactly
-  # the lie this guard exists to prevent: a case whose divergence is deliberate
-  # and total has no golden to skip, and saying it does would be untrue.
-  local bogus=0 stem
-  for stem in "${!NOGOLDEN[@]}"; do
-    if [ -z "${EXTRA[$stem]+x}" ]; then
-      echo "ALIGN: NOGOLDEN['$stem'] names a case that does not exist"
-      bogus=1
-      continue
-    fi
-    case "${NOGOLDEN[$stem]}" in
-      "differential must fail:"*)
-        if [ -f "$REFDIR/tfiles/good_$stem.html" ]; then
-          echo "ALIGN: NOGOLDEN['$stem'] claims no golden exists but one does"
-          bogus=1
-        fi
-        ;;
-      *)
-        if [ ! -f "$REFDIR/tfiles/good_$stem.html" ]; then
-          echo "ALIGN: NOGOLDEN['$stem'] skips a case that has no golden"
-          echo "      (if the port deliberately diverges from the reference for"
-          echo "       this case, start the reason with 'differential must fail:')"
-          bogus=1
-        fi
-        ;;
-    esac
-  done
-  [ "$bogus" -eq 0 ] || return 1
-  return 0
-}
+# The case-table guards live in lib.sh so the reference-free runner (accept.sh)
+# enforces exactly the same rules. See that file for why a case that does not run
+# is the failure they exist to catch.
+# shellcheck source=tests/corpus/lib.sh
+# shellcheck disable=SC1091
+. "$HERE/lib.sh"
 
 if [ "$#" -gt 0 ]; then
   stem="$1"
@@ -429,7 +323,7 @@ if [ "$#" -gt 0 ]; then
   # Checked here too, because the single-stem path is how a case is developed
   # and the misalignment is exactly the kind of thing that happens while writing
   # one. Cheap, and it names the case rather than dying on a variable.
-  alignment_check || rc=1
+  alignment_check "$GOLDEN_AUTHOR" || rc=1
   # And the duplicate-key check, for the same reason: renaming or adding a case
   # is what you do while working on one, and a collision is the cheapest mistake
   # in the file to make. It has to be visible in this mode too, or the mode used
@@ -460,7 +354,7 @@ else
     echo "  and no count would mean anything"
     exit 1
   fi
-  if ! alignment_check; then
+  if ! alignment_check "$GOLDEN_AUTHOR"; then
     echo
     echo "PASS=0 FAIL=0"
     echo "  run aborted: the case tables disagree, so no count would mean anything"
