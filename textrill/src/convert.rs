@@ -570,6 +570,27 @@ pub struct Converter {
 impl Converter {
     pub fn new(mut opts: Options) -> Self {
         opts.deal_with_options();
+
+        // An unreadable append/prepend/head file is reported once, at
+        // construction, and dropped -- the reference does the same (`!-r`
+        // check and clear), so a missing style or header cannot abort a
+        // conversion, but it is also not silently absent from the output.
+        for flag in ["append_file", "prepend_file", "append_head"] {
+            let path = match flag {
+                "append_file" => &opts.append_file,
+                "prepend_file" => &opts.prepend_file,
+                _ => &opts.append_head,
+            };
+            if !path.is_empty() && std::fs::File::open(path).is_err() {
+                eprintln!("Can't find or read {path}");
+                match flag {
+                    "append_file" => opts.append_file.clear(),
+                    "prepend_file" => opts.prepend_file.clear(),
+                    _ => opts.append_head.clear(),
+                }
+            }
+        }
+
         let preformat_enabled = opts.endpreformat_trigger_lines != 0 || opts.use_preformat_marker;
 
         let mut heading_styles = HashMap::new();

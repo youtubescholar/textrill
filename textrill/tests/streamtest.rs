@@ -140,3 +140,21 @@ fn stream_errors_on_input_that_is_not_utf8() {
     assert!(run.stdout.contains("ok"), "stdout: {:?}", run.stdout);
     assert!(!run.stdout.contains("bad"), "stdout: {:?}", run.stdout);
 }
+
+#[test]
+fn stream_exits_non_zero_with_an_unreadable_input() {
+    // The buffered path established that an unreadable input file is not an
+    // empty input and must exit non-zero. The streaming path guarantees the
+    // same, however late the unreadable file appears in the list, so a broken
+    // pipe on a later file cannot swallow the earlier failure.
+    let dir = tmpdir();
+    let input = dir.join("stream-missing.txt");
+    let _ = std::fs::remove_file(&input);
+    let run = run(&["--stream", &input.to_string_lossy()]);
+    assert_eq!(run.code, 1, "stderr: {}", run.stderr);
+    assert!(
+        run.stderr.contains("could not read 1 input file(s)"),
+        "{}",
+        run.stderr
+    );
+}

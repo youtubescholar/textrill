@@ -22,13 +22,17 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut opts = Options::default();
 
-    // --help / --version handled before full parse.
-    for a in &args {
-        if a == "--help" || a == "-h" {
+    // --help / --version handled before rc files: a broken rc file cannot get
+    // in the way of asking for help. The scan is token-aware (sees the `--`
+    // terminator and option values, unlike a plain arg sweep), so it only fires
+    // on a genuine option token -- `-- --version` is a file, not a request.
+    match cli::early_action(&args) {
+        cli::EarlyAction::None => {}
+        cli::EarlyAction::Help => {
             print!("{}", cli::usage());
             return ExitCode::SUCCESS;
         }
-        if a == "--version" {
+        cli::EarlyAction::Version => {
             eprintln!("{PROG} version: {VERSION}");
             return ExitCode::SUCCESS;
         }
@@ -55,8 +59,6 @@ fn main() -> ExitCode {
         eprintln!("{PROG}: {e}");
         return ExitCode::from(1);
     }
-
-    let mut conv = Converter::new(opts.clone());
 
     // --report not valid with --stream (needs full document).
     if opts.report && opts.stream {
@@ -89,6 +91,9 @@ fn main() -> ExitCode {
             );
             return ExitCode::from(1);
         }
+        // Constructed only after the refusals, so a refused invocation never
+        // loads dictionaries or a template for nothing.
+        let mut conv = Converter::new(opts.clone());
         return run_stream(&mut conv, &opts);
     }
 
@@ -106,6 +111,7 @@ fn main() -> ExitCode {
             eprintln!("{PROG}: --chunk requires --outfile");
             return ExitCode::from(1);
         }
+        let mut conv = Converter::new(opts.clone());
         let (files, unreadable) = conv.try_convert_chunked();
         let mut wrote = true;
         for (name, html) in &files {
@@ -137,6 +143,7 @@ fn main() -> ExitCode {
     }
 
     // Unreadable input causes non-zero exit. Output for readable files unchanged.
+    let mut conv = Converter::new(opts.clone());
     let (out, unreadable) = match conv.try_convert() {
         Ok(out) => (out, Vec::new()),
         Err(e) => (e.out, e.unreadable),
@@ -210,6 +217,7 @@ fn run_stream(conv: &mut Converter, opts: &Options) -> ExitCode {
 
     let stdin = std::io::stdin();
     let mut unreadable = 0usize;
+    let mut broken_pipe = false;
     for f in &opts.infile {
         let result = if f == "-" {
             conv.convert_stream(BufReader::new(stdin.lock()), &mut writer)
@@ -225,7 +233,15 @@ fn run_stream(conv: &mut Converter, opts: &Options) -> ExitCode {
         };
         match result {
             Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => return ExitCode::SUCCESS,
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                // The reader is gone; nothing more can be written. Record it
+                // rather than returning now, so an unreadable input earlier in
+                // the list still exits non-zero -- the buffered path does the
+                // same, and a worker that swallowed an unreadable file would
+                // hide the failure from the pipeline that most needs to see it.
+                broken_pipe = true;
+                break;
+            }
             Err(e) => {
                 eprintln!("{PROG}: {e}");
                 return ExitCode::from(1);
@@ -233,15 +249,18 @@ fn run_stream(conv: &mut Converter, opts: &Options) -> ExitCode {
         }
     }
 
+    if unreadable > 0 {
+        eprintln!("{PROG}: could not read {unreadable} input file(s), exiting non-zero");
+        return ExitCode::from(1);
+    }
+    if broken_pipe {
+        return ExitCode::SUCCESS;
+    }
     if let Err(e) = writer.flush() {
         if e.kind() != std::io::ErrorKind::BrokenPipe {
             eprintln!("{PROG}: {e}");
             return ExitCode::from(1);
         }
-    }
-    if unreadable > 0 {
-        eprintln!("{PROG}: could not read {unreadable} input file(s), exiting non-zero");
-        return ExitCode::from(1);
     }
     ExitCode::SUCCESS
 }

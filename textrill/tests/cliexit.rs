@@ -73,6 +73,7 @@ const VALUES: &[&str] = &[
 
 struct Run {
     code: i32,
+    stdout: String,
     stderr: String,
 }
 
@@ -113,6 +114,7 @@ fn run(args: &[&str]) -> Run {
             use std::os::unix::process::ExitStatusExt;
             128 + out.status.signal().expect("killed by an unhandled signal")
         }),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
     }
 }
@@ -662,5 +664,125 @@ fn rejection_happens_before_any_output() {
         out.stdout.is_empty(),
         "wrote {} bytes to stdout despite rejecting the options",
         out.stdout.len()
+    );
+}
+
+// ------------------------------------------------------------- help and version
+
+/// A missing `--version` invocation must answer on stderr and exit 0, the way
+/// the reference (which prints the banner to STDERR) does.
+#[test]
+fn version_is_answered_on_stderr() {
+    let r = run(&["--version"]);
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr);
+    assert!(
+        r.stderr.contains("textrill version:"),
+        "no version banner on stderr: {:?}",
+        r.stderr
+    );
+    assert!(
+        r.stdout.is_empty(),
+        "version went to stdout: {:?}",
+        r.stdout
+    );
+}
+
+/// Run the binary in `dir`, so a relative filename is resolved there and no
+/// rc file from the real working directory can leak in.
+fn run_in(dir: &std::path::Path, args: &[&str]) -> Run {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_textrill"))
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn textrill");
+    drop(child.stdin.take());
+    let out = child.wait_with_output().expect("wait");
+    Run {
+        code: out.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    }
+}
+
+/// `--` ends option processing, so a file genuinely named `--version` is a
+/// file. The help/version scan must not fire after the terminator: before the
+/// fix it printed the banner no matter where `--version` appeared.
+#[test]
+fn a_file_named_version_after_the_terminator_is_converted() {
+    let dir = tmp("version-file");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(dir.join("--version"), "hi\n").expect("write");
+    let r = run_in(&dir, &["--", "--version"]);
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr);
+    assert!(
+        !r.stderr.contains("textrill version"),
+        "the banner was printed for a file named --version: {:?}",
+        r.stderr
+    );
+    assert!(
+        r.stdout.contains("hi"),
+        "the file named --version was not converted: {:?}",
+        r.stdout
+    );
+    std::fs::remove_file(dir.join("--version")).ok();
+}
+
+/// Same for `--help`: after `--` it is a filename, not a request for help.
+#[test]
+fn a_file_named_help_after_the_terminator_is_converted() {
+    let dir = tmp("help-file");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(dir.join("--help"), "boo\n").expect("write");
+    let r = run_in(&dir, &["--", "--help"]);
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr);
+    assert!(
+        !r.stdout.contains("Usage: textrill"),
+        "usage text was printed for a file named --help: {:?}",
+        r.stdout
+    );
+    assert!(
+        r.stdout.contains("boo"),
+        "the file named --help was not converted: {:?}",
+        r.stdout
+    );
+    std::fs::remove_file(dir.join("--help")).ok();
+}
+
+/// `--help` as the value of a value-taking option is a value, not a request:
+/// the reference's Getopt::Long consumes it as the title.
+#[test]
+fn help_as_an_option_value_is_not_a_request_for_help() {
+    let r = run(&["--title", "--help"]);
+    assert_eq!(r.code, 0, "stderr: {}", r.stderr);
+    assert!(
+        !r.stdout.contains("Usage: textrill"),
+        "usage text was printed instead of using --help as the title: {:?}",
+        r.stdout
+    );
+    assert!(
+        r.stdout.contains("<title>--help</title>"),
+        "the title was not set to --help: {:?}",
+        r.stdout
+    );
+}
+
+/// An unreadable `--append_head` is reported exactly as the reference reports
+/// it (`Can't find or read ...`) and the conversion still succeeds.
+#[test]
+fn a_missing_append_head_is_reported_and_conversion_continues() {
+    let missing = tmp("no-append-head.inc");
+    let _ = std::fs::remove_file(&missing);
+    let r = run(&["--append_head", missing.to_str().expect("path")]);
+    assert_eq!(
+        r.code, 0,
+        "a missing append_head must not fail the conversion"
+    );
+    assert!(
+        r.stderr.contains("Can't find or read") && r.stderr.contains("no-append-head"),
+        "the reference diagnostic was lost: {}",
+        r.stderr.trim()
     );
 }

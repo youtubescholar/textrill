@@ -397,6 +397,71 @@ pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
     parse_args_from(args, opts, "")
 }
 
+/// The immediate action a command line requests, if any.
+///
+/// `--help`, `-h` and `--version` are answered before rc files are read, so a
+/// broken rc file cannot get in the way of asking for help. The scan applies
+/// the same token rules as [`parse_args_from`]: a bare `--` ends option
+/// processing (so a file genuinely named `--help` or `--version` stays a
+/// file), and a token that is the value of a value-taking option is skipped
+/// (`--title --help` sets the title; it does not ask for help).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EarlyAction {
+    None,
+    Help,
+    Version,
+}
+
+pub fn early_action(args: &[String]) -> EarlyAction {
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let (name, inline) = if let Some(rest) = arg.strip_prefix("--") {
+            if rest.is_empty() {
+                // End of options: everything after `--` is a filename.
+                return EarlyAction::None;
+            }
+            match rest.split_once('=') {
+                Some((n, v)) => (n, Some(v)),
+                None => (rest, None),
+            }
+        } else if let Some(rest) = arg.strip_prefix('-') {
+            if rest.is_empty() {
+                continue; // "-" is a filename
+            }
+            match rest.split_once('=') {
+                Some((n, v)) => (n, Some(v)),
+                None => (rest, None),
+            }
+        } else {
+            continue; // a filename
+        };
+
+        // An option that takes a value swallows the next token, which may
+        // itself begin with a dash (`--title --help`), so it is never seen as
+        // a request for help here. `--name=value` form carries no next token.
+        if inline.is_none() {
+            if name == "help" {
+                return EarlyAction::Help;
+            }
+            if name == "version" {
+                return EarlyAction::Version;
+            }
+            if arg == "-h" {
+                return EarlyAction::Help;
+            }
+            if let Some(spec) = lookup(name) {
+                if matches!(
+                    spec.kind,
+                    Kind::Str | Kind::Int | Kind::StrArray | Kind::TableType
+                ) {
+                    it.next();
+                }
+            }
+        }
+    }
+    EarlyAction::None
+}
+
 /// Expand `@file` and rc files, then parse in order.
 /// Precedence: `@file` < `~/.textrillrc` < `./.textrillrc` < command line.
 pub fn parse_args_with_rc(
