@@ -560,12 +560,17 @@ fn a_rejected_pattern_writes_no_output() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn");
-    child
-        .stdin
-        .as_mut()
-        .expect("stdin")
-        .write_all(b"one two\n")
-        .expect("write");
+    // The child rejects the pattern and exits without reading stdin, which
+    // closes the pipe; whether this write lands before or after is a scheduling
+    // race, not the behaviour under test. What matters is the empty stdout and
+    // exit 1 asserted below.
+    if let Err(e) = child.stdin.as_mut().expect("stdin").write_all(b"one two\n") {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "unexpected write error: {e}"
+        );
+    }
     let out = child.wait_with_output().expect("wait");
     assert_eq!(out.status.code(), Some(1));
     assert!(
