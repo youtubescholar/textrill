@@ -127,7 +127,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **68 options** with **125 accepted spellings** including short
+There are **69 options** with **126 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names are the upstream ones, unchanged, so a document converts the
@@ -146,6 +146,7 @@ upstream pair. A few are worth calling out:
 | `--allowed_url_schemes` | none | Allow only these URL schemes in `href`s, instead of refusing the script-bearing ones |
 | `--extract` | off | Output only the body, without the surrounding document |
 | `--meta_charset` | off | Emit `<meta charset="utf-8">` |
+| `--no_referrer` | off | Private reading: emit `<meta name="referrer" content="no-referrer">` and `rel="nofollow noreferrer"` on generated external links |
 | `--html5` | on | Emit HTML5: `<!DOCTYPE html>`, no namespace, charset meta; `--no-html5` gives the Perl original's HTML 4.01 |
 | `--xhtml` | off | Emit XHTML 1.0 Strict instead — the Perl original's default |
 | `--section` | off | Wrap each heading section in `<article id="chunk-N">` |

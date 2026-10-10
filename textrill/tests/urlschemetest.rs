@@ -540,3 +540,42 @@ fn no_generated_anchor_carries_target_in_any_mode() {
         }
     }
 }
+
+// ---------------------------------------------------------- private reading --
+
+/// A full document, unlike [`convert`] which extracts the body (no head).
+fn convert_document(text: &str, opts: Options) -> String {
+    let mut conv = Converter::new(opts);
+    conv.opts.instring = vec![text.to_string()];
+    conv.convert()
+}
+
+#[test]
+fn the_no_referrer_option_is_off_by_default() {
+    let out = convert_document("See http://example.com/x now\n\n", Options::default());
+    assert!(out.contains("<a href=\"http://example.com/x\">"), "{out}");
+    assert!(!out.contains("referrer"), "{out}");
+    assert!(!out.contains("nofollow"), "{out}");
+}
+
+#[test]
+fn no_referrer_adds_the_meta_and_tags_only_external_links() {
+    let opts = Options {
+        no_referrer: true,
+        ..Default::default()
+    };
+    let out = convert_document(
+        "See http://example.com/x and <URL:https://e.com/y>, write to <URL:mailto:a@b>\n\n",
+        opts,
+    );
+    assert!(
+        out.contains("<meta name=\"referrer\" content=\"no-referrer\">"),
+        "{out}"
+    );
+    assert!(out.contains("<a href=\"mailto:a@b\">"), "{out}");
+    assert_eq!(
+        out.matches("rel=\"nofollow noreferrer\"").count(),
+        2,
+        "only the two external links should be tagged:\n{out}"
+    );
+}

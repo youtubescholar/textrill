@@ -2269,6 +2269,16 @@ impl Converter {
                     }
                 }
             }
+            // Private reading: after a link is known to be allowed, tag the
+            // outbound web ones. The same finished-paragraph pass as the scrub,
+            // so it also covers `-h->` raw anchors from the dictionary.
+            if self.opts.no_referrer {
+                if let Some(rel) =
+                    crate::urlscheme::add_link_rel(para_ref, self.opts.lower_case_tags)
+                {
+                    *para_ref = rel;
+                }
+            }
         }
         let ls = self.opts.lower_case_tags;
         if !self.opts.bold_delimiter.is_empty() {
@@ -2765,6 +2775,21 @@ impl Converter {
                     " charset=\"utf-8\""
                 } else {
                     " CHARSET=\"utf-8\""
+                },
+            ));
+        }
+        // Private reading: one document-wide policy is enough to stop the source
+        // URL leaking on any link, including ones a template or the operator's
+        // raw HTML supplies. Off by default, so no golden moves.
+        if self.opts.no_referrer {
+            out.push('\n');
+            out.push_str(&self.get_tag(
+                "meta",
+                TAG_EMPTY,
+                if self.opts.lower_case_tags {
+                    " name=\"referrer\" content=\"no-referrer\""
+                } else {
+                    " NAME=\"referrer\" CONTENT=\"no-referrer\""
                 },
             ));
         }

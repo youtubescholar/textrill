@@ -289,6 +289,11 @@ pub struct Options {
     /// reference emits no charset declaration, so enabling it would move every
     /// golden. A GUI turns it on for its browser consumer.
     pub meta_charset: bool,
+    /// Private reading: emit `<meta name="referrer" content="no-referrer">` and
+    /// put `rel="nofollow noreferrer"` on every generated external web link, so
+    /// a reader's source URL is not leaked on click. Default **off**, so output
+    /// stays byte-identical to the reference.
+    pub no_referrer: bool,
     pub links_dictionaries: Vec<String>,
     pub link_only: bool,
     pub lower_case_tags: bool,
@@ -366,6 +371,7 @@ impl Default for Options {
             italic_delimiter: "*".to_string(),
             encoding: Encoding::Auto,
             meta_charset: false,
+            no_referrer: false,
             links_dictionaries: Vec::new(),
             link_only: false,
             lower_case_tags: true,

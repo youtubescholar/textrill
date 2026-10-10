@@ -264,6 +264,85 @@ fn find_close_a(lower_tail: &str) -> Option<(usize, usize)> {
     None
 }
 
+/// Outbound web schemes that warrant `rel="nofollow noreferrer"`.
+///
+/// A referrer is only sent on a network navigation and `nofollow` is a
+/// hyperlink hint, so a fragment, a relative path and `mailto:`/`news:` are
+/// left alone.
+fn is_external(href: &str) -> bool {
+    matches!(
+        scheme_of(href).as_deref(),
+        Some("http" | "https" | "ftp" | "ftps")
+    )
+}
+
+/// Whether an already lower-cased open tag carries the attribute `name`.
+fn has_attr(tag_lower: &str, name: &str) -> bool {
+    let b = tag_lower.as_bytes();
+    let mut from = 0;
+    while let Some(rel) = tag_lower[from..].find(name) {
+        let at = from + rel;
+        let before_ok = at == 0 || !is_attr_char(b[at - 1]);
+        let after_ok = !matches!(b.get(at + name.len()), Some(&c) if is_attr_char(c));
+        if before_ok && after_ok {
+            return true;
+        }
+        from = at + name.len();
+    }
+    false
+}
+
+/// Add `rel="nofollow noreferrer"` to every anchor whose `href` is an external
+/// web link (see [`is_external`]).
+///
+/// This is the privacy counterpart to [`scrub_hrefs`]: it runs over the same
+/// finished markup, so it also covers `-h->` raw anchors from a link dictionary.
+/// Returns `None` when nothing changed, so the default output stays
+/// byte-identical to the reference. An anchor that already carries a `rel` is
+/// left as the operator wrote it, and the tag case follows `lower_case_tags`.
+pub fn add_link_rel(html: &str, lower_case_tags: bool) -> Option<String> {
+    let attr = if lower_case_tags {
+        " rel=\"nofollow noreferrer\""
+    } else {
+        " REL=\"nofollow noreferrer\""
+    };
+    let lower = html.to_ascii_lowercase();
+    let mut out: Option<String> = None;
+    let mut scan = 0;
+    let mut copied = 0;
+    while let Some(rel) = lower[scan..].find("<a") {
+        let open = scan + rel;
+        let after = lower.as_bytes().get(open + 2).copied();
+        if !matches!(after, Some(b' ') | Some(b'>') | Some(b'\t') | Some(b'\n')) {
+            scan = open + 2;
+            continue;
+        }
+        let tag_end = match html[open..].find('>') {
+            Some(p) => open + p,
+            None => break,
+        };
+        let Some((value, value_end)) = find_href(&html[open..tag_end]) else {
+            scan = tag_end + 1;
+            continue;
+        };
+        if !is_external(value) || has_attr(&lower[open..tag_end], "rel") {
+            scan = tag_end + 1;
+            continue;
+        }
+        // Insert right after the closing quote of the href value, so the new
+        // attribute cannot land inside the value.
+        let insert = open + value_end + 1;
+        let buf = out.get_or_insert_with(|| String::with_capacity(html.len() + 24));
+        buf.push_str(&html[copied..insert]);
+        buf.push_str(attr);
+        copied = insert;
+        scan = tag_end + 1;
+    }
+    let mut buf = out?;
+    buf.push_str(&html[copied..]);
+    Some(buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,5 +543,71 @@ mod tests {
         let (out, dropped) = scrub(html);
         assert_eq!(out.unwrap(), "<p>a mid b end</p>");
         assert_eq!(dropped.len(), 2);
+    }
+
+    fn rel(html: &str) -> Option<String> {
+        add_link_rel(html, true)
+    }
+
+    #[test]
+    fn external_links_get_rel_and_internal_ones_do_not() {
+        let html = "<a href=\"http://e.com/x\">a</a> \
+                    <a href=\"https://e.com/\">b</a> \
+                    <a href=\"#frag\">c</a> \
+                    <a href=\"rel.html\">d</a> \
+                    <a href=\"mailto:a@b\">e</a>";
+        let out = rel(html).unwrap();
+        assert!(out.contains("<a href=\"http://e.com/x\" rel=\"nofollow noreferrer\">a</a>"));
+        assert!(out.contains("<a href=\"https://e.com/\" rel=\"nofollow noreferrer\">b</a>"));
+        assert!(out.contains("<a href=\"#frag\">c</a>"));
+        assert!(out.contains("<a href=\"rel.html\">d</a>"));
+        assert!(out.contains("<a href=\"mailto:a@b\">e</a>"));
+        assert_eq!(out.matches("rel=").count(), 2);
+    }
+
+    #[test]
+    fn nothing_external_is_left_byte_identical() {
+        for html in [
+            "plain text",
+            "",
+            "<a href=\"#chunk-1\">One</a>",
+            "<a href=\"mailto:a@b\">m</a>",
+            "<a href=\"news:comp.lang.perl\">n</a>",
+            "<a name=\"x\">anchor, no href</a>",
+            "<abbr title=\"t\">not an anchor</abbr>",
+        ] {
+            assert_eq!(rel(html), None, "{html}");
+        }
+    }
+
+    #[test]
+    fn the_rel_is_added_once_and_the_case_follows_the_tag() {
+        let once = rel("<a href=\"http://e.com/\">e</a>").unwrap();
+        assert_eq!(
+            once,
+            "<a href=\"http://e.com/\" rel=\"nofollow noreferrer\">e</a>"
+        );
+        assert_eq!(rel(&once), None, "already tagged");
+        assert_eq!(once.matches("rel=").count(), 1);
+
+        assert_eq!(
+            add_link_rel("<A HREF=\"http://e.com/\">e</A>", false).unwrap(),
+            "<A HREF=\"http://e.com/\" REL=\"nofollow noreferrer\">e</A>"
+        );
+    }
+
+    #[test]
+    fn an_anchors_own_rel_is_preserved() {
+        assert_eq!(rel("<a href=\"http://e.com/\" rel=\"me\">e</a>"), None);
+        assert_eq!(
+            rel("<a class=\"c\" href=\"http://e.com/\">e</a>").unwrap(),
+            "<a class=\"c\" href=\"http://e.com/\" rel=\"nofollow noreferrer\">e</a>"
+        );
+    }
+
+    #[test]
+    fn ftp_is_external_but_a_lookalike_scheme_is_not() {
+        assert!(rel("<a href=\"ftp://h/f\">f</a>").is_some());
+        assert_eq!(rel("<a href=\"httpx://h/f\">t</a>"), None);
     }
 }
