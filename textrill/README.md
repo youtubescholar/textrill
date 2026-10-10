@@ -23,10 +23,10 @@ Early. `0.1.0` is the first release of the fork.
 What is **done**:
 
 - The conversion engine is pinned by reference-free acceptance: a reviewed,
-  frozen output for every one of the 61 corpus cases, 33 golden comparisons
+  frozen output for every one of the 63 corpus cases, 32 golden comparisons
   against upstream's own `good_*.html` files, and 8 frozen real-document
   examples. The Perl differential remains available as `make diff`.
-- 367 Rust tests and a 74-test native GUI suite.
+- 374 Rust tests and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the reference-free acceptance against that binary, so it runs on Alpine
   and other glibc-less distros with the same output it produces everywhere.
@@ -532,13 +532,13 @@ differential testing against the real implementation rather than guessed from
 documentation, which is why the option names are the upstream ones and a
 document can be converted by either tool and compared:
 
-- `tests/corpus/` runs 61 cases through both implementations and requires
+- `tests/corpus/` runs 63 cases through both implementations and requires
   byte-identical output.
-- The 33 upstream golden files are compared byte for byte.
+- The 32 upstream golden files are compared byte for byte.
 
 That parity is now **recorded, not re-proved against Perl every build**.
 `make accept` compares textrill against its own goldens for every one of those
-61 cases plus the 33 upstream goldens and the 8 example documents, and it is
+63 cases plus the 32 upstream goldens and the 8 example documents, and it is
 part of `make verify`. To change output deliberately, recapture the affected
 goldens (`make accept-write`, `make examples-write`) and review the diff —
 see the root `CONTRIBUTING.md`. The Perl differential itself became `make
