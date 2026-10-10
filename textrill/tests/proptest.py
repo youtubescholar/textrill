@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""P12: properties that must hold whatever the Perl module does.
+"""Properties that must hold whatever the Perl module does.
 
-`run.sh` is a Tier 1 oracle -- it asserts byte-identity with the reference,
+`run.sh` is a byte-identity oracle -- it asserts byte-identity with the reference,
 which is the right rule for ASCII input and the documented output format. It
 cannot answer two questions this file can:
 
   * Is any of the *non-ASCII* behaviour correct? The reference is broken on
     genuine UTF-8 input (it decodes bytes as Latin-1), so a byte diff there
-    reports a Perl bug, not a port bug. See "Compatibility policy" in
-    the retired remediation plan's "Compatibility policy" section.
+    reports a Perl bug, not a port bug. The policy: a difference from the
+    reference is a declared divergence with its own oracle — see
+    `tests/corpus/README.md`.
   * Does any output satisfy the guarantees a standalone tool owes its user,
     regardless of what the reference does? Content preservation and
     well-formedness are such guarantees.
@@ -87,7 +88,7 @@ def to_numeric_entities(doc: str) -> str:
     browsers and validating parsers resolve it. Rewriting to `&#252;` makes this
     check measure what it claims to: structural well-formedness.
 
-    A *bare* ampersand, which is what A8's unescaped option values produce, has
+    A *bare* ampersand, which is what unescaped option values would produce, has
     no `;` and so is left alone and still fails the parse. That is deliberate.
     Perl's truncated `&cent` is likewise left alone.
     """
@@ -170,16 +171,16 @@ XML_ARGS = [
     ("--xhtml", "--style_url", "s.xsl?a=1&b=2"),
 ]
 
-# Defects the port has, that this suite found, and that the plan already owns.
+# Defects the port has, that this suite found, and that this file tracks by name.
 # They are listed rather than fixed so the suite can land first, and every entry
-# must name the plan item responsible -- an entry without one is a bug report,
-# not an exemption. `make verify` prints the count so they cannot be forgotten.
+# must name its owner -- an entry without one is a bug report, not an exemption.
+# `make verify` prints the count so they cannot be forgotten.
 #
-# A8: --title and --style_url are interpolated into the document unescaped, so
-# an `&` in a stylesheet URL produces XML no parser will accept. Recorded in
-# the retired remediation plan's addendum as A8; kept for provenance.
+# --title and --style_url are interpolated into the document unescaped, so
+# an `&` in a stylesheet URL produces XML no parser will accept. Kept for
+# provenance: the entry below asserts the fix but not the original defect.
 KNOWN_OPEN_XML_ARGS = {
-    # A8 is fixed: --title and --style_url are escaped on the way into the
+    # Fixed: --title and --style_url are escaped on the way into the
     # document (`chars::escape_attr`), so `& < > "` cannot produce a document
     # no parser will accept, and the XSS cases in the corpus no longer parse as
     # markup. `escape_html_chars` still governs a *derived* `--titlefirst`
@@ -266,10 +267,9 @@ def prop_reconvert_preserves(binary):
 
 
 # ---------------------------------------------------------------- property 5
-# No crash on hostile-but-plausible input. Not a fuzz test -- that is
-# fuzz.py's job against the reference. This is the floor: the process must
-# exit 0 or with a clean diagnostic, never panic, on inputs a user could
-# plausibly feed it.
+# No crash on hostile-but-plausible input. Not a differential test. This is the
+# floor: the process must exit 0 or with a clean diagnostic, never panic, on
+# inputs a user could plausibly feed it.
 
 HOSTILE = {
     "nul byte": b"before\x00after\n",
@@ -340,7 +340,7 @@ def main():
     if KNOWN_OPEN_HITS:
         items = sorted({o for o, _, _ in KNOWN_OPEN_HITS})
         print(f"proptest: {len(KNOWN_OPEN_HITS)} known-open checks, "
-              f"owned by plan item(s) {', '.join(items)} -- not fixed, not ignored")
+              f"owned by {', '.join(items)} -- not fixed, not ignored")
     if bad:
         print(f"proptest: {bad} FAILED")
         return 1

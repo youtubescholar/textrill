@@ -1,4 +1,4 @@
-//! P5.2 — opt-in sectioning, TOC and multi-file chunking.
+//! Opt-in sectioning, TOC and multi-file chunking.
 //!
 //! All three are off by default, so the first test pins that the default output
 //! is untouched. The rest pin what the flags add: sequential `chunk-N` ids,

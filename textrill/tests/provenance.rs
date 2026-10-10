@@ -1,4 +1,4 @@
-// P1.1 — the generator meta is textrill's own provenance.
+// The generator meta is textrill's own provenance.
 //!
 //! The corpus harness (tests/corpus/normalize.py) canonicalises the generator
 //! meta line out of every byte comparison, because the port and the Perl
@@ -10,7 +10,7 @@
 //!
 //! Attribution and provenance are separate claims. The GPL-3.0-or-later
 //! credit for HTML::TextToHTML lives in LICENSE and is deliberately not
-//! asserted here -- asserting it in output would be the mistake P1.1 removed.
+//! asserted here -- asserting it in output would be the mistake this removed.
 
 use std::process::Command;
 
@@ -32,7 +32,7 @@ fn the_generator_names_textrill_and_nothing_else() {
         "expected {expected:?} in:\n{out:?}"
     );
 
-    // The specific failure P1.1 fixed. Asserted separately and by name so a
+    // The specific failure this guards against. Asserted separately and by name so a
     // regression reads as the thing it is, not as a generic content mismatch.
     assert!(
         !out.contains("HTML::TextToHTML"),
@@ -106,10 +106,10 @@ fn html5_mode_also_names_textrill() {
 
 #[test]
 fn the_default_document_declares_its_encoding() {
-    // PLAN Phase 3: the default doctype is HTML5, and HTML5 always declares
+    // The default doctype is HTML5, and HTML5 always declares
     // an encoding whether or not --meta_charset was asked for. The reference
     // emits no charset at all, and the differential never sees this line
-    // because every corpus and fuzz case pins a reference-compatible mode --
+    // because every corpus case pins a reference-compatible mode --
     // so this test is where the deliberate divergence is pinned, with the
     // html5test checks on the mode's own contract as the other half.
     let out = render(Options::default());
@@ -173,7 +173,7 @@ fn a_full_document_from_the_cli_names_textrill() {
 
 #[test]
 fn help_describes_textrill_and_not_the_reference() {
-    // P1.4. The first line a user read was "A reimplementation of txt2html
+    // The first line a user read was "A reimplementation of txt2html
     // 3.0": the tool describing itself in someone else's voice. It now
     // describes what it does, and the reference is named only where it is
     // factually relevant -- the legacy option-file names, which are still read.

@@ -259,7 +259,7 @@ fn two_lists_and_two_kinds_keep_their_ids_apart() {
 
 #[test]
 fn the_definition_block_leaves_nothing_behind() {
-    // Pinned to XHTML mode (PLAN Phase 3 exempts rather than deletes): the
+    // Pinned to XHTML mode (exempted rather than deleted): the
     // empty-paragraph shape this guards against is `<p></p>`, which only a
     // mode that closes paragraphs can emit -- in the HTML5 default the assert
     // would be vacuous and the gate gone.

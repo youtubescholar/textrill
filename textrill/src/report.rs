@@ -1,20 +1,10 @@
-//! P5.0 — `--report`: what the conversion recovered, on standard error.
+//! `--report`: what the conversion recovered, on standard error.
 //!
-//! Structure is inferred from layout, and an inference a user cannot see is
-//! indistinguishable from a feature that silently does nothing: an empty
-//! `--toc` on a document with no headings looks exactly like a working table of
-//! contents that happened to find nothing. The counts behind that answer used
-//! to exist only in `make examples`, which greps the output itself; this module
-//! is the instrument, and `make examples` reads it rather than reimplementing
-//! it.
-//!
-//! The counts are of the tags in the **produced output**, not of events the
-//! engine believes it performed, for one reason: they have to be checkable. A
-//! user with the file and `grep` can reproduce every one of them, and so can
-//! [`crate::report`]'s test. Counting at the emission sites would not survive
-//! the pass that removes a `<p>` again (`notes.rs` truncates an empty paragraph
-//! wrapper), and a counter that disagrees with the file is worse than no
-//! counter.
+//! Counts are of the tags in the **produced output**, not of events the engine
+//! believes it performed, so a user with the file and `grep` can reproduce
+//! every one of them. Counting at emission sites would not survive passes that
+//! rewrite the output, e.g. `notes.rs` truncating an empty `<p>` wrapper.
+//! Covered by tests/reporttest.rs.
 
 /// The five numbers `--report` prints, for one document or one run's output.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -32,11 +22,8 @@ pub struct Counts {
 }
 
 impl Counts {
-    /// Count what is in `html`.
-    ///
-    /// Case-insensitive, because `--no-html5` emits the reference's upper-case
-    /// tags and a report that reads 0 headings off a valid HTML 4 document
-    /// would be reporting the serialisation rather than the structure.
+    /// Count what is in `html`, case-insensitively so `--no-html5`'s
+    /// upper-case tags count as structure rather than serialisation.
     pub fn of(html: &str) -> Counts {
         let b = html.as_bytes();
         let mut c = Counts {
@@ -46,9 +33,7 @@ impl Counts {
         let mut i = 0;
         while i < b.len() {
             if b[i] == b'<' {
-                // A '<' in the output is always markup: text is escaped, and
-                // every byte of a multi-byte UTF-8 character is >= 0x80, so
-                // scanning bytes cannot land inside a character.
+                // Text is escaped and no UTF-8 continuation byte is '<'.
                 let rest = &b[i + 1..];
                 if starts_with(rest, b"h") && rest.get(1).is_some_and(|d| (b'1'..=b'6').contains(d))
                 {
@@ -70,8 +55,7 @@ impl Counts {
         c
     }
 
-    /// Add another document's counts — `--chunk` writes several files and the
-    /// report is about the run, so the totals are summed.
+    /// Add another document's counts; `--chunk` sums its per-file totals.
     pub fn add(&mut self, other: &Counts) {
         self.bytes += other.bytes;
         self.headings += other.headings;
@@ -83,10 +67,7 @@ impl Counts {
 
 impl std::fmt::Display for Counts {
     /// The line `--report` prints, after the `textrill: report ` prefix.
-    ///
-    /// `key=value` rather than prose, because it is meant to be read by a person
-    /// and compared by a test; `make examples` prints the same five keys in the
-    /// same order.
+    /// `key=value` so a person can read it and a test can compare it.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -115,9 +96,8 @@ mod tests {
 
     #[test]
     fn a_paragraph_counts_once_whatever_it_carries() {
-        // The rule, and the two shapes that a naive `<p` prefix would get
-        // wrong: `<pre>` opens with the same two bytes, and mailmode's
-        // paragraphs carry an attribute.
+        // `<pre>` shares the `<p` prefix, and mailmode paragraphs carry an
+        // attribute.
         assert_eq!(Counts::of("<p>hi\n").paragraphs, 1);
         assert_eq!(Counts::of("<p class='mail_header'>From\n").paragraphs, 1);
         assert_eq!(Counts::of("<p\n>").paragraphs, 1);
@@ -138,9 +118,7 @@ mod tests {
 
     #[test]
     fn strong_and_br_count_by_prefix_in_either_case() {
-        // `--caps_tag b` emits no `<strong>` at all, and the report is about
-        // what was written, so the count goes to 0 rather than to the number of
-        // capitals the engine saw.
+        // The report counts what was written: `--caps_tag b` emits no `<strong>`.
         assert_eq!(Counts::of("<p>a <strong>b</strong>\n").strong, 1);
         assert_eq!(Counts::of("<p>a <b>b</b>\n").strong, 0);
         assert_eq!(Counts::of("<br>\n<br/>\n<BR>\n").br, 3);

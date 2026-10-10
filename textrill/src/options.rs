@@ -1,13 +1,11 @@
-//! Options for the txt2html converter.
+//! Options for the txt2html converter, mirroring HTML::TextToHTML v3.0.
 //!
-//! Mirrors the option set of HTML::TextToHTML v3.0.
+//! [`Options::validate`] enforces the numeric and regexp contracts before any
+//! output; covered by `tests/cliexit.rs`.
 
-/// A single-byte encoding: the guess, and the escape hatch.
-///
-/// None of these can be *detected*. They are mutually indistinguishable from
-/// the bytes alone — a CP1251 file is a valid CP1252 file, with different
-/// meanings for about 60 of its 128 high bytes — so `Auto` picks one and the
-/// user can name another.
+/// A single-byte encoding: the fallback guess and the escape hatch. These cannot
+/// be *detected* -- mutually indistinguishable from the bytes -- so `Auto` picks
+/// one and the user can name another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SingleByte {
     Latin1,
@@ -41,54 +39,40 @@ impl SingleByte {
     }
 }
 
-/// P7.3. How to decode input bytes.
+/// How to decode input bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Encoding {
     /// Detect. In order: a byte-order mark, then the NUL pattern that marks
     /// UTF-16 or UTF-32, then UTF-8 validity, then [`SingleByte::Cp1252`].
     ///
-    /// The ordering is the whole point and it is not arbitrary. A BOM is a
-    /// declaration by the writer, so it outranks every heuristic. The NUL
-    /// pattern is a structural fact about the bytes. UTF-8 validity is a weaker
-    /// signal than either, because UTF-16LE containing only ASCII is *also* valid
-    /// UTF-8 — so it cannot be checked first, which is exactly how a BOM-less
-    /// UTF-16 file used to decode as UTF-8 and reach the output with a NUL
-    /// between every character.
-    ///
-    /// The single-byte fallback is last because it is the only guess in the
-    /// list. It is right for Western European text and wrong for Cyrillic,
-    /// Greek or Turkish, which is why those are selectable instead.
+    /// The order matters: a BOM is a writer's declaration, the NUL pattern is a
+    /// structural fact, and UTF-8 validity is weaker (ASCII-only UTF-16LE is
+    /// also valid UTF-8). The single-byte fallback is last because it is the
+    /// only guess.
     #[default]
     Auto,
-    /// Decode as UTF-8 unconditionally. Bytes that are not valid UTF-8 are
-    /// replaced rather than interpreted, so this is lossy by construction and
-    /// is only right when the caller already knows the encoding.
+    /// Decode as UTF-8 unconditionally; invalid bytes are replaced, so this is
+    /// lossy and only right when the encoding is already known.
     Utf8,
-    /// Decode as CP1252 unconditionally, one byte to one code point, including
-    /// for bytes that would have been valid UTF-8. This is how to read a
-    /// CP1252 file that the UTF-8 probe would have misjudged.
+    /// Decode as CP1252 unconditionally, one byte per code point, even for
+    /// bytes that would have been valid UTF-8.
     Cp1252,
-    /// Latin-1. Kept as a real option rather than a historical curiosity: a file
-    /// that declares it should not be second-guessed, and it is what CP1252 was
-    /// mistaken for until P7.1.
+    /// Latin-1. A declared Latin-1 file is not second-guessed.
     Latin1,
-    /// Windows Cyrillic. Differs from CP1252 across most of `0x80`-`0xFF`, so a
-    /// bare Russian file is unreadable without naming it.
+    /// Windows Cyrillic; differs from CP1252 across most of `0x80`-`0xFF`.
     Cp1251,
     /// Windows Greek.
     Cp1253,
-    /// KOI8-R, the other common Russian encoding and the one Russian *Linux*
-    /// uses. CP1251 and KOI8-R disagree about almost every high byte, so naming
-    /// the wrong one is not a small error.
+    /// KOI8-R, the other common Russian encoding. CP1251 and KOI8-R disagree
+    /// about almost every high byte.
     Koi8R,
-    /// UTF-16 little-endian, with or without a BOM. Named explicitly when the
-    /// file has no BOM and `Auto`'s NUL heuristic would otherwise be the only
-    /// evidence.
+    /// UTF-16 little-endian, with or without a BOM. Name it when a BOM-less
+    /// file would otherwise be guessed from `Auto`'s NUL heuristic.
     Utf16Le,
     /// UTF-16 big-endian, with or without a BOM.
     Utf16Be,
-    /// UTF-32 little-endian. Detected from a BOM; near-impossible to infer
-    /// reliably from structure alone, so `Auto` does not try.
+    /// UTF-32 little-endian. Detected from a BOM; `Auto` does not infer it from
+    /// structure.
     Utf32Le,
     /// UTF-32 big-endian, BOM only.
     Utf32Be,
@@ -124,14 +108,8 @@ impl Encoding {
         }
     }
 
-    /// Parse a `--encoding` value. Accepts several spellings of each, because a
-    /// user naming an encoding should not have to know which one the
-    /// implementation happens to prefer — and because "latin-1" is what most
-    /// people type for what this port has been calling CP1252.
-    /// How many bytes one code unit occupies, for the wide encodings.
-    ///
-    /// 2 for UTF-16 and 4 for UTF-32. Used by [`crate::encode`] to decide
-    /// whether a character needs a surrogate pair, and to lay out the bytes.
+    /// How many bytes one code unit occupies: 2 for UTF-16, 4 for UTF-32, 1
+    /// otherwise. Used by [`crate::encode`] for surrogate pairs and byte layout.
     pub fn units_per_char(self) -> usize {
         match self {
             Encoding::Utf16Le | Encoding::Utf16Be => 2,
@@ -140,6 +118,7 @@ impl Encoding {
         }
     }
 
+    /// Parse a `--encoding` value, accepting several spellings of each.
     pub fn parse(s: &str) -> Result<Self, String> {
         match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
             "auto" | "detect" => Ok(Encoding::Auto),
@@ -184,29 +163,21 @@ impl Default for TableTypeFlags {
     }
 }
 
-/// The upper bound for every numeric option that is used to build a regex
-/// quantifier, an allocation, or a divisor. See [`Options::validate`].
+/// The upper bound for numeric options used to build a regex quantifier, an
+/// allocation, or a divisor. See [`Options::validate`].
 pub const MAX_NUMERIC_OPTION: usize = 999;
 
 /// The accepted range of each numeric option that cannot be arbitrary, as
 /// `(option, low, high)`.
 ///
-/// This is the single source of truth: the engine enforces it in
-/// [`Options::validate`], and the extension module hands it to a front end so a
-/// GUI builds its spin boxes from the same numbers. It used to be hardcoded in
-/// the GUI at 0..=999, which is how `tab_width=0` reached the engine at all.
+/// Single source of truth, enforced by [`Options::validate`] and handed to front
+/// ends. Only options that reach a hazard appear; the rest are used solely in
+/// comparisons and stay unbounded.
 ///
-/// Only options that reach a hazard appear here. The other numeric options are
-/// used solely in comparisons and are harmless at any value, so they stay
-/// unbounded and the port keeps accepting what the reference accepts.
-///
-/// * `tab_width` is the divisor in `tab % tw`, and the size of a space repeat.
-/// * `indent_width` is the size of a space repeat; 0 is genuinely fine.
-/// * The three below are interpolated into a regex quantifier, which the regex
-///   engine refuses above some size. That limit is pattern-dependent rather than
-///   a single number -- `\s{200000,}` is rejected while `[A-Z]{200000,}` is
-///   accepted -- so this ceiling is chosen with margin and checked in
-///   `tests/cliexit.rs`, not derived from the engine's exact threshold.
+/// `tab_width` is the divisor in `tab % tw` and a space-repeat size;
+/// `indent_width` a space-repeat size (0 is fine); the other three are
+/// interpolated into a regex quantifier, with the ceiling checked in
+/// `tests/cliexit.rs`.
 pub const NUMERIC_RANGES: &[(&str, usize, usize)] = &[
     ("tab_width", 1, MAX_NUMERIC_OPTION),
     ("indent_width", 0, MAX_NUMERIC_OPTION),
@@ -226,32 +197,13 @@ pub fn numeric_range(name: &str) -> Option<(usize, usize)> {
 /// All conversion options, with the same defaults as HTML::TextToHTML v3.0.
 #[derive(Debug, Clone)]
 pub struct Options {
-    /// A11. Schemes permitted in a generated `href`, comma separated.
+    /// Schemes permitted in a generated `href`, comma separated; default
+    /// [`urlscheme::DEFAULT_ALLOWED_SCHEMES`]. Setting this **replaces** the list,
+    /// so it can only make the policy stricter. An anchor with any other scheme
+    /// is unwrapped and reported once on standard error.
     ///
-    /// The default is [`urlscheme::DEFAULT_ALLOWED_SCHEMES`] spelled out rather
-    /// than "unset", and that is deliberate. A front end reads the defaults with
-    /// `cli::get_value` and writes them back, and it persists them to its own
-    /// settings file. With an "unset means the default" encoding, the empty
-    /// string that `get_value` returns for unset would be written back as an
-    /// *explicitly empty* list, and an empty list means "refuse nothing" -- so
-    /// saving the settings once would quietly turn the policy off. Carrying the
-    /// list makes the round trip lossless in meaning as well as in text.
-    ///
-    /// An anchor using any other scheme is unwrapped -- the tags go, the text
-    /// stays -- and the scheme is reported once on standard error.
-    ///
-    /// Setting this **replaces** the list rather than adding to it, so
-    /// `https` alone also stops `http`, `ftp` and `mailto` from being linked.
-    /// That is the useful direction: the option's job is to be able to make the
-    /// policy stricter, and an additive option could not. The diagnostics say so
-    /// on every rule they drop, because forgetting the other schemes is the
-    /// obvious mistake.
-    ///
-    /// This exists because two of the engine's inputs are not the operator's
-    /// text: the document being converted, and a link dictionary. `<URL:…>`
-    /// in ordinary prose became a live `javascript:` link in the reference, so
-    /// the default refuses every script-bearing scheme. See
-    /// [`crate::urlscheme`] for why the check is a scan over the finished markup.
+    /// Spelled out rather than "unset" so a front end can round trip it; see
+    /// [`crate::urlscheme`] for why the check scans finished markup.
     pub allowed_url_schemes: Option<Vec<String>>,
     pub append_file: String,
     pub append_head: String,
@@ -260,138 +212,82 @@ pub struct Options {
     pub bullets_ordered: String,
     pub bold_delimiter: String,
     /// Collect `{{textrill:cite:key}}` references into a numbered endnotes list.
-    ///
-    /// The source syntax, the rendering and the reasons each mistake is refused
-    /// rather than guessed at are in [`crate::notes`]. Default **off**: with the
-    /// mode off every marker is left in the output as literal text, so a document
-    /// that does not use notes converts byte for byte as before.
-    ///
-    /// Refused with `--chunk` and `--stream`. `--chunk` would have to collect
-    /// across the whole input to number references before splitting it, and
-    /// `--stream` has already written bytes by the time the list is complete.
-    /// Both would need a document-wide pass, which is the one thing those modes
-    /// exist to avoid.
+    /// Default **off**: markers stay literal text. Refused with `--chunk` and
+    /// `--stream`, which cannot afford the document-wide pass numbering needs.
     pub citations: bool,
     pub caps_tag: String,
     pub custom_heading_regexp: Vec<String>,
     pub default_link_dict: String,
     pub demoronize: bool,
     pub doctype: String,
-    /// P5.5. Path to a wrapper template inserted inside `<body>`.
-    ///
-    /// The template owns the arrangement of the body: it must contain a
-    /// `{{textrill:content}}` slot, and may use `{{textrill:toc}}`,
-    /// `{{textrill:title}}`, `{{textrill:head}}` and `{{textrill:pager}}`. The
-    /// engine still emits the doctype, `<head>` and the `<body>` tags. Empty
-    /// (the default) means output is byte-identical to the reference.
+    /// Path to a wrapper template inserted inside `<body>`. It must contain a
+    /// `{{textrill:content}}` slot and may use the `toc`, `title`, `head` and
+    /// `pager` slots; the engine still emits the doctype, `<head>` and `<body>`.
+    /// Empty (the default) is byte-identical to the reference.
     pub template: String,
-    /// P5.5. Path to a whole-document template.
-    ///
-    /// Like [`Options::template`], but the template owns the entire page
-    /// (doctype, head and body included), so none of the engine prolog is
-    /// emitted. Mutually exclusive with [`Options::template`]. Empty by default.
+    /// Path to a whole-document template: it owns doctype, head and body, so no
+    /// engine prolog is emitted. Mutually exclusive with [`Options::template`].
+    /// Empty by default.
     pub document_template: String,
-    /// S4. A shipped template's name (`article`, `book`, `manpage`, `slide`,
-    /// `bare`), from the embedded library in [`crate::library`].
-    ///
-    /// Exactly one of [`Options::template`], [`Options::document_template`] and
-    /// this is allowed at a time. Each library template has an intrinsic model
-    /// (`article`, `book`, `manpage` and `slide` own the whole document; `bare`
-    /// wraps only the body), so the engine routes it exactly as the matching
-    /// file-level option would. Uses only the fixed slots, never a var slot, so
-    /// it converts without any `--var`. Empty by default.
+    /// A shipped template's name (`article`, `book`, `manpage`, `slide`, `bare`)
+    /// from [`crate::library`]. Exactly one of [`Options::template`],
+    /// [`Options::document_template`] and this may be set; its model decides body
+    /// vs whole document. Uses only the fixed slots. Empty by default.
     pub template_library: String,
-    /// P5.5. Template parameters, in `--var` order, substituted verbatim for
+    /// Template parameters, in `--var` order, substituted verbatim for
     /// `{{textrill:var:name}}` in the active template. Empty by default.
     pub vars: Vec<(String, String)>,
     pub eight_bit_clean: bool,
     pub escape_html_chars: bool,
     pub explicit_headings: bool,
     pub extract: bool,
-    /// Collect `{{textrill:gloss:term}}` references into a definition list.
-    ///
-    /// Independent of [`Options::citations`]: either mode, both or neither may
-    /// be on. Markers of a mode that is off stay literal text, so enabling
-    /// `--citations` never draws the glossary markers into it. Default **off**.
-    /// Refused with `--chunk` and `--stream`, for the reasons given on
-    /// [`Options::citations`].
+    /// Collect `{{textrill:gloss:term}}` references into a definition list,
+    /// independent of [`Options::citations`]. Default **off**; refused with
+    /// `--chunk` and `--stream` (see [`Options::citations`]).
     pub glossary: bool,
-    /// P5.0. Print what the conversion recovered — bytes, headings, paragraphs,
-    /// capitalised runs and line breaks — as one `key=value` line on standard
-    /// error once the output is written.
-    ///
-    /// The counts are of the tags in the produced document rather than of the
-    /// events the engine performed, so a user with the file can reproduce them
-    /// (see [`crate::report`]). The output is byte-identical with and without
-    /// it; only stderr differs. Default **off**, because stderr is where the
-    /// diagnostics live and a report nobody asked for is a diagnostic. Refused
-    /// with `--stream`, which has no finished document to count: the whole-body
-    /// passes are refused there for the same reason.
+    /// Print what the conversion recovered -- bytes, headings, paragraphs,
+    /// capitalised runs and line breaks -- as one `key=value` line on stderr
+    /// once the output is written. Counts are of the produced document, not
+    /// engine events ([`crate::report`]); default **off**, refused with `--stream`.
     pub report: bool,
-    /// Phase 5. Wrap each heading-delimited section of the body in an
-    /// `<article class="section" id="chunk-N">` element.
-    ///
-    /// Default **off**: the section markup is HTML5-flavoured and is intended
-    /// to be used with `--html5`. Off by default so the reference goldens do
-    /// not move.
+    /// Wrap each heading-delimited section of the body in an
+    /// `<article class="section" id="chunk-N">` element. Default **off**: the
+    /// markup is HTML5-flavoured and would move the reference goldens.
     pub section: bool,
-    /// Phase 5. Prepend a generated table of contents linking each section.
-    ///
-    /// Implies sectioning, because the links target the `chunk-N` ids that
-    /// sectioning assigns. Default **off**.
+    /// Prepend a generated table of contents linking each section. Implies
+    /// sectioning, because the links target the `chunk-N` ids it assigns.
+    /// Default **off**.
     pub toc: bool,
-    /// Phase 5. Write one HTML file per top-level section instead of a single
-    /// document. Requires a file `--outfile`; not valid with `--extract` or
-    /// with output to standard output. Default **off**.
+    /// Write one HTML file per top-level section instead of a single document.
+    /// Requires a file `--outfile`; not valid with `--extract` or stdout.
+    /// Default **off**.
     pub chunk: bool,
-    /// P5.3. Prefix each heading with its hierarchical number (`1`, `1.1`, …).
-    ///
+    /// Prefix each heading with its hierarchical number (`1`, `1.1`, …).
     /// Composes with `--toc`, whose labels then carry the numbers. Default
-    /// **off** so the reference goldens do not move.
+    /// **off**.
     pub number_headings: bool,
-    /// P5.4. Read the input and write the output a paragraph at a time, so a
-    /// very large UTF-8 file can be piped without holding the whole document
-    /// and its markup in memory.
-    ///
-    /// Only meaningful for file/stdin input that is UTF-8 (decoded lossily, as
-    /// `--encoding utf-8` is); it is refused with `--instring` and with the
-    /// whole-body passes `--number_headings`, `--section`, `--toc` and
-    /// `--chunk`, which need the body in hand. Default **off**: the buffered
-    /// path is unchanged and the output is byte-identical either way.
+    /// Read the input and write the output a paragraph at a time, so a very large
+    /// UTF-8 file can be piped without holding the whole document in memory.
+    /// Refused with `--instring` and the whole-body passes `--number_headings`,
+    /// `--section`, `--toc` and `--chunk`. Default **off**.
     pub stream: bool,
     pub hrule_min: usize,
-    /// P5.1. Emit an HTML5 document: `<!DOCTYPE html>`, an `<html>` element
-    /// without the XHTML namespace, and `<meta charset="utf-8">`.
-    ///
-    /// Default **on** (PLAN Phase 3): XHTML 1.0 Strict is the Perl default and
-    /// is wrong for a new tool in 2026, so the port emits HTML5 and a charset
-    /// meta unless told otherwise. `--no-html5` and `--no-xhtml` both select
-    /// the reference's HTML 4.01 output, `--xhtml` selects XHTML; the corpus
-    /// cases that assert HTML4 pin those flags rather than being deleted.
-    /// Tag case follows [`Options::lower_case_tags`], which each mode flag
-    /// sets as part of entering its mode: the default is lower-case HTML5,
-    /// `--no-html5` is upper-case HTML4 (the reference's own default), and an
-    /// explicit `--lower_case_tags` given after the mode flag wins.
+    /// Emit an HTML5 document: `<!DOCTYPE html>`, an `<html>` element without the
+    /// XHTML namespace, and `<meta charset="utf-8">`. Default **on**;
+    /// `--no-html5`/`--no-xhtml` select the reference's HTML 4.01, `--xhtml`
+    /// selects XHTML. Tag case follows [`Options::lower_case_tags`].
     pub html5: bool,
     pub indent_width: usize,
     pub indent_par_break: bool,
     pub italic_delimiter: String,
-    /// P7.3. How `convert::read_any_file` should decode input that is not valid
-    /// UTF-8, and what to assume for text handed over in memory.
-    ///
-    /// `Auto` is the historical behaviour and the default. `Utf8` and `Cp1252`
-    /// force the fallback rather than probing, which matters when the probe is
-    /// wrong — a CP1252 file whose bytes happen to be valid UTF-8 is
-    /// indistinguishable from a UTF-8 file by inspection, and no amount of
-    /// probing settles it.
+    /// How `convert::read_any_file` decodes input that is not valid UTF-8, and
+    /// what to assume for text handed over in memory. `Auto` is the default;
+    /// `Utf8` and `Cp1252` force the fallback, needed when a CP1252 file is also
+    /// valid UTF-8 and the probe cannot tell.
     pub encoding: Encoding,
-    /// P7.4. Emit `<meta charset="utf-8">` in the document head.
-    ///
-    /// Default **off**, and that is a compatibility decision rather than a
-    /// preference: byte-identical output from the reference is a stated goal of
-    /// this port, and the reference emits no charset declaration, so turning
-    /// this on by default would move every golden. A GUI turns it on, because
-    /// there the consumer is a browser that is about to guess.
+    /// Emit `<meta charset="utf-8">` in the document head. Default **off**: the
+    /// reference emits no charset declaration, so enabling it would move every
+    /// golden. A GUI turns it on for its browser consumer.
     pub meta_charset: bool,
     pub links_dictionaries: Vec<String>,
     pub link_only: bool,
@@ -433,9 +329,8 @@ impl Default for Options {
     fn default() -> Self {
         let home = std::env::var("HOME").unwrap_or_default();
         Options {
-            // A11. `None` is the default tier, not "allow everything" -- see
-            // the field's doc comment. An empty list resolves to the same tier,
-            // which is what makes a front end that persists this value safe.
+            // `None` is the default tier, not "allow everything"; an empty list
+            // resolves to the same tier.
             allowed_url_schemes: None,
             append_file: String::new(),
             append_head: String::new(),
@@ -508,17 +403,9 @@ impl Default for Options {
     }
 }
 
-/// The default link-dictionary location.
-///
-/// The option points at a single file, so the default has to choose: textrill's
-/// own name if that file exists, the legacy `.txt2html.dict` if only that one
-/// does, and the textrill name when neither does. A user who has never heard of
-/// textrill still has `~/.txt2html.dict` from the Perl tool and it keeps being
-/// read; a user who has written both gets theirs read once, for the reason
-/// given at [`crate::rcfile`'s `RC_NAMES`].
-///
-/// With `HOME` unset the name is relative, so it resolves against the working
-/// directory -- which is what the legacy default did.
+/// The default link-dictionary location: textrill's own name if that file
+/// exists, else the legacy `.txt2html.dict`, else the textrill name. With `HOME`
+/// unset the name is relative, resolving against the working directory.
 fn default_link_dict(home: &str) -> String {
     const NAMES: [&str; 2] = [".textrill.dict", ".txt2html.dict"];
     if home.is_empty() {
@@ -543,36 +430,14 @@ fn default_link_dict(home: &str) -> String {
 impl Options {
     /// Reject option values that cannot be arbitrary.
     ///
-    /// A bad value here is a user error, and it is reported as a message naming
-    /// the option, its value and the acceptable range -- not as a panic and not
-    /// as an abort. Both of those were reachable from the command line:
-    /// `tab_width=0` reached `tab % tw` and divided by zero (exit 101), and a
-    /// large value reached `" ".repeat(tw)` and asked the allocator for an
-    /// impossible size, which aborts with SIGABRT (exit 134) and cannot be
-    /// caught. The GUI could produce `tab_width=0` directly, because its
-    /// spin box minimum was 0 for every numeric option.
+    /// A bad value is a user error reported with the option, value and acceptable
+    /// range -- not a panic or abort. Only options that size an allocation are
+    /// bounded; the rest are comparison-only and stay unbounded to match the
+    /// reference. 999 is the ceiling the GUI already assumed.
     ///
-    /// Only the two options that size an allocation are bounded. The other
-    /// seven numeric options are used solely in comparisons -- thresholds and
-    /// lengths, never a size -- so they are harmless at any value, and bounding
-    /// them would be stricter than the reference for no safety gain. The
-    /// reference accepts them, so the port does too.
-    ///
-    /// 999 is the ceiling the GUI already assumed, so the two agree without
-    /// inventing a second number.
-    ///
-    /// The second loop compiles each caller-supplied regular expression
-    /// ([`Options::user_patterns`]). An uncompilable pattern was the last way a
-    /// caller could take the process down: the engine compiled it lazily, so a
-    /// bad `custom_heading_regexp` panicked part-way through a conversion rather
-    /// than being rejected, and a GUI user could type one in. Compiling it here
-    /// reports it before any output exists, which is the same contract as the
-    /// bounds above -- and it diverges from the reference on purpose, since Perl
-    /// interpolates the pattern into a match, warns, and carries on with the
-    /// pattern silently inactive.
-    ///
-    /// The list is kept honest by `every_regexp_option_is_validated` in
-    /// `tests/cliexit.rs`, which compares it against the CLI option table.
+    /// It also compiles each caller-supplied regexp ([`Options::user_patterns`])
+    /// so an invalid one is reported before any output; the two lists are kept
+    /// honest by `every_regexp_option_is_validated` in `tests/cliexit.rs`.
     pub fn validate(&self) -> Result<(), String> {
         for (name, value) in self.numeric_values() {
             if let Some((low, high)) = numeric_range(name) {
@@ -593,27 +458,22 @@ impl Options {
         Ok(())
     }
 
-    /// The scheme policy a conversion runs under.
-    ///
-    /// Read once per conversion and handed to both the dictionary loader and the
-    /// scrub pass, so the two cannot disagree about what is allowed.
+    /// The scheme policy a conversion runs under, read once and handed to both
+    /// the dictionary loader and the scrub pass so the two cannot disagree.
     pub fn url_policy(&self) -> crate::urlscheme::UrlPolicy {
         match &self.allowed_url_schemes {
             // An empty or blank list is the default tier too, so a value that
-            // has been persisted and read back unchanged cannot turn a
-            // front end's "unset" into something weaker.
+            // has been persisted and read back unchanged cannot weaken the
+            // policy.
             Some(list) => crate::urlscheme::UrlPolicy::strict(list),
             None => crate::urlscheme::UrlPolicy::default(),
         }
     }
 
-    /// A11. `--style_url` is the one `href` that is pure operator input, so it
-    /// is refused outright rather than scrubbed: there is no document text to
-    /// preserve and a silent drop would leave the operator wondering why their
-    /// stylesheet is not applied.
-    ///
-    /// A relative `--style_url` (what most callers want, and what the templates
-    /// in `tests/` use) has no scheme and always passes.
+    /// `--style_url` is pure operator input, so it is refused outright rather
+    /// than scrubbed: there is no document text to preserve, and a silent drop
+    /// would leave a stylesheet unexplained. A relative value has no scheme and
+    /// passes.
     fn validate_style_url(&self) -> Result<(), String> {
         if self.style_url.is_empty() {
             return Ok(());
@@ -630,13 +490,11 @@ impl Options {
         ))
     }
 
-    /// Refuse the note modes with the two that stream.
+    /// Refuse the note modes with `--chunk` and `--stream`.
     ///
-    /// Both write output as they go, and a note list is only known once the
-    /// whole document has been read: numbering follows first reference, so a
-    /// citation in the last paragraph can insert `[1]` in the first. Refusing
-    /// here, before any byte is written, is the only way to keep the promise
-    /// that a broken note set produces no output at all.
+    /// Numbering follows first reference, so it needs the whole document;
+    /// refusing before any byte is written keeps a broken note set from
+    /// producing output.
     fn validate_notes_options(&self) -> Result<(), String> {
         for (flag, on) in [
             ("--citations", self.citations),
@@ -655,17 +513,10 @@ impl Options {
         Ok(())
     }
 
-    /// P5.5/S4. Check the template options and, when one is set, load it and
-    /// check its slots. Doing this before conversion means a bad template is
-    /// reported as a message and a non-zero exit rather than part-way through
-    /// output.
-    ///
-    /// The three template sources — `--body_template`, `--document_template`
-    /// and `--template_library` (whose model comes from the shipped library) —
-    /// are mutually exclusive, and each is refused with the modes that own the
-    /// surrounding document (`--extract`, `--chunk`, `--stream`). A whole-page
-    /// template is additionally refused with `--prepend_file`, whose content
-    /// has no slot in a template and would otherwise be dropped silently.
+    /// Check the template options and, when one is set, load it and check its
+    /// slots, so a bad template is reported before any output. The three sources
+    /// are mutually exclusive and each is refused with `--extract`, `--chunk` and
+    /// `--stream`; a whole-page template also with `--prepend_file`.
     fn validate_template_options(&self) -> Result<(), String> {
         let (whole_document, body, flag) = self.template_source()?;
         if whole_document == 2 {
@@ -694,10 +545,8 @@ impl Options {
     /// Resolve which template is active, if any, and its text.
     ///
     /// Returns `(whole_document, template text, flag name)`, where
-    /// `whole_document` is 0 for a body wrapper, 1 for a whole-page template
-    /// and 2 for "no template". A shipped library name that does not exist is
-    /// an error naming the library, so a typo is a message, not a silent
-    /// shrug.
+    /// `whole_document` is 0 for a body wrapper, 1 for a whole-page template, 2
+    /// for none. An unknown library name is an error naming the library.
     pub fn template_source(&self) -> Result<(u8, String, String), String> {
         let wrapper = !self.template.is_empty();
         let whole = !self.document_template.is_empty();
@@ -734,20 +583,10 @@ impl Options {
         Ok((u8::from(whole), shipped.html.to_string(), flag))
     }
 
-    /// The options whose value is a regular expression supplied by the caller,
-    /// as `(option, pattern)`.
-    ///
-    /// These three, and no others: every other pattern the engine compiles is
-    /// either a literal in the source or derived from a delimiter option, and
-    /// validating those here would mean duplicating the construction rules in a
-    /// second place. The list is explicit rather than derived because a list
-    /// that silently falls behind the code is worse than no list -- it reads as
-    /// coverage. [`Options::REGEXP_OPTIONS`] exists so a test can check the two
-    /// against the CLI option table, and it does.
-    ///
-    /// A pattern reaches [`compile_user_pattern`] on its way to the engine, so a
-    /// caller cannot smuggle an uncompilable one past validation. See
-    /// `Convert::re`, which used to panic on a bad pattern instead.
+    /// The options whose value is a caller-supplied regular expression, as
+    /// `(option, pattern)`. This explicit list is checked against
+    /// [`Options::REGEXP_OPTIONS`] and the CLI table by `tests/cliexit.rs`; each
+    /// pattern reaches [`compile_user_pattern`], so an uncompilable one cannot pass.
     pub fn user_patterns(&self) -> Vec<(&'static str, &str)> {
         let mut v: Vec<(&'static str, &str)> = Vec::new();
         for pattern in &self.custom_heading_regexp {
@@ -761,15 +600,9 @@ impl Options {
         v
     }
 
-    /// The canonical long name of every option that takes a regular expression.
-    ///
-    /// Hand-maintained so `tests/cliexit.rs` can assert that
-    /// [`Options::user_patterns`] covers all of it. That assertion is the point:
-    /// a new regexp option added to the CLI table and wired into `Options`, but
-    /// forgotten in `user_patterns`, is a pattern that panics the process again --
-    /// the bug P22 fixed, reintroduced by the next person to add an option.
-    /// Aliases such as `heading` and `H` are not listed; they name the same
-    /// field, and only the canonical name has a field to validate.
+    /// The canonical long name of every option that takes a regular expression,
+    /// hand-maintained so `tests/cliexit.rs` can assert [`Options::user_patterns`]
+    /// covers all of it. Aliases name the same field and are not listed.
     pub const REGEXP_OPTIONS: &[&str] = &[
         "custom_heading_regexp",
         "preformat_start_marker",
@@ -808,13 +641,9 @@ impl Options {
             self.endpreformat_trigger_lines = 1;
         }
         self.endpreformat_trigger_lines = self.endpreformat_trigger_lines.clamp(0, 2);
-        // XHTML implies lower case, as in the reference (TextToHTML.pm:1957),
-        // and takes HTML5 mode with it: the two doctypes are mutually
-        // exclusive, and a struct built directly with `xhtml: true` would
-        // otherwise carry the default `html5: true` as well and serialise as
-        // HTML5. HTML4 (neither flag) does not touch lower_case_tags here --
-        // the CLI mode flags set the tag case as part of entering their mode,
-        // which is where the reference's own `xhtml => 0` default lives.
+        // XHTML implies lower case and disables HTML5: the two doctypes are
+        // mutually exclusive, so a struct built directly with `xhtml: true`
+        // must not keep the default `html5: true`.
         if self.xhtml {
             self.html5 = false;
             self.lower_case_tags = true;

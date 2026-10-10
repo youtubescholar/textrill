@@ -1,4 +1,4 @@
-//! P5.4 — `--stream` reads and writes a paragraph at a time.
+//! `--stream` reads and writes a paragraph at a time.
 //!
 //! The flag is off by default and must not change any output, so every test
 //! here either pins the byte-for-byte equality with the buffered path or pins

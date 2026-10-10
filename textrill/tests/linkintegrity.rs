@@ -2,7 +2,7 @@
 //!
 //! The corpus cannot check this. Its 60 cases are reference-differential, so
 //! they are all about matching Perl's bytes, and not one of them passes
-//! `--toc`, `--section` or `--chunk` -- those are Phase 5 additions with no
+//! `--toc`, `--section` or `--chunk` -- those are additions with no
 //! upstream equivalent to diff against. Running the link checker over the whole
 //! corpus output finds **zero** engine-generated links, which is the problem
 //! this file exists to fix: the code that invents `href`s and the `id`s they

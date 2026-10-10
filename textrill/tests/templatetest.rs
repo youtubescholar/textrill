@@ -1,4 +1,4 @@
-//! P5.5 — `--body_template` and `--document_template`.
+//! `--body_template` and `--document_template`.
 //!
 //! Templates are off by default, so the reference output must not move. These
 //! tests pin the wrapper and whole-document models, the slot substitution, the
@@ -306,7 +306,7 @@ fn the_legacy_template_alias_still_works_and_warns() {
     );
 }
 
-// ---- 4.1: `--var name=value` -> `{{textrill:var:name}}` ----
+// ---- `--var name=value` -> `{{textrill:var:name}}` ----
 
 /// A declared var is substituted verbatim, in both template models, and the
 /// engine's own slots survive around it (nothing is squished by the insertion).
@@ -512,7 +512,7 @@ fn malformed_var_arguments_are_rejected_up_front() {
     assert!(out.stderr.contains("non-empty"), "{}", out.stderr);
 }
 
-// ---- 4.2: the shipped template library ----
+// ---- the shipped template library ----
 
 /// Every shipped template converts a document out of the box. The four
 /// whole-document templates own the page and start with a doctype; `bare`

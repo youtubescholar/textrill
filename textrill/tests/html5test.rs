@@ -1,4 +1,4 @@
-//! P5.1 — the HTML5 output mode, which is the default (PLAN Phase 3).
+//! The HTML5 output mode, which is the default.
 //!
 //! The reference's XHTML 1.0 Strict default is wrong for a new tool in 2026,
 //! so the port emits HTML5 unless told otherwise; this suite pins both
@@ -32,9 +32,9 @@ fn html5_is_on_by_default() {
 
 #[test]
 fn the_reference_default_is_still_one_flag_away() {
-    // Exempted, not deleted (PLAN Phase 3): the pre-flip default was the
+    // Exempted, not deleted: the pre-flip default was the
     // reference's XHTML 1.0 Strict, and these are the assertions it made.
-    // One --xhtml (the flag the corpus and fuzz pin) brings it back, and it
+    // One --xhtml (the flag the corpus pins) brings it back, and it
     // must take HTML5 mode with it rather than composing with it.
     let mut opts = Options::default();
     cli::set_value(&mut opts, "xhtml", "1").expect("xhtml");

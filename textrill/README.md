@@ -42,10 +42,9 @@ What is **not** done yet:
 
 - No Flatpak, no distro packaging yet.
 
-The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`; the
-earlier Python/PySide6 front end is retired and archived under `legacy-archive/`.
-Performance is no longer a gap: the P6 link-pass fix puts textrill ahead of the
-reference on the link-dense benchmark (see `../legacy-archive/REMEDIATION-PLAN.md`, P6).
+The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`. A
+link-pass fix puts textrill ahead of the reference on the link-dense
+benchmark.
 
 
 ## Option files
@@ -536,17 +535,16 @@ document can be converted by either tool and compared:
   byte-identical output.
 - The 33 upstream golden files are compared byte for byte.
 
-That parity is now **frozen, not re-proved every build**. `make accept` compares
-textrill against its own reviewed self-goldens for every one of those 61 cases
-plus the 33 upstream goldens and the 8 example documents, and it is part of
-`make verify`. The differential itself became `make diff`, a non-gating
-cross-check for when a fresh comparison against Perl is worth having — the
-reference is a historical artifact, not the specification, and it no longer
-sits on the path of either `make verify` or CI. Where the two disagree the
-question is which is right, and textrill decides; see `../docs/PLAN.md`.
-
-The fuzzer hunts for divergences in Unicode handling, delimiter recovery and
-encoding detection; like `run.sh` it is part of `make diff` (Phase 8 S13).
+That parity is now **recorded, not re-proved against Perl every build**.
+`make accept` compares textrill against its own goldens for every one of those
+61 cases plus the 33 upstream goldens and the 8 example documents, and it is
+part of `make verify`. To change output deliberately, recapture the affected
+goldens (`make accept-write`, `make examples-write`) and review the diff —
+see the root `CONTRIBUTING.md`. The Perl differential itself became `make
+diff`, a non-gating cross-check for when a fresh comparison against Perl is
+worth having — the reference is a historical artifact, not the specification,
+and it never sits on the path of `make verify` or CI. Where the two disagree,
+textrill decides.
 
 Where textrill deliberately differs from upstream, the divergence is declared
 and explained in `tests/corpus/README.md` rather than left to be discovered.
@@ -568,8 +566,9 @@ Known differences:
 - A handful of pathological inputs that upstream handles by silently corrupting
   output are handled correctly here. These are marked in the corpus README.
 
-The full audit trail of what was found and fixed is in
-`../legacy-archive/REMEDIATION-PLAN.md`.
+The audit trail for the harness itself — how the corpus and the goldens are
+meant to be believed and changed — is in `tests/corpus/README.md`
+and the root `../CONTRIBUTING.md`.
 
 ## Licence
 

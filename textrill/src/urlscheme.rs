@@ -9,80 +9,24 @@
 
 //! Which URL schemes may reach an `href`.
 //!
-//! The engine's output is an HTML *document*, usually published somewhere, and
-//! one of its inputs is not under the converter's control: the text being
-//! converted. A document can name a URL of its own choosing in the output, and
-//! Perl's `HTML::TextToHTML` never looked at what that URL was, so
-//! `<URL:javascript:alert(1)>` in an otherwise ordinary file came out of the
-//! reference as a live `javascript:` link. This module is the one place that
-//! decides, so the property is "no executing scheme reaches the output" rather
-//! than a rule each producer has to remember.
-//!
-//! Three properties matter, and they are why this is a scan over finished markup
-//! rather than a check at each construction site:
-//!
-//! * **Total.** Every producer of an `href` is covered, including one added
-//!   later, and including raw HTML a dictionary injects with `-h->`.
-//! * **Byte-identical when nothing is refused.** [`scrub_hrefs`] returns `None`
-//!   if it changed nothing, so the reference goldens do not move for any input
-//!   that does not actually contain a dangerous scheme.
-//! * **Loses no text.** A refused anchor is unwrapped, not deleted: the visible
-//!   words survive. Refusing to *convert* untrusted input would let a hostile
-//!   document deny service to the converter, which is the wrong direction for
-//!   the fail-safe to point. Hard failure is still right for `--style_url`,
-//!   which is operator input -- see
-//!   [`Options::validate`](crate::options::Options::validate).
-//!
-//! # Two tiers, and why not just an allowlist
-//!
-//! An allowlist is the stronger guarantee and the obvious design, and
-//! `--allowed_url_schemes` gives exactly one. It is not the *default*, because
-//! an allowlist has to enumerate every scheme a legitimate document might
-//! mention, and getting that list wrong breaks real input in a way that is hard
-//! to diagnose. Upstream's own CI fixture is the worked example: its dictionary
-//! contains one rule, `|xyz:[\w/\.:+\-]+| -> $&`, which links `xyz://…`. No
-//! allowlist short of "include `xyz`" survives that, and `xyz` is not a scheme
-//! anyone could have predicted.
-//!
-//! So the default is the smaller question, which is also the one that actually
-//! matters: which schemes *do something*. A browser asked to navigate to
-//! `xyz://example.com` does nothing, shows nothing, and executes nothing. A
-//! browser asked to navigate to `javascript:…` runs it in the page's origin.
-//! [`DANGEROUS_SCHEMES`] is that set, and it is short.
-//!
-//! The honest cost: a scheme nobody thought of would get through. That is the
-//! price of not breaking `xyz://`, and the mitigation is the strict mode rather
-//! than a longer list -- `--allowed_url_schemes https` refuses everything the
-//! default allows, including anything added to a browser after this was
-//! written.
-//!
-//! Operator-authored dictionaries get a louder treatment than document text: a
-//! rule with a statically-known bad URL is refused at load with a diagnostic,
-//! because the operator can fix it. See [`Links`](crate::links).
+//! The converted text is untrusted, so this is the one place that decides which
+//! schemes are safe. It scans finished markup, covering every `href` producer
+//! (including `-h->` raw HTML). [`scrub_hrefs`] returns `None` when it changed
+//! nothing, keeping output byte-identical to the reference, and unwraps a
+//! refused anchor rather than deleting it so text survives. Default refuses
+//! [`DANGEROUS_SCHEMES`]; a strict `--allowed_url_schemes` list is the allowlist.
 
-/// Schemes refused by default, whatever else is allowed.
-///
-/// The script-bearing schemes, which execute in the page's origin, plus `file`,
-/// which lets a converted document point at the reader's filesystem. `data:`
-/// is here for the same reason as `javascript:`: a `data:text/html` href
-/// navigates to attacker-authored HTML.
-///
-/// This is a denylist, and [`UrlPolicy::strict`] is the allowlist; see the
-/// module docs for why that is the default split.
+/// Schemes refused by default: the script-bearing ones, plus `file` (points at
+/// the reader's filesystem) and `data` (attacker-authored HTML).
 pub const DANGEROUS_SCHEMES: &[&str] = &["javascript", "data", "vbscript", "file"];
 
-/// Schemes the built-in dictionary links, kept for `--help` and for the
-/// operator who wants to write a strict list and start from this one.
+/// Schemes the built-in dictionary links, kept for `--help` and for a strict list.
 pub const WELL_KNOWN_SCHEMES: &[&str] = &[
     "ftp", "ftps", "gopher", "http", "https", "mailto", "news", "nntp", "telnet", "wais",
 ];
 
-/// Which schemes a generated `href` may use.
-///
-/// Schemes are compared ASCII-case-insensitively, because a browser does:
-/// `JaVaScRiPt:` is the same scheme as `javascript:`. Only ASCII case folding is
-/// wanted here -- a full Unicode fold would need the whole scheme table to be
-/// case-closed, which no browser assumes either.
+/// Which schemes a generated `href` may use. Compared ASCII-case-insensitively,
+/// because a browser does: `JaVaScRiPt:` is the same scheme as `javascript:`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum UrlPolicy {
     /// Refuse [`DANGEROUS_SCHEMES`] and allow everything else, including
@@ -94,13 +38,9 @@ pub enum UrlPolicy {
 }
 
 impl UrlPolicy {
-    /// A policy allowing exactly `schemes`.
-    ///
-    /// An empty or all-whitespace list is [`UrlPolicy::Default`] rather than
-    /// "allow nothing": a caller cannot express "refuse every scheme" by
-    /// accident, and `--allowed_url_schemes ''` means "no opinion", which is
-    /// what an unset option must mean for the round trip through a front end's
-    /// settings file to be harmless.
+    /// A policy allowing exactly `schemes`. An empty or all-whitespace list is
+    /// [`UrlPolicy::Default`], not "allow nothing": `--allowed_url_schemes ''`
+    /// means "no opinion".
     pub fn strict<I, S>(schemes: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -124,13 +64,9 @@ impl UrlPolicy {
         UrlPolicy::Strict(allowed)
     }
 
-    /// May `url` be used as an `href`?
-    ///
-    /// A URL with no scheme is a *relative* reference -- `page.html`, `/x`,
-    /// `#chunk-2` -- and is always allowed: it names something inside the
-    /// document set the converter was asked to produce, which is what the
-    /// generated TOC and pager links are, and it is what
-    /// `<URL:foo:label>` produces when the label has no colon.
+    /// May `url` be used as an `href`? A URL with no scheme is a relative
+    /// reference (`page.html`, `/x`, `#chunk-2`) and is always allowed,
+    /// including the generated TOC and pager links.
     pub fn allows(&self, url: &str) -> bool {
         let Some(scheme) = scheme_of(url) else {
             return true;
@@ -141,14 +77,12 @@ impl UrlPolicy {
         }
     }
 
-    /// Is this the default tier? [`scrub_hrefs`] returns early when not, because
-    /// with no list to compare against there is nothing to enforce.
+    /// Is this the default tier? [`scrub_hrefs`] otherwise has nothing to enforce.
     pub fn is_default(&self) -> bool {
         matches!(self, UrlPolicy::Default)
     }
 
-    /// A description for a diagnostic: the refused schemes under the default
-    /// tier, or the allowed ones under a strict one.
+    /// A description for a diagnostic: refused schemes, or allowed under strict.
     pub fn describe(&self) -> String {
         match self {
             UrlPolicy::Default => format!("refusing {}", DANGEROUS_SCHEMES.join(", ")),
@@ -159,20 +93,10 @@ impl UrlPolicy {
 
 /// The lower-cased scheme of `url`, or `None` if it is relative.
 ///
-/// Two normalisations, both because a browser performs them before it looks at
-/// the scheme, and a check that skipped them could be walked past:
-///
-/// * **TAB, LF and CR are removed from anywhere in the scheme.** A browser
-///   strips them from the whole URL, so `java&#9;script:` and a literal tab
-///   both arrive as `javascript:`.
-/// * **Leading C0 control characters and space are skipped.** `java\nscript:`
-///   is the same attack as a tab.
-///
-/// No entity decoding happens, and none is needed. Body text has `&` escaped to
-/// `&amp;` before the link pass sees it, so a document writing `&#58;` puts the
-/// six literal characters `&amp;#58;` in the attribute; the browser's single
-/// decode pass yields the text `&#58;`, not a colon. Confirming that cost one
-/// release, and the escaping is in `chars::escape`.
+/// Mirrors two browser normalisations, since skipping them could be walked past:
+/// TAB, LF and CR are removed from anywhere in the scheme, and leading C0
+/// controls and space are skipped. No entity decoding is needed: `&` is escaped
+/// to `&amp;` before the link pass, so `&#58;` never decodes to a colon.
 pub fn scheme_of(url: &str) -> Option<String> {
     let b = url.as_bytes();
     let mut i = 0;
@@ -213,36 +137,22 @@ fn is_stripped_everywhere(c: u8) -> bool {
 
 /// Remove every anchor whose `href` uses a scheme the policy refuses.
 ///
-/// Returns `None` when there was nothing to remove, which is the case for every
-/// document that does not actually contain a dangerous scheme -- so the output
-/// is byte-identical to the reference and no allocation happens.
-///
-/// A refused anchor is *unwrapped*: the `<a …>` and its `</a>` go, the words
-/// between them stay. An unterminated anchor (an open tag with no `</a>`, which a
-/// dictionary's `-h->` HTML can produce) loses only its open tag.
-///
-/// Schemes are collected into `dropped`, in first-seen order, so the caller can
-/// report each one once rather than once per match.
-///
-/// There is no early exit for the default tier: the default tier has a denylist
-/// to enforce, so it has to walk the markup like any other. The "no work done"
-/// property is the `None` return below, not a shortcut.
+/// Returns `None` when nothing was removed, so safe documents stay byte-identical
+/// to the reference. A refused anchor is *unwrapped*: the tags go, the words
+/// stay; an unterminated anchor loses only its open tag. Refused schemes are
+/// pushed to `dropped` in first-seen order.
 pub fn scrub_hrefs(html: &str, policy: &UrlPolicy, dropped: &mut Vec<String>) -> Option<String> {
     let lower = html.to_ascii_lowercase();
     let mut out: Option<String> = None;
-    // Two cursors, because they move differently. `scan` is where the next
-    // `<a` is looked for and advances past every anchor it declines to touch;
-    // `copied` is how much of `html` is already in `buf` and only ever moves
-    // when something is actually removed. Advancing `scan` must not drag
-    // `copied` forward, or an allowed anchor skipped earlier would lose the
-    // bytes of its own open tag when a later refusal copies the gap.
+    // `scan` finds the next `<a` and may skip allowed anchors; `copied` tracks
+    // how much of `html` is in `buf` and advances only when something is
+    // removed. They must not move together, or an allowed anchor skipped earlier
+    // loses its open tag when a later refusal copies the gap.
     let mut scan = 0;
     let mut copied = 0;
     while let Some(rel) = lower[scan..].find("<a") {
         let open = scan + rel;
-        // `<abbr`, `<area` and `<article` all start `<a`; require the tag to end
-        // there so they are not mistaken for an anchor. A `</a` is not a start
-        // tag either.
+        // Require a tag boundary after `<a`, or `<abbr`/`<area`/`</a` match too.
         let after = lower.as_bytes().get(open + 2).copied();
         let is_anchor = matches!(after, Some(b' ') | Some(b'>') | Some(b'\t') | Some(b'\n'));
         if !is_anchor {
@@ -274,9 +184,7 @@ pub fn scrub_hrefs(html: &str, policy: &UrlPolicy, dropped: &mut Vec<String>) ->
         }
         let buf = out.get_or_insert_with(|| String::with_capacity(html.len()));
         buf.push_str(&html[copied..open]);
-        // Unwrap rather than delete: the open tag goes, the words between the
-        // tags stay, and the close tag goes. Dropping the whole element would
-        // lose text, which is the one outcome not allowed here.
+        // Unwrap: drop the tags, keep the words; deleting loses text.
         let inner_start = tag_end + 1;
         match find_close_a(&lower[inner_start..]) {
             // `start` is the offset of `</a`, `end` one past its `>`.
@@ -284,8 +192,7 @@ pub fn scrub_hrefs(html: &str, policy: &UrlPolicy, dropped: &mut Vec<String>) ->
                 buf.push_str(&html[inner_start..inner_start + start]);
                 copied = inner_start + end;
             }
-            // Unterminated: the open tag goes and the rest of the string is
-            // ordinary text, so it is emitted once here and the scan is over.
+            // Unterminated: emit the rest as ordinary text and end the scan.
             None => {
                 buf.push_str(&html[inner_start..]);
                 copied = html.len();
@@ -298,9 +205,7 @@ pub fn scrub_hrefs(html: &str, policy: &UrlPolicy, dropped: &mut Vec<String>) ->
     Some(buf)
 }
 
-/// The `href` value inside one open tag, as `(value, value_end)`, with the
-/// attribute name matched case-insensitively and `=` and the quote allowed
-/// whitespace around them -- the spellings a dictionary's raw HTML can produce.
+/// The `href` value inside one open tag, as `(value, value_end)`.
 fn find_href(tag: &str) -> Option<(&str, usize)> {
     let lower = tag.to_ascii_lowercase();
     let mut from = 0;
@@ -341,8 +246,7 @@ fn is_attr_char(c: u8) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b':' | b'.')
 }
 
-/// The `</a>` that closes an anchor, as `(offset, end)`, allowing whitespace
-/// and attributes-free spelling variants (`</a >`).
+/// The `</a>` that closes an anchor, as `(offset, end)`, allowing `</a >`.
 fn find_close_a(lower_tail: &str) -> Option<(usize, usize)> {
     let mut from = 0;
     while let Some(rel) = lower_tail[from..].find("</a") {
@@ -399,8 +303,7 @@ mod tests {
 
     #[test]
     fn tab_and_newline_cannot_hide_a_scheme() {
-        // What a browser resolves these to is `javascript:`, so this is what the
-        // check has to resolve them to.
+        // A browser resolves these to `javascript:`, so the check must too.
         assert_eq!(
             scheme_of("java\tscript:alert(1)").as_deref(),
             Some("javascript")
@@ -422,8 +325,7 @@ mod tests {
 
     #[test]
     fn an_entity_encoded_colon_is_not_a_scheme() {
-        // `&` is escaped before the link pass, so the attribute holds the six
-        // characters `&amp;#58;` and the browser's one decode pass leaves text.
+        // `&` is escaped before the link pass, so `&amp;#58;` stays literal text.
         assert_eq!(scheme_of("javascript&amp;#58;alert(1)"), None);
     }
 
@@ -445,9 +347,8 @@ mod tests {
             "ftp://h/f",
             "mailto:a@b",
             "news:comp.lang.perl",
-            // An unknown scheme is not an executing one, and refusing it would
-            // break legitimate links to internal applications -- see the
-            // module docs and upstream's `xyz://` CI fixture.
+            // An unknown scheme does not execute; refusing it would break
+            // legitimate internal links.
             "xyz://example.com",
             "#chunk-1",
             "relative.html",
@@ -478,11 +379,7 @@ mod tests {
 
     #[test]
     fn an_empty_list_means_the_default_tier() {
-        // `--allowed_url_schemes ''` must mean "no opinion", not "refuse
-        // everything" (which would break every document) and not "allow
-        // everything" (which would be a silently-open default). It has to mean
-        // the default, so that an unset option round-tripping through a front
-        // end's settings file lands somewhere safe.
+        // `''` means "no opinion" (the default), not "refuse all" or "allow all".
         let p = UrlPolicy::strict([""]);
         assert!(p.is_default());
         assert!(!p.allows("javascript:x"));

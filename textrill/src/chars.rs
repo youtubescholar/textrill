@@ -14,24 +14,10 @@ pub fn escape(text: &str) -> String {
     out
 }
 
-/// Escape a value that will be interpolated into a double-quoted attribute or
-/// into element text, for option values the caller supplies rather than document
-/// content.
-///
-/// [`escape`] covers `&`, `<` and `>`, which is what a *document* needs: the
-/// reference's own `escape()` is the model, and a paragraph's text has no
-/// attribute delimiters in it. An option value has a second problem — it can
-/// contain the `"` that closes the attribute it is being placed in. `--title
-/// '</title><script>alert(3)</script>'` and `--style_url 'x.css" onload="alert(4)'`
-/// both produced live XSS before this existed, escaping `& < >` but not `"`.
-///
-/// Perl emits the same unescaped bytes. This is Tier 2 by the plan's own tier
-/// table — error handling may differ, provided the port is the better one — and
-/// it is not verified against the reference, because the reference is the defect.
-/// It is a deviation from Perl's output for *every* title and stylesheet URL
-/// containing any of these four characters, and that includes the fuzzer's own
-/// `--title "A & B"`, so `fuzz.py` must not compare those two options (see
-/// `OPTION_DIVERGENT` there).
+/// Escape `&`, `<`, `>` and `"` for a caller-supplied option value interpolated
+/// into a double-quoted attribute or element text, where the `"` can close the
+/// attribute that [`escape`] does not guard. Deliberately diverges from Perl;
+/// declared and tested in `tests/corpus/README.md`.
 pub fn escape_attr(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -46,10 +32,9 @@ pub fn escape_attr(text: &str) -> String {
     out
 }
 
-/// Microsoft "smart character" bytes -> plain characters.
-/// Operates on the common Unicode code points produced when such files are
-/// read as UTF-8 (these are the UTF-8 encodings of CP1252 code points),
-/// mirroring `demoronize_char`.
+/// Microsoft smart-character code points -> plain characters, on the Unicode
+/// code points produced when such files are read as UTF-8. Mirrors
+/// `demoronize_char`.
 pub fn demoronize_char(s: &mut String) {
     let replacements: &[(char, &str)] = &[
         ('\u{201a}', ","),   // \x82
@@ -73,7 +58,7 @@ pub fn demoronize_char(s: &mut String) {
     }
 }
 
-/// Convert a few Microsoft "smart" bytes into HTML code, mirroring
+/// Convert a few Microsoft smart bytes into HTML code. Mirrors
 /// `demoronize_code`.
 pub fn demoronize_code(s: &str) -> String {
     s.replace('\u{0192}', "<em>f</em>") // \x83
@@ -183,11 +168,8 @@ pub fn char_to_entity(c: char) -> Option<&'static str> {
     })
 }
 
-/// Convert bytes interpreted as Latin-1 into a Rust String (UTF-8).
-///
-/// This is a lossless byte<->char round-trip so that arbitrary input bytes
-/// (plain ASCII, Latin-1, or raw UTF-8 bytes) map onto Unicode code points in
-/// exactly the way the Perl module treats input "characters".
+/// Convert bytes interpreted as Latin-1 into a Rust String (UTF-8). Lossless
+/// byte-to-char mapping, matching how the Perl module treats input characters.
 pub fn latin1_to_string(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len());
     for &b in bytes {
@@ -196,8 +178,8 @@ pub fn latin1_to_string(bytes: &[u8]) -> String {
     s
 }
 
-/// Replace non-ASCII Latin-1 characters with their HTML entities,
-/// leaving ASCII and everything else untouched.
+/// Replace non-ASCII Latin-1 characters with their HTML entities, leaving ASCII
+/// and everything else untouched.
 pub fn entities(para: &str) -> String {
     let mut out = String::with_capacity(para.len());
     for c in para.chars() {

@@ -7,8 +7,8 @@
 
 //! Running conversions off the GUI thread.
 //!
-//! This is the Rust form of the contract in `SURFACE.md` §3, which was written
-//! against the Python worker and is carried across in intent:
+//! The concurrency contract, carried across from the retired Python worker in
+//! intent:
 //!
 //! 1. **Generation counter.** Every request gets a number; the front end drops
 //!    any result older than the newest request.
@@ -99,7 +99,7 @@ impl ConversionWorker {
     /// As [`ConversionWorker::new`], but with a caller-supplied conversion.
     ///
     /// This is the seam the panic test uses: the engine no longer has a
-    /// documented input that panics (P22 closed the last one), and the thing
+    /// documented input that panics, and the thing
     /// under test is the handler, not the defect.
     pub fn with_converter(
         max_threads: usize,

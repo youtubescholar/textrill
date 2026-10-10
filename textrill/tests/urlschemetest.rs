@@ -1,4 +1,4 @@
-//! A11 — the URL scheme policy on generated `href` values.
+//! The URL scheme policy on generated `href` values.
 //!
 //! `<URL:javascript:…>` in ordinary prose became a live `javascript:` link in
 //! the Perl reference, so the engine now decides once, in one place, which
@@ -71,7 +71,7 @@ fn a_refused_anchor_keeps_the_words_the_reader_would_have_seen() {
         "Click <URL:javascript:alert(document.domain)> now",
         Options::default(),
     );
-    // The text is the document's, and losing it would be data loss (A5). What is
+    // The text is the document's, and losing it would be data loss. What is
     // removed is the element that would have executed it.
     assert!(
         out.contains("Click javascript:alert(document.domain) now"),

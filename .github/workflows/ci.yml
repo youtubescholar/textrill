@@ -1,28 +1,21 @@
-# P8. There was no CI anywhere, and this project's own history is why that is
-# not a gap but a hazard: the differential harness reported two false passes
-# (A1: a stale debug binary; P1: a fuzz target that piped to `tail -1` and so
-# could not fail). Both shipped. A gate that has never been observed failing is
-# not a gate, so this file is deliberately written to be the fourth place those
-# shapes could hide, and each one is called out below at the line that closes it.
-#
 # What runs, and why each step is here:
 #
 #   fmt / clippy  -D warnings / test --release. The lints and the unit tests.
-#   accept        - reference-free acceptance: the port against its own frozen
-#                   self-goldens (61 corpus cases) plus upstream's 33 good_*.html
-#                   goldens. This is the gate, and it needs no Perl.
-#   examples      - the 8 frozen real-document outputs, also reference-free.
+#   accept        - reference-free acceptance: the port against its own
+#                   self-goldens (63 corpus cases) plus the upstream
+#                   good_*.html goldens. This is the gate, and it needs no
+#                   Perl. The goldens are a record of approved behaviour:
+#                   recapture with `make accept-write`/`make examples-write`
+#                   and review the diff.
+#   examples      - the 8 real-document outputs, recorded the same way.
 #   musl          - the distribution claim: a single static binary, re-accepted
-#                   with the same frozen outputs so a musl build that silently
+#                   with the same outputs so a musl build that silently
 #                   produced different bytes would fail.
 #
-# The parity oracle is deliberately *not* here. Since Phase 8 S13, the Perl
-# differential and fuzzer run only on demand as `make diff` (materialised
-# offline from the tracked tarball by `make ref`); nothing but that target
-# depends on Perl, and a regression found there is a review, never a blocker.
-# The upstream t/*.t suite was part of the retired differential job, kept as
-# a canary for the oracle itself; with the oracle off the gate, the canary
-# leaves with it.
+# The parity oracle is deliberately *not* here. The Perl differential runs only
+# on demand as `make diff` (materialised offline from the tracked tarball by
+# `make ref`); nothing but that target depends on Perl, and a regression found
+# there is a review, never a blocker.
 
 name: CI
 
@@ -85,26 +78,25 @@ jobs:
           make proptest
           make alloctest
 
-      # The reference-free gate (Phase 8 S12/S13). A clean RUNDIR, not a
-      # leftover: the runner compares against whatever is in its output
-      # directory, so a stale file from a previous run is a comparison against
-      # the wrong thing. Pointing it at a fresh path under the job's workspace
-      # is stronger than relying on the runner to have cleaned it.
-      - name: Reference-free acceptance (frozen corpus + upstream goldens)
+      # The reference-free gate. A clean RUNDIR, not a leftover: the runner
+      # compares against whatever is in its output directory, so a stale file
+      # from a previous run is a comparison against the wrong thing. Pointing
+      # it at a fresh path under the job's workspace is stronger than relying
+      # on the runner to have cleaned it.
+      - name: Reference-free acceptance (corpus + upstream goldens)
         env:
           RUNDIR: ${{ runner.temp }}/textrill-accept
         run: make accept
 
-      - name: Frozen real-document outputs
+      - name: Real-document outputs
         run: make examples
 
   # The distribution binary. The CLI ships as one static musl executable so it
   # runs on Alpine and other distros without glibc. Building it is the only
-  # thing that keeps that claim true, and re-running the reference-free
-  # acceptance against the result is the part that matters: a build-only check
-  # would pass on a musl target whose output differed from the glibc one, which
-  # is exactly the class of silent divergence the rest of this file exists to
-  # catch. The target is self-contained, so no musl-gcc is needed.
+  # thing that keeps that claim true, and re-running the acceptance against
+  # the result is the part that matters: a build-only check would pass on a
+  # musl target whose output differed from the glibc one, which is exactly
+  # the class of silent divergence the rest of this file exists to catch. The target is self-contained, so no musl-gcc is needed.
   musl:
     name: musl (static CLI, acceptance)
     runs-on: ubuntu-latest

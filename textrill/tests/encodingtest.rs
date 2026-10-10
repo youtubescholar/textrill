@@ -1,8 +1,8 @@
-//! P7.1 — the encoding rules `read_any_file` and `demoronize` actually
+//! The encoding rules `read_any_file` and `demoronize` actually
 //! implement, pinned.
 //!
 //! The point of this file is the `0x80`-`0x9F` range. Everything the port did
-//! before P7.1 passed on it by accident: no fixture had a byte in that range,
+//! before this passed on it by accident: no fixture had a byte in that range,
 //! so the CP1252 decode was never exercised, and `demoronize` never fired on
 //! a file it was supposed to. A test that cannot fail is not a test, so these
 //! cases are built from raw bytes rather than from Rust string literals — a
@@ -28,7 +28,7 @@ fn fixture(tag: &str, bytes: &[u8]) -> std::path::PathBuf {
 
 #[test]
 fn cp1252_range_decodes_to_cp1252_not_latin1() {
-    // The four bytes in the plan's measurement: left/right double quote and
+    // The four bytes measured: left/right double quote and
     // en/em dash. Latin-1 would make these U+0093/U+0094/U+0096/U+0097, which
     // are C1 controls and which the demoronize table does not contain.
     let raw = b"He said \x93hello\x94 and \x96dash\x97.\n";
@@ -87,7 +87,7 @@ fn undefined_cp1252_slots_stay_as_latin1() {
 #[test]
 fn valid_utf8_is_reported_as_utf8() {
     // The 0xA0-0xFF agreement means a UTF-8 file and a CP1252 file can contain
-    // the same *rendered* text. The report has to distinguish them or P7.3's
+    // the same *rendered* text. The report has to distinguish them or the
     // status line is a coin flip.
     let path = fixture("utf8", "caf\u{e9} \u{201c}hi\u{201d}\n".as_bytes());
     let (text, resolved) = read_any_file_with_encoding(path.to_str().unwrap()).unwrap();
@@ -154,7 +154,7 @@ fn utf8_input_with_cp1252_range_bytes_is_untouched_by_the_fallback() {
 
 #[test]
 fn resolved_encoding_reports_cp1252_after_conversion() {
-    // P7.3's reporting, end to end: the caller can find out what happened.
+    // The reporting, end to end: the caller can find out what happened.
     let path = fixture("report", b"a \x93b\n");
     let mut conv = Converter::new(Options::default());
     conv.opts.infile = vec![path.to_str().unwrap().to_string()];
@@ -170,7 +170,7 @@ fn resolved_encoding_reports_cp1252_after_conversion() {
 
 #[test]
 fn wide_chars_survive_an_aligned_table() {
-    // P7.1's second case. byte_slice cuts cells by byte offset, so this only
+    // The second case. byte_slice cuts cells by byte offset, so this only
     // holds when every row is the same byte length -- which the fixture
     // guarantees by construction, the 3-byte character included. Before the
     // test existed, nothing in the corpus had a wide character in a table, so
@@ -197,7 +197,7 @@ fn wide_chars_survive_an_aligned_table() {
     );
 }
 
-// --- P7.3: the explicit --encoding option ---------------------------------
+// --- the explicit --encoding option ---------------------------------
 
 #[test]
 fn encoding_auto_is_the_default_and_probes() {
@@ -257,12 +257,12 @@ fn encoding_names_round_trip() {
     assert!(Encoding::parse("shift_jis").is_err());
 }
 
-// --- P7.4: the charset declaration ----------------------------------------
+// --- the charset declaration ----------------------------------------
 
 #[test]
 fn meta_charset_is_off_by_default_but_html5_declares_one() {
-    // The option stays off (PLAN Phase 3 keeps the reference-compatible
-    // modes reference-compatible), but the default *doctype* is now HTML5,
+    // The option stays off (the reference-compatible modes stay
+    // reference-compatible), but the default *doctype* is now HTML5,
     // and HTML5 always declares its encoding -- so default output carries
     // exactly one charset meta, and the legacy modes carry none at all.
     let mut conv = Converter::new(Options::default());
@@ -293,7 +293,7 @@ fn meta_charset_emits_one_per_line_when_on() {
     // Each meta needs its own line. The generator string is spelled from the
     // crate version rather than written out: this test is about the newline
     // between the two metas, not about which generator is named, and a literal
-    // here went stale the moment P1.1 renamed it -- which is how the test
+    // here went stale the moment the generator line was renamed -- which is how the test
     // started failing for a reason that had nothing to do with encodings. The
     // value itself is asserted in tests/provenance.rs.
     let gen = format!(
@@ -317,7 +317,7 @@ fn meta_charset_follows_lower_case_tags() {
 }
 
 // ---------------------------------------------------------------------------
-// P7.4 -- detection order: BOM, then NUL structure, then UTF-8, then CP1252.
+// Detection order: BOM, then NUL structure, then UTF-8, then CP1252.
 //
 // The tests above cover the single-byte fallback, which was the easy half of
 // the problem. These cover the half that was actually broken: a UTF-16 file
@@ -366,7 +366,7 @@ const PROSE: &str = "Hello world.\nThis is plain ASCII prose.\n";
 
 #[test]
 fn bomless_utf16_ascii_is_not_mistaken_for_utf8() {
-    // The regression that motivated P7.4. Both files are valid UTF-8; the only
+    // The regression this guards against. Both files are valid UTF-8; the only
     // thing separating them from a real UTF-8 document is where the NULs sit.
     for (enc, name) in [("utf-16le", "utf-16le"), ("utf-16be", "utf-16be")] {
         let bytes = wide(PROSE, enc, false);
@@ -388,7 +388,7 @@ fn bomless_utf16_ascii_is_not_mistaken_for_utf8() {
 
 #[test]
 fn a_bom_is_honoured_rather_than_decoded_as_cp1252() {
-    // `FF FE` is a guarantee, not a decode error. Before P7.4 it failed the
+    // `FF FE` is a guarantee, not a decode error. Previously it failed the
     // UTF-8 probe and fell through to CP1252, where those bytes have no meaning
     // at all, so the text came out as `&yuml;&thorn;Hello`.
     for enc in ["utf-16le", "utf-16be", "utf-32le", "utf-32be"] {
@@ -452,7 +452,7 @@ fn bomless_utf16_of_non_latin_text_is_detectable_only_when_named() {
     // The documented limit, pinned so it cannot be forgotten. Cyrillic in
     // UTF-16LE is `04 xx` per unit: no NULs, so the structural evidence simply
     // is not there. `--encoding utf-16le` recovers it, which is exactly why the
-    // option exists and why P7.4 did not try to guess harder.
+    // option exists and why the heuristic is not pushed harder.
     // What decides detection is not the script but the *density* of
     // ASCII-range units, since spaces and punctuation are what supply the
     // NULs. Measured, rather than assumed:
@@ -460,8 +460,8 @@ fn bomless_utf16_of_non_latin_text_is_detectable_only_when_named() {
     //   "Привет, мир!"  4 NULs in 24 bytes  -> sniff fires, decodes correctly
     //   "Привет"        0 NULs in 12 bytes  -> nothing to detect, reads as UTF-8
     //
-    // The second is the honest limit, and it is why `--encoding` exists. P7.4
-    // deliberately does not guess harder here: a text file that is pure
+    // The second is the honest limit, and it is why `--encoding` exists. The
+    // heuristic deliberately does not guess harder here: a text file that is pure
     // Cyrillic in BOM-less UTF-16 is indistinguishable from UTF-8 bytes by any
     // rule short of a statistical model, and a confident wrong answer is worse
     // than one the user can fix with a flag.
@@ -617,7 +617,7 @@ fn naming_the_encoding_recovers_what_detection_cannot() {
         ),
     ];
     for (name, bytes, want) in cases {
-        // Auto guesses CP1252 and is wrong for all three -- the pre-P7.4
+        // Auto guesses CP1252 and is wrong for all three -- the previous
         // behaviour, kept visible rather than deleted.
         let (auto, auto_resolved) = textrill::convert::decode_bytes_with(bytes, Encoding::Auto);
         assert_eq!(
@@ -636,7 +636,7 @@ fn naming_the_encoding_recovers_what_detection_cannot() {
 
 #[test]
 fn an_explicitly_named_utf8_file_is_not_reinterpreted_as_cp1252() {
-    // The mirror image of P7.1's CP1252 case: a file that *is* valid UTF-8 but
+    // The mirror image of the CP1252 case: a file that *is* valid UTF-8 but
     // was meant to be read as something else. Auto calls it UTF-8 (correct
     // here), and naming cp1252 gets the Latin-1 reading the user asked for.
     const TEXT: &str = "Привет, мир!\n";
@@ -809,7 +809,7 @@ fn undefined_slots_are_exactly_the_documented_ones() {
 
 #[test]
 fn latin1_is_no_longer_an_alias_for_cp1252() {
-    // Before P7.4 `--encoding latin-1` meant CP1252. That was not a harmless
+    // Previously `--encoding latin-1` meant CP1252. That was not a harmless
     // spelling: a Latin-1 file's 0x93 is a C1 control, not a left double quote,
     // and the user asking for Latin-1 was asking for the C1 control.
     let bytes = [0x93u8, b'a', 0x94, b' ', 0x97];
@@ -867,10 +867,9 @@ fn a_named_wide_encoding_still_strips_a_bom() {
 
 // --- The save path -----------------------------------------------------------
 //
-// Phase 6 step 2. These are `FileTests` from `textrill-gui/tests/test_gui.py`,
-// moved here because the rule under test is now the engine's: the encode side
-// lives in `convert::encode`, and `files.py` is scheduled for deletion. A test
-// that guards a Python helper is work waiting to be thrown away.
+// These are the GUI's `FileTests`, moved here because the rule under test is
+// now the engine's: the encode side lives in `convert::encode`. A test that
+// guards a Python helper is work waiting to be thrown away.
 
 use textrill::convert::decode_bytes_with;
 use textrill::encode::{encode, write_with, EncodeError, WriteError};
@@ -1043,7 +1042,7 @@ fn a_lone_surrogate_is_a_replacement_not_half_a_character() {
 }
 
 // ---------------------------------------------------------------------------
-// The corpus fixtures, decoded end to end (Phase 8 S12 truth set).
+// The corpus fixtures, decoded end to end.
 //
 // The corpus cases `cp1251_named`, `koi8r_named`, `cp1253_named` and the three
 // UTF-16 cases are reference-free self-goldens: accept.sh freezes the port's

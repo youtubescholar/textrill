@@ -29,7 +29,8 @@ has made, not a requirement imposed by any dependency:
   — and links no Qt and no Python. It carries GPLv3 so that the port and its
   front end are covered by a single, consistent licence, which is easier for
   a user to reason about and easier for a distributor to ship. (The retired
-  Python/PySide6 front end is archived under `legacy-archive/`.)
+  Python/PySide6 front end is not shipped; the design notes are in the
+  repository's history.)
 
 If you are redistributing this and would rather work under the LGPL, the
 Artistic/GPL dual grant from upstream permits that, and no dependency imposes

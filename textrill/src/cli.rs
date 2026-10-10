@@ -1,9 +1,7 @@
 //! Command line option handling, shared by the `textrill` binary and the
 //! Python bindings.
 //!
-//! The table of options, the abbreviation rules and the `--no` prefix for
-//! booleans follow `Getopt::Long` as used by the reference script
-//! `scripts/txt2html`.
+//! Option table with abbreviation rules and `--no` prefix for booleans.
 
 use crate::options::{Encoding, Options, TableTypeFlags};
 
@@ -37,7 +35,7 @@ macro_rules! specs {
 }
 
 pub const SPECS: &[Spec] = specs![
-    Str "Allow only these URL schemes in href values; a stricter policy than the default, which refuses script-bearing schemes (A11)." ["allowed_url_schemes", "url_schemes"],
+    Str "Allow only these URL schemes in href values; a stricter policy than the default, which refuses script-bearing schemes." ["allowed_url_schemes", "url_schemes"],
     Str "File whose contents are appended to the output." ["append_file", "append_body", "ab"],
     Str "File whose contents are inserted inside <head>." ["append_head", "ah"],
     Str "Text inserted between <body> and the first paragraph." ["body_deco"],
@@ -45,27 +43,27 @@ pub const SPECS: &[Spec] = specs![
     Str "Characters that start an unordered list item." ["bullets"],
     Str "Characters that start an ordered list item." ["bullets_ordered"],
     Str "HTML tag wrapped around runs of capitals." ["caps_tag", "capstag", "ct"],
-    Flag "Write one HTML file per top-level section (P5.2)." ["chunk"],
+    Flag "Write one HTML file per top-level section." ["chunk"],
     Flag "Collect {{textrill:cite:key}} references into a numbered endnotes list." ["citations", "notes"],
     StrArray "Regexp matching lines that become headings." ["custom_heading_regexp", "heading", "H"],
     Str "Link dictionary loaded at start-up." ["default_link_dict", "dict"],
     Flag "Convert Microsoft character codes into sensible HTML." ["demoronize"],
     Str "Document type declaration, without the surrounding quotes." ["doctype", "dt"],
-    Str "Use a whole-document template file (P5.5)." ["document_template"],
+    Str "Use a whole-document template file." ["document_template"],
     Flag "Assume the input is plain 7-bit ASCII." ["eight_bit_clean", "8"],
     Flag "Escape &, < and > in text." ["escape_HTML_chars", "escapechars", "ec"],
     Flag "Number custom headings by the order of their regexps." ["explicit_headings", "EH"],
     Flag "Output only the body, without the surrounding document." ["extract"],
     Int "Minimum length of a horizontal rule." ["hrule_min", "r"],
-    Flag "Emit HTML5: <!DOCTYPE html> and a charset meta (P5.1)." ["html5"],
+    Flag "Emit HTML5: <!DOCTYPE html> and a charset meta." ["html5"],
     Flag "Collect {{textrill:gloss:term}} references into a definition list." ["glossary"],
     Int "Spaces per indentation level." ["indent_width", "iw"],
     Flag "Indent a paragraph when a tag breaks it." ["indent_par_break", "ipb"],
     StrArray "Input file; repeat for several files." ["infile"],
     StrArray "Input string; repeat for several strings." ["instring"],
     Str "Delimiter that turns text into italic text." ["italic_delimiter"],
-    Str "How to decode input: auto, utf-8 or cp1252 (P7.3)." ["encoding", "enc"],
-    Flag "Emit <meta charset=\"utf-8\"> in the document head (P7.4)." ["meta_charset"],
+    Str "How to decode input: auto, utf-8 or cp1252." ["encoding", "enc"],
+    Flag "Emit <meta charset=\"utf-8\"> in the document head." ["meta_charset"],
     StrArray "Link dictionary to use; repeat for several." ["links_dictionaries", "link", "l"],
     Flag "Only convert URLs, leave the rest of the text alone." ["link_only", "linkonly", "LO"],
     Flag "Emit lower-case HTML tags." ["lower_case_tags", "lc_tags", "LC"],
@@ -74,7 +72,7 @@ pub const SPECS: &[Spec] = specs![
     Flag "Turn URLs and dictionary words into links." ["make_links"],
     Flag "Recognise ALIGN, PGSQL, BORDER and DELIM tables." ["make_tables", "tables"],
     Int "Minimum number of capitals that count as a run." ["min_caps_length", "caps", "c"],
-    Flag "Prefix headings with hierarchical numbers (P5.3)." ["number_headings"],
+    Flag "Prefix headings with hierarchical numbers." ["number_headings"],
     Str "Write the result here; \"-\" means standard output." ["outfile", "out", "o"],
     Int "Spaces to indent the first line of a paragraph." ["par_indent"],
     Int "Consecutive indented lines that start preformatted text." ["preformat_trigger_lines", "prebegin", "pb"],
@@ -84,18 +82,18 @@ pub const SPECS: &[Spec] = specs![
     Int "Whitespace needed in a line to preformat it." ["preformat_whitespace_min", "prewhite", "p"],
     Str "File whose contents are prepended to the output." ["prepend_file", "prepend_body", "pp"],
     Flag "Keep the original indentation of list items." ["preserve_indent", "pi"],
-    Flag "Print what the conversion recovered (bytes, headings, paragraphs, capitals, breaks) on standard error (P5.0)." ["report"],
-    Flag "Wrap each heading section in <article> (P5.2)." ["section"],
+    Flag "Print what the conversion recovered (bytes, headings, paragraphs, capitals, breaks) on standard error." ["report"],
+    Flag "Wrap each heading section in <article>." ["section"],
     Int "Lines shorter than this are broken with <br/>." ["short_line_length", "shortline", "s"],
-    Flag "Read and write a paragraph at a time (P5.4)." ["stream"],
+    Flag "Read and write a paragraph at a time." ["stream"],
     Str "URL of a stylesheet linked into the output." ["style_url"],
     Int "Width of a tab character." ["tab_width", "tabwidth", "tw"],
     TableType "Enable one table type, e.g. ALIGN=0." ["table_type"],
-    Str "Wrap the body in a template file (P5.5); the whole-document counterpart is --document_template. The old name --template still works but is deprecated." ["body_template", "template"],
-    Str "Use a shipped template by name: article, book, manpage, slide, bare (S4)." ["template_library"],
+    Str "Wrap the body in a template file; the whole-document counterpart is --document_template. The old name --template still works but is deprecated." ["body_template", "template"],
+    Str "Use a shipped template by name: article, book, manpage, slide, bare." ["template_library"],
     Str "Document title." ["title", "t"],
     Flag "Use the first line of the text as the title." ["titlefirst", "tf"],
-    Flag "Prepend a generated table of contents (P5.2)." ["toc"],
+    Flag "Prepend a generated table of contents." ["toc"],
     Str "Delimiter that turns text into underlined text." ["underline_delimiter"],
     Int "Allowed length difference when underlining." ["underline_length_tolerance", "ulength", "ul"],
     Int "Allowed offset difference when underlining." ["underline_offset_tolerance", "uoffset", "uo"],
@@ -103,14 +101,13 @@ pub const SPECS: &[Spec] = specs![
     Flag "Accepted for compatibility; the input is decoded as UTF-8 when possible." ["utf8"],
     Flag "Recognise Mosaic-style headers." ["use_mosaic_header", "mosaic", "mh"],
 Flag "Honour the preformat start and end markers." ["use_preformat_marker", "preformat_marker", "pm"],
-    StrArray "Template parameter `name=value`, substituted for {{textrill:var:name}} in the active template (P5.5); repeat for several." ["var"],
+    StrArray "Template parameter `name=value`, substituted for {{textrill:var:name}} in the active template; repeat for several." ["var"],
     Flag "Produce XHTML: lower-case tags, closed empty tags, XHTML doctype." ["xhtml"],
 ];
 
 /// Canonical long name for an abbreviation (Getopt::Long prefix matching).
 pub fn lookup(abbrev: &str) -> Option<&'static Spec> {
-    // An exact name match wins over prefix matches (Getopt::Long), so
-    // --bullets resolves even though --bullets_ordered also starts with it.
+    // Exact match wins over prefix match.
     for spec in SPECS {
         for name in spec.names.iter() {
             if *name == abbrev {
@@ -120,8 +117,7 @@ pub fn lookup(abbrev: &str) -> Option<&'static Spec> {
     }
     let mut found: Option<&'static Spec> = None;
     for spec in SPECS {
-        // short options like "8" and "H"/"l" need the whole name matched,
-        // but Getopt::Long still allows partial matches of long names.
+        // Short single-char options must match exactly; long names allow partial matches.
         for name in spec.names.iter() {
             if name.len() == 1 {
                 if *name == abbrev {
@@ -131,7 +127,7 @@ pub fn lookup(abbrev: &str) -> Option<&'static Spec> {
             }
             if name.starts_with(abbrev) {
                 if found.is_some() {
-                    // ambiguous; keep looking for a tie-breaker
+                    // ambiguous; look for tie-breaker
                     return None;
                 }
                 found = Some(spec);
@@ -143,10 +139,8 @@ pub fn lookup(abbrev: &str) -> Option<&'static Spec> {
 
 /// Set one option from a textual value, as the command line would.
 ///
-/// The name may be a full name or any unambiguous abbreviation, aliases
-/// included. Booleans accept `0`/`1`, `no`/`yes`, `false`/`true`, `off`/`on`;
-/// array options append. This is the entry point the Python bindings use, so
-/// the binary and the GUI cannot drift apart.
+/// The name may be a full name or any unambiguous abbreviation. Booleans
+/// accept `0`/`1`, `no`/`yes`, `false`/`true`, `off`/`on`; array options append.
 pub fn set_value(opts: &mut Options, name: &str, value: &str) -> Result<(), String> {
     let spec = lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?;
     match spec.kind {
@@ -177,12 +171,7 @@ pub fn set_value(opts: &mut Options, name: &str, value: &str) -> Result<(), Stri
 pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
     let spec = lookup(name).ok_or_else(|| format!("Unknown option `{name}`"))?;
     let v = match spec.names[0] {
-        // A11. Comma separated, matching what `set_str` splits on. `Options`
-        // carries the standard list rather than "unset", so this round trips to
-        // the same policy and not to an empty one.
-        // `None` and `[]` both round-trip as "", and `set_value("")` resolves
-        // to the default tier, so a front end can persist the unset state
-        // without having to know what "unset" means.
+        // Comma-separated list; round-trips to preserve unset/default semantics.
         "allowed_url_schemes" => opts.allowed_url_schemes.as_deref().unwrap_or(&[]).join(","),
         "append_file" => opts.append_file.clone(),
         "append_head" => opts.append_head.clone(),
@@ -284,8 +273,7 @@ impl std::fmt::Display for Source {
     }
 }
 
-/// Parse one argument list, reporting errors as `file:line: message` when the
-/// argument came from an option file.
+/// Parse argument list; errors report file/line when from option file.
 pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Result<(), String> {
     let mut it = args.iter().peekable();
     let mut table_type_seen = false;
@@ -317,9 +305,7 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
             return Err(at(format!("Unknown option `{name}`")));
         }
 
-        // 2.3: `--template` predates the clearer `--body_template`, and the two
-        // template names were a trap. The legacy spelling keeps working (an rc
-        // file may use it), but it says so, and points at the pair.
+        // --template is deprecated; prefer --body_template or --document_template.
         if spec.names[0] == "body_template" && !name.is_empty() && "template".starts_with(name) {
             eprintln!(
                 "textrill: warning: `--{name}` is deprecated; use --body_template \
@@ -364,9 +350,7 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
                     Some(v) => v,
                     None => take_value(&mut it, name).map_err(at)?,
                 };
-                // See reset_table_type: the command line names the whole set of
-                // table types, so the defaults are dropped on the first
-                // occurrence and later ones accumulate.
+                // First --table_type resets defaults; subsequent ones accumulate.
                 if !table_type_seen {
                     reset_table_type(opts);
                     table_type_seen = true;
@@ -378,11 +362,7 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
     Ok(())
 }
 
-/// Look up an option name, handling the `no` negation prefix for booleans.
-///
-/// Split out of `parse_args` because the option-file path needs the same rules
-/// and they must not drift: an rc file that accepted `--noextract` while the
-/// command line did not would be a confusing asymmetry.
+/// Look up an option name, handling `no` prefix for boolean flags.
 fn resolve(name: &str) -> Result<(&'static Spec, bool), String> {
     let stripped = name
         .strip_prefix("no-")
@@ -403,22 +383,13 @@ fn resolve(name: &str) -> Result<(&'static Spec, bool), String> {
     }
 }
 
-/// Parse a command-line argument list.
-///
-/// Thin wrapper over [`parse_args_from`] so callers on the command line do not
-/// have to name a source.
+/// Parse command-line argument list.
 pub fn parse_args(args: &[String], opts: &mut Options) -> Result<(), String> {
     parse_args_from(args, opts, "")
 }
 
-/// P11: expand `@file` and the rc files, then parse everything in order.
-///
-/// The reference reads option files before its command line
-/// (`Getopt::ArgvFile::argvFile` prepends its expansion to `@ARGV`), so a
-/// command-line value always wins. Precedence is therefore
-/// `@file` < `~/.textrillrc` < `./.textrillrc` < command line (the legacy
-/// `.txt2htmlrc` names being read in place of the new ones), and `@file` is
-/// expanded where it appears so a later command-line option overrides it.
+/// Expand `@file` and rc files, then parse in order.
+/// Precedence: `@file` < `~/.textrillrc` < `./.textrillrc` < command line.
 pub fn parse_args_with_rc(
     args: &[String],
     opts: &mut Options,
@@ -434,8 +405,7 @@ pub fn parse_args_with_rc(
                 let label = p.display().to_string();
                 read_option_file(&p, &label, opts, false)?;
             }
-            // A bare `@` is not a group. Left for the input-file path, which
-            // reports it as an unopenable file -- the same as upstream.
+            // Bare `@` is not a group; treated as input file.
             _ => command_line.push(a.clone()),
         }
     }
@@ -447,21 +417,14 @@ pub fn parse_args_with_rc(
     parse_args(&command_line, opts)
 }
 
-/// Read one option file and apply it, one line at a time.
-///
-/// Lines rather than a flat token stream, because an option file is line
-/// oriented: `--bold_delimiter #` is one option with one value, and flattening
-/// it into tokens would make that indistinguishable from a bare
-/// `--bold_delimiter` missing its argument.
+/// Read and apply an option file (line-oriented).
 fn read_option_file(
     path: &std::path::Path,
     label: &str,
     opts: &mut Options,
     optional_missing: bool,
 ) -> Result<(), String> {
-    // The two rc files are optional, so a missing one is fine. An `@file` group
-    // is not: the user named it explicitly, so a typo must be an error rather
-    // than a silently ignored group.
+    // rc files are optional; explicit `@file` groups are not.
     let optional = optional_missing;
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
@@ -479,8 +442,7 @@ fn read_option_file(
             continue;
         }
         if line == "--" {
-            // Everything after this is an input filename. Option processing
-            // ends, which is the only way to name a file beginning with a dash.
+            // Everything after -- is input filenames; option processing ends.
             for rest in text.lines().skip(idx + 1) {
                 let t = rest.trim();
                 if !t.is_empty() {
@@ -493,10 +455,7 @@ fn read_option_file(
         if tokens.is_empty() {
             continue;
         }
-        // `--table_type` names the whole set of table types, so the first
-        // occurrence in a file drops the defaults just as the first occurrence
-        // on the command line does. Per file, not per invocation, so a file's
-        // own repeat accumulates.
+        // First --table_type in a file resets defaults; repeats accumulate.
         if !table_type_seen
             && tokens
                 .first()
@@ -535,28 +494,13 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         "escape_HTML_chars" => opts.escape_html_chars = value,
         "explicit_headings" => opts.explicit_headings = value,
         "extract" => opts.extract = value,
-        // P5.0.
         "report" => opts.report = value,
-        // P5.2.
         "section" => opts.section = value,
         "toc" => opts.toc = value,
         "chunk" => opts.chunk = value,
-        // Note and glossary collection.
         "citations" => opts.citations = value,
         "glossary" => opts.glossary = value,
-        // P5.1. The mode flags carry their tag case with them, because the
-        // default is now lower-case HTML5 and `--no-html5` has to mean the
-        // reference's HTML4 *with* the reference's upper-case tags. An
-        // explicit `--lower_case_tags` given after the flag still wins; the
-        // order that cannot express itself is `--lower_case_tags --no-html5`
-        // (and `--lower_case_tags --no-xhtml`), where entering the mode resets
-        // it -- the reference is itself order-dependent on this axis, since
-        // `--xhtml` forces lower_case_tags on in deal_with_options whatever
-        // came before it. Unlike the reference, an explicit
-        // `--no-lower_case_tags` is honoured in the default HTML5 mode: the
-        // port does not force lower case on for its own doctype the way the
-        // reference does for XHTML, because an option that does nothing is
-        // worse than a mode pair that differs by a default.
+        // html5/xhtml set tag case semantics (invariant/order constraints)
         "html5" => {
             opts.html5 = value;
             if value {
@@ -568,12 +512,10 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         "link_only" => opts.link_only = value,
         "lower_case_tags" => opts.lower_case_tags = value,
         "mailmode" => opts.mailmode = value,
-        // P7.4.
         "meta_charset" => opts.meta_charset = value,
         "make_anchors" => opts.make_anchors = value,
         "make_links" => opts.make_links = value,
         "make_tables" => opts.make_tables = value,
-        // P5.3.
         "number_headings" => opts.number_headings = value,
         "preserve_indent" => opts.preserve_indent = value,
         "stream" => opts.stream = value,
@@ -582,12 +524,7 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         "utf8" => {}
         "use_mosaic_header" => opts.use_mosaic_header = value,
         "use_preformat_marker" => opts.use_preformat_marker = value,
-        // The XHTML half of the same rule: `--xhtml` is lower case (the
-        // reference forces lower_case_tags on for it), `--no-xhtml` is the
-        // reference's HTML4 default, which is upper case -- so the flag sets
-        // both the doctype and the tag case, and clearing html5 unconditionally
-        // keeps the two doctypes exclusive (`--no-xhtml` after `--html5` has
-        // to mean HTML4, not "HTML5 but XHTML-shaped").
+        // xhtml/html5 are mutually exclusive with tag-case coupling (contractual invariant)
         "xhtml" => {
             opts.xhtml = value;
             opts.html5 = false;
@@ -602,12 +539,7 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
 
 pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
     match spec.names[0] {
-        // A11. **Replaces** rather than accumulates, unlike the repeatable
-        // options (`--infile`, `--links_dictionaries`). A comma-separated list
-        // is one value, and a front end must be able to write the whole thing
-        // back; accumulating would double the list on every round trip through
-        // `get_value`. Layering still overrides in the usual way, since the
-        // command line is applied after the rc files.
+        // Replaces (not accumulates); comma-separated single value.
         "allowed_url_schemes" => {
             opts.allowed_url_schemes = Some(v.split(',').map(|s| s.trim().to_string()).collect());
         }
@@ -622,9 +554,7 @@ pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
         "doctype" => opts.doctype = v.to_string(),
         "document_template" => opts.document_template = v.to_string(),
         "italic_delimiter" => opts.italic_delimiter = v.to_string(),
-        // P7.3. The only string option whose value is not stored verbatim: an
-        // unrecognised encoding is a user error worth reporting, not a string
-        // to be discovered three files later.
+        // Unrecognized encoding is a user error.
         "encoding" => opts.encoding = Encoding::parse(v).map_err(|e| e.to_string())?,
         "outfile" => opts.outfile = v.to_string(),
         "preformat_start_marker" => opts.preformat_start_marker = v.to_string(),
@@ -678,12 +608,7 @@ pub fn push_array(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String
         "infile" => opts.infile.push(v.to_string()),
         "instring" => opts.instring.push(v.to_string()),
         "links_dictionaries" => opts.links_dictionaries.push(v.to_string()),
-        // P5.5. Eagerly parsed, like `--encoding`: a malformed `name=value` is a
-        // user error worth reporting on the spot, not a string to be discovered
-        // when a template is loaded. The value is taken verbatim, `=` and
-        // newlines included (a value may carry a block of markup), so
-        // `--var k=a=b` binds k to `a=b`. Like [`--infile`], one entry per
-        // occurrence; `get_value`/`set_value` round-trip the joined form.
+        // Parse name=value eagerly; values may include `=` and newlines. One per occurrence.
         "var" => {
             if v.is_empty() {
                 return Ok(());
@@ -711,10 +636,7 @@ pub fn push_array(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String
     Ok(())
 }
 
-/// Set one or more table types from their `TYPE=0/1` spelling.
-///
-/// The command line repeats the option for each type; a whitespace separated
-/// list is accepted as well, which is what [`get_value`] hands back.
+/// Set one or more table types from `TYPE=0/1`; whitespace-separated values allowed.
 pub fn set_table_type(opts: &mut Options, v: &str) -> Result<(), String> {
     for word in v.split_whitespace() {
         set_one_table_type(opts, word)?;
@@ -722,28 +644,8 @@ pub fn set_table_type(opts: &mut Options, v: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Turn every table type off, ready for a command line `--table_type` to fill
-/// in just the keys it names.
-///
-/// This is what makes `--table_type DELIM=0` disable *every* table type rather
-/// than just DELIM.  The reference declares the option as `table_type=n%`
-/// (scripts/txt2html:895), and Getopt::Long's `n%` builds a brand new hashref
-/// from the options actually present.  `init_our_data` seeds the four flags to
-/// 1, but that seed is thrown away the moment the option is named, so
-/// `--table_type DELIM=0` leaves only `{DELIM => 0}` and ALIGN, PGSQL and
-/// BORDER are simply not there.  Measured on a `+----+----+` table:
-///
-/// ```text
-/// txt2html --make_tables --table_type DELIM=0
-/// reference  <p>+----+----+<br/>| ab | cd |<br/>...</p>
-/// port       <table border="1" summary="">...</table>   (before this fix)
-/// ```
-///
-/// The reference's own --table_type documentation (scripts/txt2html:431) says
-/// to repeat the option once per key, e.g. `--table_type ALIGN=1
-/// --table_type BORDER=0`, and repeated occurrences accumulate into the one
-/// hash.  So the flags are reset once, on the first --table_type, and each
-/// later occurrence adds to that same set.
+/// Reset all table type flags; used when first --table_type appears. Invariant:
+/// naming the option resets prior defaults; later occurrences accumulate.
 fn reset_table_type(opts: &mut Options) {
     opts.table_type = TableTypeFlags {
         align: false,
@@ -808,8 +710,7 @@ pub fn usage() -> String {
         s.push_str(&format!("        {}\n", spec.help));
     }
     s.push_str("\nOptions can be abbreviated.  Boolean options take a `no` prefix to disable.\n");
-    // P11. Documented here rather than only in the README because this is the
-    // only place a user learns the precedence order without opening a second file.
+    // Precedence documented here for visibility.
     s.push_str(
         "\nOptions may also be read from @file groups, and from ~/.textrillrc or\n\
          ./.textrillrc -- one option per line, `#` comments, and a `--` line to end\n\
@@ -818,10 +719,7 @@ pub fn usage() -> String {
          \n\
          \x20   @file < ~/.textrillrc < ./.textrillrc < command line\n",
     );
-    // P7.4. --help spells the detection order out, because --encoding is the
-    // one option whose behaviour cannot be guessed from its name, and the
-    // difference between "detected" and "guessed" decides whether a user
-    // bothers to read this at all.
+    // Encoding detection order: byte-order mark, UTF-16 pattern, UTF-8 validity, then CP1252 guess.
     s.push_str(
         "\n--encoding values:\n\
          \n  auto        probe in order: byte-order mark, then the NUL pattern\n\

@@ -33,7 +33,7 @@ fn default_delimiters() {
     assert_eq!(o.italic_delimiter, "*");
     assert_eq!(o.bullets, "-=o*\u{b7}");
     assert_eq!(o.bullets_ordered, "");
-    // PLAN Phase 3: the default doctype is HTML5 and its tag case is lower;
+    // The default doctype is HTML5 and its tag case is lower;
     // the reference-compatible pair (--no-html5 / --no-xhtml) is requested
     // explicitly and is pinned case by case by the corpus, not by defaults.
     assert!(!o.xhtml);
@@ -156,7 +156,7 @@ fn table_type_accepts_several_pairs() {
     assert!(cli::set_table_type(&mut o, "BORDER").is_err());
 }
 
-// --- P11: option files -------------------------------------------------------
+// --- option files -------------------------------------------------------
 
 mod p11_rcexamples {
     use super::*;
@@ -332,7 +332,7 @@ mod p11_rcexamples {
         assert!(!o.extract, "--no_extract in an rc file");
     }
 
-    // --- P1.2/P1.3: textrill's own names, with the legacy ones kept working --
+    // --- textrill's own names, with the legacy ones kept working -----------
 
     #[test]
     fn the_textrillrc_name_is_read() {
@@ -345,7 +345,7 @@ mod p11_rcexamples {
 
     #[test]
     fn the_legacy_rc_name_still_works() {
-        // Compatibility is the point of P1.2: a `.txt2htmlrc` written for the
+        // Compatibility is the point: a `.txt2htmlrc` written for the
         // Perl tool keeps being read, and nothing about it has to change.
         let d = tmpdir("legacy-rc");
         write(&d, ".txt2htmlrc", "--extract\n");

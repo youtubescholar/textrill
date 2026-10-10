@@ -4,7 +4,7 @@ set -u
 # Directory holding this script, so regression fixtures in tests/corpus/inputs
 # can be referenced by absolute path from cases.sh.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# P22. Every path below used to be the absolute path of the machine that
+# Every path below used to be the absolute path of the machine that
 # happened to develop this port, so a fresh clone had no working differential
 # gate at all: `git archive HEAD` contains no ref/ tree, because ref/ is
 # gitignored, and the defaults pointed into a home directory that does not exist
@@ -29,7 +29,7 @@ GOLDEN_AUTHOR="${GOLDEN_AUTHOR:-$HERE/tfiles}"
 # hardcoded, so it works on a machine that keeps its temporary files elsewhere.
 RUNDIR="${RUNDIR:-${TMPDIR:-/tmp}/textrill-corpus}"
 
-# P1.1. Counts generator meta lines canonicalised by normalize.py, so the one
+# Counts generator meta lines canonicalised by normalize.py, so the one
 # declared divergence is visible in the run's output instead of being an
 # invisible edit to both sides of every comparison. See normalize.py for why
 # this is one line and why the expected value is asserted elsewhere.
@@ -133,7 +133,7 @@ PYEOF
 # comparison legitimately reports PASS. Printing both lines said "PASS" on a case
 # that had just said it could not run. empty1 hit exactly this -- it was reading
 # a tfiles/empty1.txt that does not exist, and comparing two empty files.
-# A9 is what made the port non-zero there, which is what finally surfaced it.
+# The non-zero exit on unreadable input is what finally surfaced it.
 report_result() {
   if [ -n "$CASE_ERR" ]; then
     # run_case already printed the error, once.
@@ -189,9 +189,9 @@ run_case() {
       # than relying on the module default, and puts the pin first so a case
       # may still override it: a later pair in the same args() hash wins, and
       # CTOR[]/EXTRA[] (sample, empty1, empty3 need HTML4) come after. With the
-      # port default doctype changing out from under the corpus (PLAN Phase 3),
-      # a case whose doctype comes from a default rather than from its own
-      # entry would otherwise change meaning silently on one side only.
+      # port default doctype differing from the reference, a case whose
+      # doctype comes from a default rather than from its own entry would
+      # otherwise change meaning silently on one side only.
       my $c = HTML::TextToHTML->new('xhtml' => 1, @ctor);
       $c->args(links_dictionaries => \@dicts) if @dicts;
       $c->txt2html(%t);
@@ -214,7 +214,7 @@ run_case() {
     CASE_ERR+="port exited $mine_rc: $(head -c 200 "$RUNDIR/mine/$stem.err" | tr '\n' ' ')"
   fi
 
-  # P1.1. Each converter names itself in the generator meta, and since the port
+  # Each converter names itself in the generator meta, and since the port
   # stopped claiming the Perl module produced it, those two strings differ:
   #
   #     reference: <meta name="generator" content="HTML::TextToHTML v3.0"/>
@@ -265,7 +265,7 @@ golden_check() {
     echo "  GOLDEN not compared (the converter errored)"
     return
   fi
-  # P1.1. The upstream golden names itself as the generator, for the same
+  # The upstream golden names itself as the generator, for the same
   # reason the reference output does, so it needs the same canonicalisation as
   # $RUNDIR/mine/$stem.html -- which run_case already did. The golden itself is
   # a tracked copy and must not be rewritten: mutating it would make the tree
@@ -369,7 +369,7 @@ else
     golden_check "$stem"
     # A case declared `differential must fail:` has no golden and diverges from
     # the reference *on purpose* -- the reference is the defect, which is the
-    # whole of Tier 2. So a mismatch is the required outcome, not a failure, and
+    # whole point. So a mismatch is the required outcome, not a failure, and
     # counting it as one would make the fix impossible to land. What is still
     # checked, and what would be a real failure, is the two things that can go
     # wrong in the other direction: the port not running at all, and the port
@@ -400,21 +400,21 @@ else
   if [ "${#GOLDEN_FAILS[@]}" -gt 0 ]; then
     printf '  differing: %s\n' "${GOLDEN_FAILS[*]}"
   fi
-  # P1.1. Printed on every run, not only when it is non-zero. A normalisation
+  # Printed on every run, not only when it is non-zero. A normalisation
   # that silently stopped applying would still leave the corpus green, so the
   # count is part of the output the gate produces rather than a debug aid.
   # Expected value is stable for this corpus; a change in it means a change in
   # which documents emit a generator meta, which is worth seeing.
-  echo "NORMALISED: $NORMALISED generator meta line(s) (P1.1 declared divergence; value asserted by tests/provenance.rs)"
+  echo "NORMALISED: $NORMALISED generator meta line(s) (declared divergence; value asserted by tests/provenance.rs)"
   # The counters above are for humans. Without this the script ends on a
   # successful `echo` and reports success to `make corpus` and `make verify`
   # even when every case failed: demonstrated with a stub converter that exits
   # 0 and writes wrong output, which produced "PASS=0 FAIL=46" and exit 0.
   #
-  # That made the Tier 1 invariant -- 46/46 and 29/29, restated in this plan
-  # after nearly every item -- unenforced. It is the same false-green shape as
-  # the P1 per-case bug, one level up: P1 made a crashed case count as a pass,
-  # this made every crashed case count as a pass without anyone counting.
+  # That made the byte-identity invariant (every case must pass) unenforced.
+  # It is the same false-green shape as the per-case bug, one level up: one
+  # made a crashed case count as a pass, this made every crashed case count as
+  # a pass without anyone counting.
   if [ "$fail" -gt 0 ] || [ "${#GOLDEN_FAILS[@]}" -gt 0 ]; then
     exit 1
   fi

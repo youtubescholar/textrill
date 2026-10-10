@@ -1,7 +1,7 @@
-//! P12: resource bounds, measured with a counting allocator.
+//! Resource bounds, measured with a counting allocator.
 //!
 //! Every other check in this repository compares output bytes. That is the
-//! wrong instrument for a resource defect: A2 leaks a compiled regex per
+//! wrong instrument for a resource defect: a leaked compiled regex per
 //! distinct pattern while producing perfectly correct output, so the corpus
 //! passes and the process still grows without bound. This file is the
 //! instrument that can see it.
@@ -61,8 +61,8 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
 
-/// The allocation defects this file is built to detect, that the port still has,
-/// and that the plan already owns. They are *measured and printed on every run*
+/// The allocation defects this file is built to detect, that the port still has.
+/// They are *measured and printed on every run*
 /// rather than deleted, so the numbers stay visible; each is recorded by an
 /// explicit `known_open(..)` call at the site that measures it, so removing a
 /// defect is a two-line change and cannot be done by accident.
@@ -71,16 +71,16 @@ static ALLOCATOR: Counting = Counting;
 /// not call `known_open`, the run fails -- which is the point: a *new*
 /// allocation regression is not excusable, only the two recorded ones are.
 ///
-///   A2  `Box::leak` in `links::ascii_re_cached` retains ~3.9 KB per distinct
-///       compiled pattern, forever. Reachable from document content through the
-///       table path, and from the fixed literal patterns in `do_delim`.
-const KNOWN_OPEN: &[&str] = &["A2: Box::leak retains ~3.9 KB per distinct pattern"];
+///   The `Box::leak` in `links::ascii_re_cached` retains ~3.9 KB per distinct
+///   compiled pattern, forever. Reachable from document content through the
+///   table path, and from the fixed literal patterns in `do_delim`.
+const KNOWN_OPEN: &[&str] = &["regex leak: Box::leak retains ~3.9 KB per distinct pattern"];
 
 fn known_open(item: &str, what: String) {
     assert!(
         KNOWN_OPEN.iter().any(|k| k.starts_with(item)),
         "{item} is recorded as known-open but is not in the KNOWN_OPEN audit list: \
-         add it there with a pointer to the plan item, or fix it"
+         add it there, or fix it"
     );
     eprintln!("  KNOWN-OPEN [{item}]: {what}");
 }
@@ -179,13 +179,13 @@ fn printable_delimiters() -> Vec<char> {
         .collect()
 }
 
-// ------------------------------------------------------------------ A2, part 1
+// ------------------------------------------------------------------ regex leak, part 1
 // The leak is real and unbounded in principle. `ascii_re_cached` returns a
 // `&'static Regex` produced by `Box::leak`, so nothing is ever freed; the
 // 128-entry cap clears the map, which drops references without releasing
 // memory. This drives it directly, which is the only way to reach that state:
 // only ~90 printable delimiter characters exist, so no real document can
-/// A2 was "`ascii_re_cached` leaks one `Regex` per distinct pattern, forever".
+/// The leak was one `Regex` kept per distinct pattern, forever.
 ///
 /// The fix is not to free those `Regex`es -- the function cannot, it returns
 /// `&'static` -- but to make the set of patterns *fixed*, so there is nothing
@@ -197,11 +197,11 @@ fn printable_delimiters() -> Vec<char> {
 ///
 /// What remains is a bounded, one-time cost for the fixed literals, and that is
 /// what this measures. It is a real allocation the process never gives back, so
-/// it is recorded here rather than ignored; `valgrind` flags it, and the plan
-/// says so. Closing it entirely would mean changing the return type at 39 call
+/// it is recorded here rather than ignored; `valgrind` flags it. Closing it
+/// entirely would mean changing the return type at 39 call
 /// sites, which is a larger change than the defect warrants.
 #[test]
-fn a2_literal_cache_retention_is_bounded() {
+fn literal_cache_retention_is_bounded() {
     let _guard = exclusive();
     /// The patterns `do_delim` and the table sniffs actually use. Literals, so
     /// they are what the cache is for.
@@ -255,7 +255,7 @@ fn a2_literal_cache_retention_is_bounded() {
     .expect("measurement thread panicked");
 
     eprintln!(
-        "A2 literal cache: {} fixed patterns, {live:+} bytes retained",
+        "literal cache: {} fixed patterns, {live:+} bytes retained",
         LITERALS.len()
     );
 
@@ -266,7 +266,7 @@ fn a2_literal_cache_retention_is_bounded() {
     const BUDGET: isize = 512 * 1024;
     if live >= BUDGET {
         known_open(
-            "A2",
+            "regex leak",
             format!(
                 "the fixed-literal cache retains {live} bytes, over the {BUDGET} byte \
                  budget for {} patterns",
@@ -276,14 +276,14 @@ fn a2_literal_cache_retention_is_bounded() {
     }
 }
 
-// ------------------------------------------------------------------ A2, part 2
-// What a *real* document can actually cost, and the regression budget A2's fix
+// ------------------------------------------------------------------ regex leak, part 2
+// What a *real* document can actually cost, and the regression budget the fix
 // must keep under.
 //
 // The assertion is on **marginal retained bytes per distinct delimiter**, not on
 // total allocation. Two reasons. Total allocation is dominated by ordinary churn
 // -- the long-paragraph path alone accounts for tens of megabytes of
-// allocate-and-free for a small document, which `a1_long_paragraph_allocation_is_linear`
+// allocate-and-free for a small document, which `long_paragraph_allocation_is_linear`
 // covers -- and a total-allocation budget would be measuring that instead of the
 // leak. And the leak's signature is retention, so marginal cost per delimiter is
 // both the sensitive and the specific signal: the converter's fixed overhead
@@ -334,7 +334,7 @@ fn retained_for(n: usize, delims: &[char]) -> (usize, isize) {
 }
 
 #[test]
-fn a2_retained_bytes_do_not_scale_with_delimiter_count() {
+fn retained_bytes_do_not_scale_with_delimiter_count() {
     let _guard = exclusive();
     let delims = printable_delimiters();
     assert!(
@@ -347,7 +347,7 @@ fn a2_retained_bytes_do_not_scale_with_delimiter_count() {
 
     let marginal = (live_large - live_small) as f64 / 16.0;
     eprintln!(
-        "A2 realistic: 4 delimiters {alloc_small} B/{live_small:+}, \
+        "realistic: 4 delimiters {alloc_small} B/{live_small:+}, \
          20 delimiters {alloc_large} B/{live_large:+}, \
          marginal {marginal:.0} B per additional delimiter"
     );
@@ -358,7 +358,7 @@ fn a2_retained_bytes_do_not_scale_with_delimiter_count() {
     const BUDGET_PER_DELIMITER: f64 = 2_048.0;
     if marginal >= BUDGET_PER_DELIMITER {
         known_open(
-            "A2",
+            "regex leak",
             format!(
                 "each additional distinct delimiter retains {marginal:.0} bytes, over the \
                  {BUDGET_PER_DELIMITER:.0} byte budget -- the same Box::leak, reached from \
@@ -368,13 +368,13 @@ fn a2_retained_bytes_do_not_scale_with_delimiter_count() {
     }
 }
 
-// ---------------------------------------------------------------------- A1
-// A1 removed a superlinear *time* explosion. This is the memory-side companion:
+// ---------------------------------------------------------------------- long-paragraph allocation
+// A previous fix removed a superlinear *time* explosion. This is the memory-side companion:
 // one paragraph of ~1 MB must not allocate superlinearly either, and must
 // release what it allocated when the converter is dropped.
 
 #[test]
-fn a1_long_paragraph_allocation_is_linear() {
+fn long_paragraph_allocation_is_linear() {
     let _guard = exclusive();
     let mk = |n: usize| {
         let mut t = String::with_capacity(n * 5);
@@ -399,7 +399,7 @@ fn a1_long_paragraph_allocation_is_linear() {
 
     let ratio = large_alloc as f64 / small_alloc.max(1) as f64;
     eprintln!(
-        "A1 shape: 10x input ({small_alloc} -> {large_alloc} bytes, {ratio:.1}x), \
+        "allocation shape: 10x input ({small_alloc} -> {large_alloc} bytes, {ratio:.1}x), \
          net live {small_live:+} then {large_live:+}"
     );
 
@@ -448,9 +448,9 @@ fn the_instrument_works() {
     );
 }
 
-// ---------------------------------------------------------------- P6
+// ---------------------------------------------------------------- link pass copies
 //
-// P6 removed two per-rule copies from `check_dictionary_links`: the whole
+// This removed two per-rule copies from `check_dictionary_links`: the whole
 // remaining paragraph was cloned once per match per rule, and a `format!`
 // copied the paragraph again for every rule even when it matched nothing.
 //
@@ -477,7 +477,7 @@ fn link_paragraphs(n: usize) -> Vec<String> {
 }
 
 #[test]
-fn p6_link_pass_does_not_copy_the_paragraph_per_rule() {
+fn link_pass_does_not_copy_the_paragraph_per_rule() {
     let _g = exclusive();
     let opts = Options {
         default_link_dict: String::new(),
@@ -507,7 +507,7 @@ fn p6_link_pass_does_not_copy_the_paragraph_per_rule() {
     // once() so neither arm borrows parser twice at once
     let small_per = per_para(&small);
     let large_per = per_para(&large);
-    eprintln!("  P6 link pass: {small_per} bytes/para (50)  {large_per} bytes/para (200)");
+    eprintln!("  link pass: {small_per} bytes/para (50)  {large_per} bytes/para (200)");
 
     // The saving under test is the per-rule copy: the rules each cloning the
     // remaining paragraph. Measured: 5.5 KB/paragraph fixed, 12.4 KB/paragraph
@@ -521,7 +521,7 @@ fn p6_link_pass_does_not_copy_the_paragraph_per_rule() {
     );
 }
 
-// --------------------------------------------------------------------- P5.4
+// --------------------------------------------------------------------- streaming peak
 // `--stream` exists to hold one paragraph, not the document, and the only way
 // to show that is the peak live-byte high-water mark: cumulative allocation can
 // be identical for both paths, because a streaming converter still allocates
@@ -529,7 +529,7 @@ fn p6_link_pass_does_not_copy_the_paragraph_per_rule() {
 // paragraphs keeps the whole thing live; a streamed one keeps the largest
 // paragraph plus the engine's fixed caches, no matter how long the input is.
 #[test]
-fn p5_4_streaming_peak_stays_flat_while_buffered_grows() {
+fn streaming_peak_stays_flat_while_buffered_grows() {
     let _g = exclusive();
     let opts = Options {
         default_link_dict: String::new(),
@@ -580,7 +580,7 @@ fn p5_4_streaming_peak_stays_flat_while_buffered_grows() {
     let buf_growth = buf_large - buf_small;
     let stream_growth = stream_large.saturating_sub(stream_small);
     eprintln!(
-        "  P5.4 peak KiB (extra {extra} B): buffered {} -> {} (+{}), stream {} -> {} (+{})",
+        "  stream peak KiB (extra {extra} B): buffered {} -> {} (+{}), stream {} -> {} (+{})",
         buf_small / 1024,
         buf_large / 1024,
         buf_growth / 1024,

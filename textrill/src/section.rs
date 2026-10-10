@@ -7,21 +7,16 @@
 // Software Foundation, either version 3 of the License, or (at your option)
 // any later version.  See the LICENSE file for the full text.
 
-//! Opt-in sectioning and table-of-contents generation (Phase 5).
+//! Opt-in sectioning and table-of-contents generation.
 //!
-//! This module is a **pure post-pass** over the body HTML the engine has
-//! already produced. It never runs unless `--section`, `--toc` or `--chunk` is
-//! set, so byte-identical default output is untouched.
+//! A pure post-pass over the body HTML: it runs only with `--section`, `--toc`
+//! or `--chunk`, so default output is byte-identical.
 //!
-//! Sections are the heading-delimited runs of the converted body. Each gets a
-//! sequential `chunk-N` id assigned here, not the `make_anchors`
-//! `section_x_y` names. Positional ids cannot collide and cannot produce a
-//! dead TOC link, which is the failure the plan warned about when a TOC reuses
-//! heading-derived anchors.
-//!
-//! The markup emitted here is lower-case and HTML5-flavoured (`<article>`,
-//! `<nav>`); it is intended to be used together with `--html5`. It does not
-//! change any tag the engine itself emits.
+//! A section is a heading-delimited run of the body, given a sequential
+//! `chunk-N` id here. Positional ids cannot collide, unlike the `make_anchors`
+//! `section_x_y` names, so a TOC cannot produce a dead link. The markup is
+//! lower-case HTML5 (`<article>`, `<nav>`), intended for `--html5`.
+//! Covered by the tests below and `tests/sectiontest.rs`.
 
 /// One heading-delimited section of the body.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,12 +31,9 @@ pub struct Section {
     pub html: String,
 }
 
-/// Recognise a heading line emitted by the engine.
-///
-/// The engine writes a heading alone on one line as `<h1>…</h1>` (or upper
-/// case), optionally with an `<a name="…">` anchor inside. Only column-zero
-/// lines are considered, so a heading-looking string indented inside `<pre>`
-/// (reachable only with `--no-escape_HTML_chars`) is not mistaken for one.
+/// Recognise a heading line emitted by the engine: `<hN>…</hN>` (either case),
+/// optionally with an `<a name="…">` anchor inside. Only column-zero lines
+/// count, so a heading-looking string inside `<pre>` is not mistaken for one.
 fn parse_heading(line: &str) -> Option<(usize, String)> {
     let t = line.trim_end_matches(['\r', ' ', '\t']);
     let b = t.as_bytes();

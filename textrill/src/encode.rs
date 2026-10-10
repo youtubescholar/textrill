@@ -5,40 +5,21 @@
 // Software Foundation, either version 3 of the License, or (at your option)
 // any later version.  See the LICENSE file for the full text.
 
-//! Writing text back out, in the encoding it was read with.
-//!
-//! This is the save path, and it is the reason this module exists. Until now
-//! the engine could decode but not encode: `files.py` grew a Python encoder so
-//! that a file opened and saved without edits would come back byte-for-byte
-//! identical. The Phase 6 rewrite deletes `files.py`, so the encoder has to
-//! live in the engine or the rewrite loses that guarantee.
-//!
-//! The rule it exists to protect: **opening a file must not change it.** A
-//! CP1252 file containing `0x93` is a curly quote. Written back as UTF-8 it
-//! becomes `c2 93`, two C1 control characters, and the user has silently
-//! corrupted their document by doing nothing to it.
+//! Encoding text for saving; preserves the encoding read. Invariant: opening
+//! and saving without edits must round-trip bytes. CP1252 round-trips
+//! punctuation and undefined slots; UTF-8/UTF-16/UTF-32 write with BOM as
+//! appropriate. Covered by tests.
 
 use crate::options::{Encoding, SingleByte};
 
 /// Why a character could not be written.
-///
-/// Distinct from a plain error because the remedy differs: an unrepresentable
-/// character is something the *user* has to decide about (change the text, or
-/// choose a different encoding), while an unknown encoding name is a bug in the
-/// caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EncodeError {
-    /// The text contains a character this encoding cannot hold.
-    ///
-    /// Carries the character and its offset so a front end can underline it in
-    /// the editor rather than saying "unsupported character" and leaving the
-    /// user to find it.
+    /// Character not representable in this encoding; includes offset.
     Unrepresentable { ch: char, at: usize },
     /// The encoding name is not one this engine writes.
     UnknownEncoding(String),
-    /// A surrogate or a code point above U+10FFFF cannot be encoded at all,
-    /// which in Rust cannot reach `str` but can reach a lone surrogate arriving
-    /// from a decoded file.
+    /// Invalid code point (surrogate or > U+10FFFF).
     NotAChar(u32),
 }
 
@@ -61,12 +42,7 @@ impl std::fmt::Display for EncodeError {
 
 impl std::error::Error for EncodeError {}
 
-/// The byte-order mark for a wide encoding, if it has one.
-///
-/// Separate from [`bom`] in `convert` because that one *detects* a mark on input
-/// and this one *writes* one on output, and they must agree about UTF-32LE:
-/// its mark starts with UTF-16LE's, so a lookup that picked the shorter one
-/// would emit a UTF-16LE mark for a UTF-32LE file.
+/// Byte-order mark for wide encodings on output. Must be distinct for UTF-32LE vs UTF-16LE.
 fn bom_for(encoding: Encoding) -> Option<&'static [u8]> {
     Some(match encoding {
         Encoding::Utf32Le => &[0xFF, 0xFE, 0x00, 0x00],
@@ -77,22 +53,14 @@ fn bom_for(encoding: Encoding) -> Option<&'static [u8]> {
     })
 }
 
-/// The single byte that represents `ch` in `enc`, if there is one.
-///
-/// The reverse of `convert::single_byte_char`. Built by scanning the same
-/// `ENCODING_TABLES` rather than by keeping a second table, because a second
-/// table is exactly the kind of copy that drifts -- and a drifted encoder
-/// produces a save that corrupts a file, which is worse than a missing feature.
+/// Map character to single byte in encoding (uses same tables as decoder).
 fn single_byte_of(enc: SingleByte, ch: char) -> Option<u8> {
     if (ch as u32) < 0x80 {
         return Some(ch as u8);
     }
     let table = crate::convert::encoding_table(enc);
     for (i, &cp) in table.iter().enumerate() {
-        // A `0` entry is an undefined slot. `single_byte_char` decodes those as
-        // Latin-1, so encoding them back as Latin-1 is what round-trips; leaving
-        // them unencodable would mean a file containing 0x81 cannot be saved at
-        // all, which is the corruption this module exists to prevent.
+        // Undefined slot decodes as Latin-1; encode back to preserve round-trip.
         let effective = if cp == 0 { 0x80 + i as u32 } else { cp };
         if effective == ch as u32 {
             return Some(0x80 + i as u8);
@@ -101,18 +69,8 @@ fn single_byte_of(enc: SingleByte, ch: char) -> Option<u8> {
     None
 }
 
-/// Encode `text` under `encoding`.
-///
-/// `Encoding::Auto` is **not** accepted: "auto" describes a decision made on
-/// input, and there is nothing to detect on output. A caller that wants UTF-8
-/// says so. Returning `UnknownEncoding` rather than silently defaulting is the
-/// point -- a save that quietly wrote UTF-8 to a CP1252 file is precisely the
-/// bug this module was written to end.
-///
-/// Wide encodings are written *with* a byte-order mark even when the input had
-/// none. That asymmetry is deliberate and matches the Python behaviour: the
-/// mark is a declaration that costs two bytes, tools that read UTF-16 expect
-/// it, and "this file had no BOM" is state the GUI has nowhere to keep.
+/// Encode text under `encoding`. `Encoding::Auto` is rejected (no detection on output).
+/// Wide encodings include a BOM. Vertrags: round-trips for supported encodings.
 pub fn encode(text: &str, encoding: Encoding) -> Result<Vec<u8>, EncodeError> {
     match encoding {
         Encoding::Auto => Err(EncodeError::UnknownEncoding("auto".into())),
@@ -136,19 +94,12 @@ pub fn encode(text: &str, encoding: Encoding) -> Result<Vec<u8>, EncodeError> {
             let mut out = Vec::with_capacity(text.len() * 2 + 4);
             out.extend_from_slice(bom_for(wide).unwrap_or_default());
             let units = wide.units_per_char();
-            // Surrogate pairs are a UTF-16 concern specifically. UTF-32 holds
-            // whole code points, so applying the same split there would write an
-            // astral character as two invalid code units -- which decodes back
-            // as mojibake, the very corruption this module prevents.
             let utf16 = matches!(wide, Encoding::Utf16Le | Encoding::Utf16Be);
             let _ = units;
             for ch in text.chars() {
                 let cp = ch as u32;
                 if utf16 && cp > 0xFFFF {
-                    // UTF-16 cannot hold an astral character, so it needs a
-                    // surrogate pair. Getting this wrong writes two Latin-1
-                    // characters instead of one emoji, which is the same
-                    // corruption class as the CP1252 bug.
+                    // UTF-16: astral characters encoded as surrogate pairs.
                     let v = cp - 0x1_0000;
                     push_unit(&mut out, wide, 0xD800 + (v >> 10));
                     push_unit(&mut out, wide, 0xDC00 + (v & 0x3FF));
@@ -161,12 +112,7 @@ pub fn encode(text: &str, encoding: Encoding) -> Result<Vec<u8>, EncodeError> {
     }
 }
 
-/// Append one code unit to `out`, in the byte order `encoding` names.
-///
-/// UTF-32 takes the full 32 bits; UTF-16 takes 16. They are separate arms
-/// rather than one arm with a width parameter because the truncation for UTF-16
-/// is only ever correct for values that already fit -- the astral case is split
-/// into a surrogate pair by the caller before it gets here.
+/// Append code unit in encoding byte order. UTF-16 astral chars handled by caller.
 fn push_unit(out: &mut Vec<u8>, encoding: Encoding, unit: u32) {
     match encoding {
         Encoding::Utf16Le => out.extend_from_slice(&(unit as u16).to_le_bytes()),
@@ -177,16 +123,7 @@ fn push_unit(out: &mut Vec<u8>, encoding: Encoding, unit: u32) {
     }
 }
 
-/// Write `text` to `path`, encoded under `encoding`.
-///
-/// Fails if the parent directory does not exist, and does **not** create it.
-///
-/// A missing directory used to be created with `mkdir -p` in Python, on the
-/// theory that a save should always succeed. It should not: this is called from
-/// a save dialog, which is exactly where a mistyped path happens, and one typo
-/// like `newtree/a/b/c/out.html` then invented five directories the user never
-/// asked for and has to clean up by hand. An actionable error beats a stray
-/// tree.
+/// Write `text` to `path` in `encoding`. Fails if parent dir missing (no mkdir -p).
 pub fn write_with(
     path: &std::path::Path,
     text: &str,
@@ -247,7 +184,7 @@ mod tests {
         // The bytes the whole module exists for: 0x93/0x94/0x96/0x97 are
         // punctuation in CP1252 and C1 controls in Latin-1. The decoded
         // characters are U+2014 and friends, NOT U+0097: a decoder that returned
-        // the Latin-1 reading is the original P7 defect.
+        // the Latin-1 reading is the original defect.
         let text = "Café \u{2014} naïve \u{201c}quotes\u{201d}";
         let bytes = encode(text, Encoding::Cp1252).unwrap();
         assert!(bytes.contains(&0x97), "em dash should be one byte 0x97");
@@ -257,7 +194,7 @@ mod tests {
 
     #[test]
     fn a_round_trip_preserves_the_original_bytes() {
-        // The A5 property: read then write leaves a CP1252 file untouched.
+        // Read-then-write leaves a CP1252 file untouched.
         let original: &[u8] = b"Caf\xe9 \x97 na\xefve \x93quotes\x94\r\nsecond\r\n";
         let (text, resolved) = decode_bytes_with(original, Encoding::Auto);
         assert_eq!(resolved, Resolved::Single(SingleByte::Cp1252));

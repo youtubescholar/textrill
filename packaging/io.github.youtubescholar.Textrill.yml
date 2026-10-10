@@ -5,13 +5,13 @@
 # `textrill-gui-rs/Cargo.toml`): `io.github.youtubescholar.Textrill`. The
 # filename matches the id, as the format requires.
 #
-# One thing is unresolved and is recorded in docs/PACKAGING.md:
+# One thing is unresolved and is recorded in packaging/README.md:
 #
 #   `cargo-sources.json`, referenced by both modules below. It is generated,
 #   not committed, and generating it needs `flatpak-cargo-generator` (pip),
 #   which is not installed on this host. `make cargo-sources` does it.
 #
-# The plan prefers offline/vendored dependencies for reproducibility, and
+# Offline/vendored dependencies are preferred for reproducibility, and
 # `cargo vendor` would avoid the generator entirely at the cost of a large
 # vendored tree. That trade is not made here; pick one before the first build.
 #
@@ -49,7 +49,7 @@ modules:
 
   # Engine first: textrill-gui-rs depends on it by path, so the CLI has to exist
   # before the GUI module configures. Installed to /app/bin so the single artifact
-  # ships both, as P13's delivery goal requires.
+  # ships both.
   - name: textrill
     buildsystem: simple
     build-commands:
@@ -61,8 +61,6 @@ modules:
         skip:
           - target
           - ref
-          - legacy-archive
-          - docs/template-research
           - research
           - stubs
           - packaging
@@ -88,8 +86,6 @@ modules:
         skip:
           - target
           - ref
-          - legacy-archive
-          - docs/template-research
           - research
           - stubs
           - packaging

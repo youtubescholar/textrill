@@ -1,11 +1,11 @@
-//! P5.0 — `--report`: what the conversion recovered, on standard error.
+//! `--report`: what the conversion recovered, on standard error.
 //!
 //! The flag is off by default, writes nothing to the output, and must agree
 //! with what someone counting the produced file would get — the same numbers
 //! `make examples` prints. So the tests either recount the output with a
 //! deliberately different implementation and compare, or pin the numbers that
-//! are already asserted elsewhere (`make proof` P4–P8 hold the same four
-//! inference counts plus the byte size of `examples/homer.txt`).
+//! the example goldens and `make examples` already hold (the inference counts
+//! plus the byte size of `examples/homer.txt`).
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -291,8 +291,7 @@ fn the_report_changes_nothing_but_stderr() {
 }
 
 /// The number `make examples` prints for `examples/homer.txt`, asserted here so
-/// that `make verify` (the test) and `make proof`'s P4–P8 hold the same claim
-/// even though the proof suite needs pandoc and this does not.
+/// that the test and `make examples` hold the same claim.
 #[test]
 fn homer_reports_the_numbers_make_examples_prints() {
     let r = run(&["--infile", HOMER, "--report"]);
@@ -308,11 +307,11 @@ fn homer_reports_the_numbers_make_examples_prints() {
             br: 34,
         }
     );
-    // And it really is what the file holds, not just what make proof claims.
+    // And it really is what the file holds, not just what make examples claims.
     assert_eq!(c, recount(&r.stdout));
 }
 
-/// The rest of `examples/`: the CC0/PD documents S7 brought in, pinned the
+/// The rest of `examples/`: the CC0/PD documents, pinned the
 /// same way as homer so that `make examples` and `make verify` agree on every
 /// corpus file. The counts come from the report of the produced output, and the
 /// recount-of-output assertion keeps the instrument from agreeing with itself.
@@ -352,11 +351,11 @@ fn the_example_corpus_reports_its_counts() {
         (
             "gelbenhuegel.txt",
             Counts {
-                bytes: 44199,
+                bytes: 44484,
                 headings: 16,
-                paragraphs: 171,
+                paragraphs: 191,
                 strong: 1,
-                br: 312,
+                br: 334,
             },
         ),
         (

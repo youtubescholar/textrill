@@ -1,8 +1,6 @@
 //! Link dictionary engine: parses dictionaries and applies link rules.
 //!
-//! Faithful port of `parse_dict`, `setup_dict_checking`, `glob2regexp`,
-//! `apply_links` (link part), `check_dictionary_links` and
-//! `in_link_context` from HTML::TextToHTML v3.0.
+//! Port of the link half of HTML::TextToHTML v3.0. Covered by tests/linktest.rs.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -25,33 +23,16 @@ pub struct LinkRule {
     pub pattern: String,
     pub regex: Regex,
     pub replacement: String,
-    /// A literal that every match of `regex` must contain, when one could be
-    /// proven. `None` means "no filter": the regex is always run.
-    ///
-    /// Normally built from `regex.as_str()` -- the regex that actually runs --
-    /// because the translation in `translate_pattern` rewrites classes. But
-    /// that same translation rewrites `\b` and `$` into look-around, which
-    /// `regex-syntax` refuses to parse, so every pattern the dictionary wraps
-    /// in `\b` (`add_literal`, `add_glob`) would otherwise lose its filter and
-    /// run the backtracking VM on every paragraph. When the translated pattern
-    /// will not parse, the prefilter falls back to the original `pattern`
-    /// (see `add_rule`): translation only rewrites zero-width anchors and
-    /// escape classes, never a literal run, so a required literal proven there
-    /// is still required by the translated regex.
-    ///
-    /// Sound in one direction only: see [`crate::prefilter`]. A wrong literal
-    /// here would silently drop links, which is why the extractor returns
-    /// `None` whenever it cannot prove the literal is required.
+    /// A literal every match of `regex` must contain, when one could be proven;
+    /// `None` means no filter. Sound one direction only (see
+    /// [`crate::prefilter`]): a wrong literal silently drops links.
     pub prefilter: Option<crate::prefilter::Alternatives>,
 }
 
 impl LinkRule {
-    /// Could this rule match `haystack` at all?
-    ///
-    /// Always true when no literal could be proven, and otherwise true if any
-    /// alternative literal is present. A `false` is a guarantee that
-    /// `regex.captures(haystack)` would have returned `None`, so the caller may
-    /// skip it.
+    /// Could this rule match the already-lowercased `haystack_folded`?
+    /// `false` guarantees `regex.captures` would return `None`, so the caller
+    /// may skip it.
     pub fn may_match(&self, haystack_folded: &[u8]) -> bool {
         match &self.prefilter {
             None => true,
@@ -60,10 +41,9 @@ impl LinkRule {
     }
 }
 
-/// Expand `\s \S \w \W \d \D \b \B` to explicit ASCII classes (so the result
-/// matches like Perl without `/u`) and mimic Perl's `$`, which matches at
-/// end-of-text or before a trailing newline (regex crate's `$` is
-/// end-of-text only, but here lines keep their trailing `\n`).
+/// Expand `\s \S \w \W \d \D \b \B` to explicit ASCII classes so matches are
+/// Perl-like without `/u`, and rewrite `$` to Perl's end-of-text-or-before-a-
+/// trailing-newline meaning (regex-crate `$` is end-of-text only).
 fn expand_ascii_escapes(pat: &str) -> String {
     let mut out = String::new();
     let mut chars = pat.chars().peekable();
@@ -136,13 +116,12 @@ fn expand_ascii_escapes(pat: &str) -> String {
                 );
             }
             '>' => {
-                // Perl: `\>` is an escaped literal '>'; regex-crate treats
-                // it as an end-of-word anchor. Recover Perl's meaning.
+                // Perl: `\>` is a literal '>'; regex-crate treats it as an anchor.
                 chars.next();
                 out.push('>');
             }
             '<' => {
-                // same for `\<` (start-of-word anchor in regex-crate).
+                // Same for `\<` (start-of-word anchor in regex-crate).
                 chars.next();
                 out.push('<');
             }
@@ -156,17 +135,12 @@ fn expand_ascii_escapes(pat: &str) -> String {
     out
 }
 
-/// Compile a Perl-style pattern with the /s (dotall) flag, ASCII semantics,
-/// and optional /i, reporting a pattern that does not compile.
+/// Compile a Perl-style pattern with the /s (dotall) flag, ASCII semantics and
+/// optional /i, reporting a pattern that does not compile.
 ///
-/// This is the single place a pattern becomes a `Regex`. Both orderings of
-/// "add the flags" and "translate" existed here and in `Convert::re`, and they
-/// happened to agree; having one function means they cannot stop agreeing. The
-/// flags go on first and the translation second, which is the order `Convert`
-/// used and therefore the order the engine's behaviour is defined by.
-// The error is upstream's and 136 bytes wide. Boxing it would change this
-// signature and the call sites for no gain: the width only shows up on the
-// path where a pattern has already failed to compile.
+/// The single place a pattern becomes a `Regex`. Flags go on first, translation
+/// second -- the order the engine's behaviour is defined by.
+// The error type is upstream's; boxing it would change the signature for no gain.
 #[allow(clippy::result_large_err)]
 pub fn try_compile_pattern(pat: &str, nocase: bool) -> Result<Regex, fancy_regex::Error> {
     let full = if nocase {
@@ -177,32 +151,13 @@ pub fn try_compile_pattern(pat: &str, nocase: bool) -> Result<Regex, fancy_regex
     Regex::new(&translate_pattern(&full))
 }
 
-/// True if `pat` can match the empty string, which is what makes the
-/// substitution loop in [`LinkParser::check_dictionary_links`] spin forever.
+/// True if `pat` can match the empty string, which would make the substitution
+/// loop in [`LinkParser::check_dictionary_links`] spin forever.
 ///
-/// A `/|Perl\b/`-delimited entry is an alternation whose first and last
-/// branches are both empty, so it matches at every position without
-/// consuming anything. The loop then splits the paragraph into
-/// `(pre, "", post)` where `post` is the whole paragraph again, reassigns
-/// `para_ref` to an unchanged value and matches empty again, forever.
-/// **Verified: the Perl original hangs identically**, so this is an upstream
-/// pathology rather than a port defect, and the differential corpus can never
-/// catch it -- the oracle hangs too.
-///
-/// The correct spelling is the `|...|` form, which is handled separately in
-/// `parse_dict` and is verified byte-identical to Perl for glob, literal,
-/// `-o`, `-i`, `-h` and `$1` templates.
-///
-/// Tested by matching against `""` rather than by inspecting the compiled form:
-/// the translation in [`translate_pattern`] rewrites `\b` into a zero-width
-/// lookaround alternation, so reasoning about "does this match empty" from the
-/// source text is not reliable. Every one of the built-in system-dictionary
-/// patterns is non-empty-matching, so none of them is affected.
-///
-/// This answers "could this hang", not "is this pattern well written". The
-/// caller applies it only to the switch combinations that reach the loop;
-/// `-o` and `-s` substitute once and so terminate regardless. Rejecting those
-/// would diverge from Perl for no gain, and Tier 1 is byte-identical.
+/// Tested by matching `""`, since [`translate_pattern`] rewrites `\b` to a
+/// zero-width lookaround and the source text is not a reliable guide. Callers
+/// apply this only to switch combinations that reach the loop; `-o` and `-s`
+/// substitute once and terminate.
 pub fn can_match_empty(pat: &str, nocase: bool) -> bool {
     match try_compile_pattern(pat, nocase) {
         Ok(re) => re.is_match("").unwrap_or(false),
@@ -211,9 +166,8 @@ pub fn can_match_empty(pat: &str, nocase: bool) -> bool {
     }
 }
 
-/// [`try_compile_pattern`] for callers that have already validated, or that are
-/// compiling a pattern this crate wrote. A failure here is an internal bug, so
-/// it panics rather than being threaded through every call site.
+/// [`try_compile_pattern`] for already-validated patterns. Panics on failure,
+/// which is an internal bug.
 pub fn compile_pattern(pat: &str, nocase: bool) -> Regex {
     try_compile_pattern(pat, nocase).expect("valid pattern")
 }
@@ -230,30 +184,17 @@ pub fn translate_pattern(pat: &str) -> String {
         .replace("[:space:]", " \\t\\r\\n\\x0c\\x0b")
 }
 
-/// Compile a Perl-style pattern with ASCII semantics, matching like Perl
-/// without `/u` and with Perl-style `$`.
+/// Compile a Perl-style pattern with ASCII semantics and Perl-style `$`.
 pub fn ascii_re(pat: &str) -> Regex {
     Regex::new(&translate_pattern(pat)).expect("valid pattern")
 }
 
-/// Memoized `ascii_re`, for patterns that sniff every paragraph (list
+/// Memoized `ascii_re`, for fixed patterns that sniff every paragraph (list
 /// prefixes, table shapes, mail headers).
 ///
-/// Compiling is a large share of the remaining cost, and these patterns are
-/// fixed literals, so keep them per-thread: a `Converter` holds no shared
-/// mutable state, which also keeps concurrent conversions independent.
-///
-/// The parameter is `&'static str` rather than `&str`, and that is the whole
-/// point of the signature. This function cannot free what it hands out, because
-/// it returns `&'static Regex`; the only thing keeping the leak bounded is that
-/// the pattern set is *fixed*, so `&'static` on the input is a compile-time
-/// promise that a caller cannot break. A caller with a document-derived pattern
-/// gets a compile error rather than silently growing the cache, and should use
-/// [`ascii_re`] instead, which returns an owned `Regex` that is dropped with it.
-///
-/// The `MAX_CACHED` bound below is therefore a guard against a future mistake,
-/// not the thing that makes this safe, and it does not bound the leak: clearing
-/// a map of `&'static` drops no memory.
+/// The `&'static str` parameter is load-bearing: this returns a leaked
+/// `&'static Regex`, so a document-derived pattern is a compile error rather
+/// than unbounded cache growth. Use [`ascii_re`] for dynamic patterns.
 pub fn ascii_re_cached(pat: &'static str) -> &'static Regex {
     thread_local! {
         static CACHE: RefCell<HashMap<String, &'static Regex>> = RefCell::new(HashMap::new());
@@ -309,8 +250,7 @@ fn expand_template(template: &str, caps: &fancy_regex::Captures, whole: &str) ->
     out
 }
 
-/// Lower-case the HTML tags in an h-switch replacement template
-/// (mirrors `setup_dict_checking`'s `\L` substitutions).
+/// Lower-case the HTML tags in an h-switch replacement template.
 pub fn lower_html_tags(template: &str) -> String {
     let mut s = template.to_string();
     let g = |c: &fancy_regex::Captures, i: usize| -> String {
@@ -401,10 +341,9 @@ pub struct LinkParser {
     pub once_done: Vec<bool>,
     pub sect_once_done: Vec<bool>,
     /// Dictionary patterns that did not compile and were skipped, so a front
-    /// end can report them rather than leaving the user with output that
-    /// silently lost a link. See `add_regexp`.
+    /// end can report them. See `add_regexp`.
     pub rejected_patterns: Vec<String>,
-    /// A11. Which schemes may reach an `href`. See [`crate::urlscheme`].
+    /// Which schemes may reach an `href`. See [`crate::urlscheme`].
     pub policy: crate::urlscheme::UrlPolicy,
 }
 
@@ -427,15 +366,10 @@ impl LinkParser {
         }
         self.label_seen.insert(label.to_string());
 
-        // A11. A rule whose URL is written out in full is checked here, at load,
-        // where the operator can still fix it: a diagnostic naming the
-        // dictionary is worth more than silently unwrapping every match.
-        //
-        // Two forms are not checked, and neither is a gap. A URL containing a
-        // capture reference (`$1`, `$&`) is only known at substitution time, and
-        // a `-h->` rule's URL is raw HTML rather than a URL at all; both are
-        // caught by the scrub over the finished paragraph, which
-        // `Converter::apply_links` runs.
+        // A rule whose URL is written out in full is checked here, where the
+        // operator can still fix it. URLs with capture refs (`$1`, `$&`) and
+        // `-h->` raw HTML are only known at substitution time; the scrub over
+        // the finished paragraph catches both.
         if switches & LINK_HTML == 0 && !url.contains('$') && !self.policy.allows(url) {
             let scheme = crate::urlscheme::scheme_of(url).unwrap_or_default();
             let msg = format!(
@@ -449,7 +383,6 @@ impl LinkParser {
             return;
         }
 
-        // build the replacement template
         let mut repl;
         if switches & LINK_HTML == 0 {
             if self.lower_case_tags {
@@ -464,14 +397,9 @@ impl LinkParser {
             }
         }
         let regex = compile_pattern(pattern, switches & LINK_NOCASE != 0);
-        // Prefer the translated pattern (it is the regex that actually runs),
-        // but fall back to the original when translation made it unparsable.
-        // The translation turns `\b`/`\B`/`$` into look-around, which
-        // `regex-syntax` rejects, so without this fallback every `add_literal`
-        // and `add_glob` rule -- the whole `\b...\b` family -- silently gets
-        // no prefilter and pays for a backtracking `captures()` per paragraph.
-        // `prefilter`'s module docs argue why a literal required by the
-        // original is still required by the translated regex.
+        // Prefer the translated pattern (what actually runs), falling back to
+        // the original when translation made it unparsable: translation turns
+        // `\b`/`\B`/`$` into look-around, which `regex-syntax` rejects.
         let prefilter = crate::prefilter::required_literal(regex.as_str())
             .or_else(|| crate::prefilter::required_literal(pattern));
         self.rules.push(LinkRule {
@@ -487,34 +415,19 @@ impl LinkParser {
     }
 
     fn add_regexp(&mut self, label: &str, pattern: &str, url: &str, switches: u8) {
-        // A `/pattern/` entry is the one dictionary form that reaches the regex
-        // engine verbatim, so it is the one that can fail to compile. It used to
-        // abort the process here via `.expect("valid pattern")`.
-        //
-        // Reported and skipped rather than fatal, because `Convert::convert_text`
-        // returns `String` and turning it into a `Result` is a much larger change
-        // than this defect. That is also what the reference does, so this is not
-        // a compromise on behaviour -- but the message is better than the
-        // reference's, which is Perl's own "Unmatched ( in regex" with no
-        // indication of which dictionary line was at fault.
-        //
-        // The three option-level patterns are validated up front instead, in
-        // `Options::validate`, where a `Result` already exists. See P22.
+        // A `/pattern/` entry reaches the regex engine verbatim, so it is the
+        // one dictionary form that can fail to compile; report and skip. The
+        // option-level patterns are validated up front in `Options::validate`.
         if let Err(e) = try_compile_pattern(pattern, switches & LINK_NOCASE != 0) {
             let msg = format!("textrill: ignoring link-dictionary pattern {pattern:?}: {e}");
             eprintln!("{msg}");
             self.rejected_patterns.push(msg);
             return;
         }
-        // P5: a pattern that matches the empty string spins the substitution
-        // loop in `check_dictionary_links` forever. See `can_match_empty`.
-        //
-        // Only guarded for the switch combinations that actually reach that
-        // loop. `-o` (LINK_ONCE) and `-s` (LINK_SECT_ONCE) substitute at most
-        // once per paragraph or per section, so the same pattern terminates
-        // there -- and Perl accepts them, so rejecting them would be a Tier 1
-        // byte-parity divergence for no benefit. Measured: `/|x/ -o-> url`
-        // emits an empty anchor in both implementations.
+        // A pattern that matches the empty string spins the substitution loop
+        // in `check_dictionary_links` forever (see `can_match_empty`); only
+        // guarded for switch combinations that reach it, since `-o`/`-s`
+        // substitute once and Perl accepts them.
         if switches & (LINK_ONCE | LINK_SECT_ONCE) == 0
             && can_match_empty(pattern, switches & LINK_NOCASE != 0)
         {
@@ -548,13 +461,12 @@ impl LinkParser {
         self.add_rule(label, &p, url, switches);
     }
 
-    /// Filter comment / colon-terminated lines, mirroring the preprocessing
-    /// applied to the system dictionary and in `load_dictionary_links`.
+    /// Filter comment and colon-terminated lines before parsing.
     pub fn filter_dict(&self, dict: &str) -> String {
         let mut out = String::new();
         for line in dict.split('\n') {
-            // /^\#/ is anchored at the very start of the line (no /m): a line
-            // with leading whitespace before '#' is NOT skipped.
+            // Anchored at the very start of the line (no /m): leading
+            // whitespace before '#' stops the skip.
             if line.starts_with('#') {
                 continue;
             }
@@ -669,22 +581,12 @@ impl LinkParser {
     /// Port of `check_dictionary_links`.
     pub fn check_dictionary_links(&mut self, para_ref: &mut String) {
         let i_len = self.rules.len();
-        // P6 prefilter: one ASCII-lowercased copy of the paragraph, shared by
-        // every rule. Folding once rather than per rule is what makes the
-        // filter cheaper than the regex calls it removes.
-        //
-        // Rules without a proven literal still see this; they simply ignore it.
+        // One ASCII-lowercased paragraph shared by every rule; folding once
+        // makes the filter cheaper than the regex calls it removes.
         let mut folded = para_ref.as_bytes().to_vec();
         folded.make_ascii_lowercase();
-        // Every rule that substitutes rewrites `para_ref`, so the fold has to
-        // follow it. Refreshing unconditionally at each rule would be correct
-        // but wasteful -- most rules substitute nothing -- so this tracks
-        // whether the text has actually changed since the last refresh.
-        //
-        // Getting this wrong is silent link loss, not a crash: a stale fold can
-        // report a still-present literal as absent. The corpus caught exactly
-        // that, since an earlier rule rewrites part of a mail address and the
-        // later `...\@...` rule then sees no `@`.
+        // Substitutions rewrite `para_ref`, so the fold must follow. A stale
+        // fold is silent link loss, not a crash, so track whether text changed.
         let mut fold_is_stale = false;
         for i in 0..i_len {
             if fold_is_stale {
@@ -693,8 +595,8 @@ impl LinkParser {
                 folded.make_ascii_lowercase();
                 fold_is_stale = false;
             }
-            // Soundness: a `false` here proves `captures` would return None, so
-            // skipping cannot lose a link.
+            // A `false` here proves `captures` would return None, so skipping
+            // cannot lose a link.
             if !self.rules[i].may_match(&folded) {
                 continue;
             }
@@ -706,11 +608,8 @@ impl LinkParser {
                         let m = caps.get(0).unwrap();
                         let (pre, matched, post) = split_front(para_ref, m.start(), m.end());
                         self.once_done[i] = true;
-                        // Perl appends the text before the match to
-                        // $line_with_links *before* asking in_link_context, so
-                        // the guard sees the whole line emitted so far.  Pass an
-                        // empty string here and the guard cannot see the
-                        // surrounding <a>, which produces nested anchors.
+                        // The guard must see the text before the match, or it
+                        // cannot see a surrounding <a> and nests anchors.
                         line_with_links.push_str(&pre);
                         let mut linkme = matched;
                         if !self.in_link_context(&linkme, &line_with_links) {
@@ -731,8 +630,7 @@ impl LinkParser {
                         let m = caps.get(0).unwrap();
                         let (pre, matched, post) = split_front(para_ref, m.start(), m.end());
                         self.sect_once_done[i] = true;
-                        // same ordering as the LINK_ONCE branch: the preceding
-                        // text is part of the context the guard inspects
+                        // same ordering as the LINK_ONCE branch
                         line_with_links.push_str(&pre);
                         let mut linkme = matched;
                         if !self.in_link_context(&linkme, &line_with_links) {
@@ -749,17 +647,11 @@ impl LinkParser {
                 }
             } else {
                 loop {
-                    // The literal may have been consumed by a previous
-                    // substitution in this same loop, so the filter is consulted
-                    // per iteration, not once per rule.
+                    // Re-check each iteration: a previous substitution may have
+                    // consumed the literal.
                     if !self.rules[i].may_match(&folded) {
                         break;
                     }
-                    // P6: this used to be `let cur = para_ref.clone();`, copying
-                    // the whole remaining paragraph once per match per rule.
-                    // Not needed: `split_front` returns owned Strings, so the
-                    // borrow `caps`/`m` holds on `para_ref` ends before the
-                    // reassignment below.
                     let caps_opt = self.rules[i].regex.captures(para_ref).ok().flatten();
                     match caps_opt {
                         None => break,
@@ -773,9 +665,8 @@ impl LinkParser {
                             }
                             line_with_links.push_str(&linkme);
                             *para_ref = post;
-                            // Refreshed at the top of the next rule instead of
-                            // here, since several rules may run before the text
-                            // is read again.
+                            // Refreshed at the next rule instead, since several
+                            // may run before the text is read again.
                             fold_is_stale = true;
                         }
                     }
@@ -807,8 +698,7 @@ fn split_front(s: &str, start: usize, end: usize) -> (String, String, String) {
     )
 }
 
-/// The built-in system dictionary (from `__DATA__`/system dict in
-/// HTML::TextToHTML v3.0).
+/// The built-in system dictionary (from HTML::TextToHTML v3.0).
 pub const SYSTEM_DICT: &str = "\
 #
 # Global links dictionary file for HTML::TextToHTML
@@ -940,13 +830,12 @@ pub const SYSTEM_DICT: &str = "\
 # End of global dictionary
 ";
 
-/// Build the link rule set for a given set of options (which may include
-/// user dictionaries) plus the system dictionary.
+/// Build the link rule set from the given options plus the system dictionary.
 pub fn load_links(opts: &Options) -> LinkParser {
     let mut parser = LinkParser::new(opts.lower_case_tags, opts.url_policy());
-    // Mirror do_init_call: the system dictionary (and everything else) is only
-    // loaded when make_links is set; the default link dictionary is appended
-    // to the user dictionaries when it exists.
+    // The system dictionary (and everything else) loads only when make_links
+    // is set; the default dictionary is appended to the user dictionaries when
+    // it exists.
     if !opts.make_links {
         return parser;
     }
@@ -969,8 +858,7 @@ pub fn load_links(opts: &Options) -> LinkParser {
     parser
 }
 
-/// Clean a link dictionary file string (used by the GUI when taking user
-/// link-dictionary text directly) and return the parsed rules.
+/// Parse a link-dictionary string (used by the GUI) into rules.
 #[allow(dead_code)]
 pub fn load_links_from_text(opts: &Options, dict_text: &str) -> LinkParser {
     let mut parser = LinkParser::new(opts.lower_case_tags, opts.url_policy());

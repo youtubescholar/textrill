@@ -5,8 +5,8 @@
 //! The expected strings are upstream's own, which means they are XHTML
 //! strings: upstream runs with the Perl module's `xhtml => 1` default, so
 //! `<br/>` and `</p>` are what t/10para.t asserts. Every converter here pins
-//! `xhtml: true` for that reason (PLAN Phase 3 exempts these mirrors rather
-//! than rewriting them to the port's HTML5 default).
+//! `xhtml: true` for that reason: these upstream mirrors keep XHTML rather
+//! than being rewritten to the port's HTML5 default.
 
 use textrill::convert::Converter;
 use textrill::options::Options;

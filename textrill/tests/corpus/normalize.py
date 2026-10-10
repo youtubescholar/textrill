@@ -5,7 +5,7 @@ Why this exists
 ---------------
 `textrill` names itself as the generator in the `meta` it writes. The Perl
 reference names itself. Those strings cannot both be present in a byte
-comparison, and before P1.1 they were identical only because the port was
+comparison, and before that change they were identical only because the port was
 claiming a false provenance:
 
     reference: <meta name="generator" content="HTML::TextToHTML v3.0"/>
@@ -44,8 +44,8 @@ proves content parity with the reference, that test proves correct provenance.
 
 Usage: normalize.py FILE...   (rewrites in place; prints how many lines changed)
 
-The fuzzer imports `normalise_bytes` so both gates apply this one rule and
-neither grows its own copy of it.
+The differential runner applies this one rule through this file, so the two
+halves of a comparison cannot grow separate copies of it.
 """
 
 import re

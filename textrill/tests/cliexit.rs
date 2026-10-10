@@ -1,9 +1,9 @@
 //! Exit-code tests for the numeric options.
 //!
-//! A3 was that a numeric option could take the process down rather than be
+//! A numeric option could once take the process down rather than be
 //! rejected: `tab_width=0` divided by zero and exited 101, and a large value
 //! asked the allocator for an impossible size and exited 134 with SIGABRT,
-//! which cannot be caught even by A4's GUI handler. Both were reachable from
+//! which cannot be caught even by the GUI's handler. Both were reachable from
 //! the command line, and `tab_width=0` was reachable from the GUI as well,
 //! because its spin box minimum was 0.
 //!
@@ -257,7 +257,7 @@ fn comparison_only_options_are_not_bounded() {
     );
 }
 
-// ---------------------------------------------------------------- A9
+// ---------------------------------------------------------------- unreadable input
 //
 // `--infile /nonexistent` printed `Could not open …` to stderr, carried on, and
 // exited 0 having written a 0-byte output file. Perl does the same, so this is a
@@ -276,7 +276,7 @@ fn tmp(name: &str) -> std::path::PathBuf {
     dir.join(name)
 }
 
-/// The case from the plan: a missing input file, writing to a file.
+/// A missing input file, writing to a file.
 #[test]
 fn a_missing_input_file_exits_non_zero() {
     let out_path = tmp("missing-out.html");
@@ -404,7 +404,7 @@ fn stdin_is_not_treated_as_an_unreadable_input() {
     );
 }
 
-// ---------------------------------------------------------------- P22
+// ---------------------------------------------------------------- uncompilable regexp
 //
 // A user-supplied regular expression that does not compile used to abort the
 // process with a panic and exit 101. `--custom_heading_regexp 'a('` is the
@@ -444,10 +444,10 @@ const BAD_PATTERNS: &[(&str, &str)] = &[
 /// Every option the CLI describes as taking a regular expression must be
 /// validated by `Options::validate`.
 ///
-/// This is the guard on the guard. The P22 fix is a hand-written list of three
+/// This is the guard on the guard. The fix is a hand-written list of three
 /// options, and the failure mode of a hand-written list is not that it is wrong
 /// today but that the next regexp option is added and not added to it -- which
-/// reinstates the panic P22 removed, with nothing failing. So the list is
+/// reinstates the panic it removed, with nothing failing. So the list is
 /// compared against the option table here.
 #[test]
 fn every_regexp_option_is_validated() {

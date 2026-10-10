@@ -1,38 +1,11 @@
-//! Option files: `@file`, `~/.textrillrc` and `./.textrillrc`.
+//! Option files: `@file`, `~/.textrillrc` and `./.textrillrc`, with the legacy
+//! `.txt2htmlrc` still accepted so an existing configuration keeps working.
 //!
-//! The reference script reads option files before parsing its command line:
-//! `scripts/txt2html:838-845` calls
-//! `Getopt::ArgvFile::argvFile(startupFilename=>".txt2htmlrc", home=>1, current=>1)`,
-//! and the POD at `scripts/txt2html:509,759-771` documents all three forms as
-//! active behaviour. textrill reads the same three forms under its own names:
-//! `.textrillrc` is preferred, `.txt2htmlrc` is still accepted, so an existing
-//! configuration keeps working. Before any option file was read,
-//! `textrill @opts.txt` treated `@opts.txt` as an input filename and failed with
-//! `Could not open @opts.txt` -- a confusing failure rather than an honest
-//! "unknown option".
-//!
-//! # Precedence
-//!
-//! `@file` first, then the home directory, then the working directory, then the
-//! command line, so the command line always wins. Within a directory the
-//! preferred `.textrillrc` is read if it exists and `.txt2htmlrc` otherwise --
-//! never both, so an option array is applied once however many names a
-//! migrating user has.
-//!
-//! # Syntax
-//!
-//! One option per line, shell-like but not shell: whitespace around a line is
-//! trimmed, `#` starts a comment, and a value may be quoted. Options use the
-//! same spelling as the command line, including `--name=value`, `--name value`
-//! and the `no` prefix for booleans. A `--` line ends option processing, so
-//! everything after it is an input filename -- which is what `Getopt::ArgvFile`
-//! does and is the only way to name a file that begins with a dash.
-//!
-//! # Errors
-//!
-//! A bad option is reported as `file:line: message`, which is the whole
-//! ergonomic win over upstream: Perl's own error names neither the file nor the
-//! line, so a typo in a dotfile produces an unhelpful message.
+//! Precedence is `@file`, home, working directory, then the command line, so the
+//! command line always wins; within a directory only the preferred name is read.
+//! Syntax is one option per line (`#` comments, `--` ends options); a bad option
+//! is reported as `file:line: message`.
+//! Covered by tests/optionstest.rs.
 
 use std::path::{Path, PathBuf};
 
@@ -52,17 +25,15 @@ pub struct Token {
 
 /// Split option-file text into tokens, or return `Err` with the offending line.
 ///
-/// Exposed separately from applying them so the tokenizer can be tested without
-/// a filesystem, and so a diagnostic can be produced before anything is
-/// mutated.
+/// Exposed separately from applying them so it can be tested without a
+/// filesystem and before anything is mutated.
 pub fn tokenize(text: &str) -> Result<Vec<Token>, (usize, String)> {
     let mut out = Vec::new();
     let mut options_done = false;
     for (idx, raw) in text.lines().enumerate() {
         let lineno = idx + 1;
         if options_done {
-            // Everything after a `--` line is a filename, kept verbatim even if
-            // it is empty or contains a comment marker.
+            // After a `--` line, filenames keep comment markers and are not split.
             let trimmed = raw.trim();
             if !trimmed.is_empty() {
                 out.push(Token {
@@ -91,10 +62,8 @@ pub fn tokenize(text: &str) -> Result<Vec<Token>, (usize, String)> {
     Ok(out)
 }
 
-/// Remove a `#` comment, honouring quotes so a value may contain one.
-///
-/// An unquoted `#` starts a comment wherever it appears, which is what
-/// `Getopt::ArgvFile`'s own reader does. A quoted `#` does not.
+/// Remove a `#` comment, honouring quotes so a value may contain one: an
+/// unquoted `#` starts a comment, a quoted one does not.
 pub fn strip_comment(line: &str) -> &str {
     let bytes = line.as_bytes();
     let (mut quote, mut escaped) = (None, false);
@@ -160,10 +129,9 @@ pub fn split_tokens(line: &str) -> Vec<String> {
 
 /// Read and apply one option file.
 ///
-/// `apply` is called with each token in file order, so the caller controls how a
-/// token becomes an option and can report `file:line:` itself. Returning early
-/// on the first error is deliberate: half-appplied configuration with a
-/// diagnostic is worse than a clean refusal.
+/// `apply` is called with each token in file order; it controls how a token
+/// becomes an option and can report `file:line:` itself. Stops on the first
+/// error, since half-applied configuration is worse than a clean refusal.
 pub fn apply_file<F>(path: &Path, label: &str, mut apply: F) -> Result<bool, String>
 where
     F: FnMut(&str, usize, &str) -> Result<(), String>,
@@ -182,24 +150,16 @@ where
 
 /// The option-file names, preferred first.
 ///
-/// `.txt2htmlrc` is the name upstream gave the file and is still read, so a
-/// configuration written for the Perl tool keeps working. `.textrillrc` is
-/// textrill's own and wins when both exist in one directory: reading both would
-/// apply an array option twice, and a user who has written a `.textrillrc` has
-/// said which one they mean.
+/// `.txt2htmlrc` is still read for compatibility. `.textrillrc` wins when both
+/// exist in one directory: reading both would apply an array option twice.
 const RC_NAMES: [&str; 2] = [".textrillrc", ".txt2htmlrc"];
 
 /// The rc files to read, in precedence order, that exist.
 ///
-/// `home` is taken from `$HOME` and `current` is the working directory. A
-/// missing file is not an error -- the reference treats both as optional -- but
-/// a file that exists and cannot be read is, since that is a real fault.
-///
-/// The two directories are deduplicated rather than the two paths: on many
-/// systems they are the same directory (`HOME=$PWD`, a service unit, a
-/// container), and each directory is read exactly once, under whichever of its
-/// two names exists. The reference's `home=>1, current=>1` has no such
-/// protection and would apply the same file twice.
+/// `home` is `$HOME` and `current` the working directory. A missing file is
+/// optional, but one that exists and cannot be read is a fault. The two
+/// directories are deduplicated, so when they are the same each is read once
+/// under whichever name exists.
 pub fn rc_files(home: Option<&Path>, current: &Path) -> Vec<(PathBuf, String)> {
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     let mut handled: Vec<&Path> = Vec::new();
@@ -217,9 +177,8 @@ pub fn rc_files(home: Option<&Path>, current: &Path) -> Vec<(PathBuf, String)> {
     files
 }
 
-/// Render a path the way a user would recognise it: `~/.textrillrc` for the
-/// home file, `./.textrillrc` for the current-directory one, absolute
-/// otherwise. The name shown is the name that was read.
+/// Render a path as the user would recognise it: `~/`, `./` or absolute. The
+/// name shown is the name that was read.
 fn display_path(path: &Path, home: Option<&Path>) -> String {
     if let Some(h) = home {
         if let Ok(rest) = path.strip_prefix(h) {
@@ -272,7 +231,7 @@ mod tests {
         );
     }
 
-    // --- P1.2: textrill's own names, with the legacy ones still read ----------
+    // --- textrill and legacy rc names ----------------------------------------
 
     fn scratch(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("textrill-rcfile-{tag}"));
@@ -313,8 +272,7 @@ mod tests {
 
     #[test]
     fn home_and_cwd_are_one_directory_when_they_are_the_same_directory() {
-        // `HOME=$PWD`. The directory is handled once, under whichever of its
-        // two names exists, so an array option is applied once.
+        // `HOME=$PWD`: the directory is handled once under whichever name exists.
         for tag in ["same-both", "same-legacy"] {
             let d = scratch(tag);
             if tag == "same-both" {

@@ -1,22 +1,9 @@
-//! The shipped template library (Phase 4.2).
+//! The shipped template library: five templates selectable by
+//! `--template_library`, each treated like the matching `--body_template` or
+//! `--document_template` file.
 //!
-//! Five templates you can use without writing one -- let `--template_library`
-//! pick a template by name and the engine treats it exactly as if you had
-//! passed the corresponding `--body_template` or `--document_template` file.
-//!
-//! The templates are content, not machinery: each is a plain HTML file under
-//! `templates/`, embedded into the binary with [`include_str!`] so a static
-//! build carries the whole library and works from any directory. The library
-//! deliberately uses **only the seven fixed slots** and no
-//! `{{textrill:var:...}}` slots, so every shipped template converts with zero
-//! required arguments and produces no silent-empty or invisible frames. A
-//! template that wants a byline, date or the like is expected to be copied and
-//! given `{{textrill:var:name}}` slots of its own, which is exactly what `--var`
-//! is for (Phase 4.1).
-//!
-//! Each name carries its model: `article`, `book`, `manpage` and `slide` own
-//! the whole document, `bare` is the minimal body wrapper and converts
-//! byte-for-byte like no template at all.
+//! Plain HTML under `templates/`, embedded with [`include_str!`] and using only
+//! the fixed slots, so each converts with no arguments; verified by the tests.
 
 /// Which part of the page a shipped template owns.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -76,9 +63,7 @@ pub fn names() -> impl Iterator<Item = &'static str> {
 mod tests {
     use super::*;
 
-    /// Every shipped template is a valid template on its own: it contains the
-    /// `content` slot, uses only the seven fixed slots, and never a
-    /// `{{textrill:var:...}}` slot that would then demand an undeclared `--var`.
+    /// Every shipped template validates on its own with only the fixed slots.
     #[test]
     fn every_shipped_template_validates_with_no_parameters() {
         for s in LIBRARY {
@@ -86,8 +71,7 @@ mod tests {
         }
     }
 
-    /// The fixed-slots-only rule is a literal one, so a template that sneaks a
-    /// var slot in fails this gate instead of shipping a silent variance.
+    /// Guards the fixed-slots-only rule in [`LIBRARY`].
     #[test]
     fn no_shipped_template_uses_a_var_slot() {
         for s in LIBRARY {
@@ -99,8 +83,7 @@ mod tests {
         }
     }
 
-    /// The library is exactly the documented five, in a stable order, with the
-    /// documented models.
+    /// Pins the library to the documented five, in a stable order and models.
     #[test]
     fn the_library_is_the_documented_five() {
         let got: Vec<(&str, Model)> = LIBRARY.iter().map(|s| (s.name, s.model)).collect();

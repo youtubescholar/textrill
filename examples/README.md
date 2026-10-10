@@ -10,7 +10,7 @@ text itself unaltered.
 | file | source / edition | licence (confirmed) | counts (B/H/P/S/br) | notes |
 | --- | --- | --- | --- | --- |
 | homer.txt | Project Gutenberg Odyssey (pre-existing) | PD (Gutenberg) | 38477 / 0 / 64 / 39 / 34 | provenance in commit `ab2bb04` |
-| gelbenhuegel.txt | github.com/carpedavid/gelbenhugel, `src/content/docs/` (125 md files, concatenated) | CC0 1.0 Universal | 44199 / 16 / 171 / 1 / 312 | David Garrett / Amalara Game Studio; city setting for Shadowdark/Cairn; markdown kept as-is |
+| gelbenhuegel.txt | github.com/carpedavid/gelbenhugel, `src/content/docs/` (125 md files, concatenated) | CC0 1.0 Universal | 44484 / 16 / 191 / 1 / 334 | David Garrett / Amalara Game Studio; city setting for Shadowdark/Cairn; markdown kept as-is |
 | septuagint_swete_genesis.txt | H.B. Swete, *The Old Testament in Greek* I (Cambridge UP, 4th ed. 1909/1930), Genesis only, via `subatomicglue/AncientGreekSources` | PD (1909–1930 ed.) | 378854 / 0 / 50 / 0 / 50 | polytonic Greek; verse anchors; `[…]` = edition's lacuna reconstructions |
 | mohe_zhiguan_vol001.txt | zh.wikisource.org `摩訶止觀/卷001` (智顗, Sui dynasty, 6th c.) | PD (author died >100 y; pre-1931) | 48433 / 0 / 1 / 0 / 7 | CJK text is one continuous paragraph (no blank lines); Wikisource transcription layer CC-BY-SA |
 | erya.txt | zh.wikisource.org `爾雅` (Warring States–Western Han lexicon, all 19 釋-X chapters) | PD (author died >100 y; pre-1931) | 51304 / 0 / 41 / 0 / 1028 | terse entry-and-gloss lines yield many `<br>`; Wikisource transcription layer CC-BY-SA |

@@ -5,7 +5,7 @@
 // Software Foundation, either version 3 of the License, or (at your option)
 // any later version.  See the LICENSE file for the full text.
 
-//! The concurrency contract from `SURFACE.md` §3, as tests.
+//! The concurrency contract, as tests.
 //!
 //! These are the Rust form of `BacklogTests` in the Python suite, plus the
 //! panic-handler test. They use a converter that sleeps, so the race the
@@ -49,7 +49,7 @@ fn drain_until_idle(worker: &Arc<ConversionWorker>, timeout: Duration) -> Vec<Ou
     outcomes
 }
 
-/// A6: a burst must not run every queued conversion.
+/// A burst must not run every queued conversion.
 #[test]
 fn a_burst_does_not_run_every_queued_conversion() {
     let worker = slow_worker(1);

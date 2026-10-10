@@ -177,7 +177,7 @@ fn large_heading_list_document_is_not_quadratic() {
     );
 }
 
-// ---------------------------------------------------------------- P5
+// ---------------------------------------------------------------- empty-match guard
 
 /// The criterion that drives the empty-match guard.
 ///
@@ -277,7 +277,7 @@ fn a_hanging_dictionary_entry_is_reported_and_skipped() {
 ///
 /// Both substitute at most once per paragraph or per section, so an
 /// empty-matching pattern terminates there, and the Perl original accepts it.
-/// Guarding them would be a Tier 1 byte-parity divergence for no benefit.
+/// Guarding them would be a byte-parity divergence for no benefit.
 /// Measured against the reference: `/|x/ -o-> url` emits the same empty
 /// anchor in both.
 #[test]
@@ -316,10 +316,10 @@ fn the_pipe_delimited_form_still_links() {
     );
 }
 
-/// P6: the link pass must not scale superlinearly with paragraph size.
+/// The link pass must not scale superlinearly with paragraph size.
 ///
 /// The existing quadratic test above covers document shape; this one covers the
-/// dictionary path specifically, because P6's two changes were about work done
+/// dictionary path specifically, because the two changes here were about work done
 /// per rule per paragraph. It asserts a *ratio*, not a wall-clock number: the
 /// benchmark host has background load (a desktop greeter measured at 32% CPU)
 /// that made every absolute timing bimodal, so a threshold in seconds would be
@@ -370,7 +370,7 @@ fn link_work_scales_linearly_with_paragraph_count() {
     );
 }
 
-// --- P6 prefilter integration -------------------------------------------------
+// --- prefilter integration -------------------------------------------------
 
 /// The prefilter must never lose a link: any `may_match == false` has to be a
 /// genuine non-match.
@@ -505,7 +505,7 @@ fn prefilter_sees_literals_introduced_by_earlier_rules() {
     );
 }
 
-/// Prefilter coverage is a real number in the plan, so it is asserted rather
+/// Prefilter coverage is a real number, so it is asserted rather
 /// than asserted-in-prose. Every shipped rule now yields a required literal.
 ///
 /// The nine that used to be unfiltered are the `\b...\b` family and RFC:

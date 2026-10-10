@@ -9,15 +9,15 @@
 # fail. That check lives here, in one place, rather than being copied into the
 # second runner and left to drift. A guard that is duplicated is a guard that
 # can disagree with itself, which is the whole class of bug these functions
-# exist to catch (P20, P21).
+# exist to catch.
 #
 # The functions read the arrays `cases.sh` declares (EXTRA, CLI, INPUT, GOLDEN,
 # NOGOLDEN); they take no table argument because bash arrays are global.
 
-# P20. The full run iterates "${!EXTRA[@]}" and reads CLI[$stem] for each, so
+# The full run iterates "${!EXTRA[@]}" and reads CLI[$stem] for each, so
 # the two arrays have to name the same cases. They do today -- 61 and 61 -- but
 # that was a fact about the file, not something the harness checked, and the way
-# it breaks is the P2 shape exactly: a case is written, wired up on one side, and
+# it breaks is the same shape exactly: a case is written, wired up on one side, and
 # never runs. It fails silently in the direction that matters, because a case
 # that does not run cannot fail.
 #
@@ -28,13 +28,13 @@
 # and the message names a variable rather than a case. So both directions are
 # checked by name.
 duplicate_key_check() {
-  # P21. `alignment_check` compares key *sets*, so it cannot see a key that was
+  # `alignment_check` compares key *sets*, so it cannot see a key that was
   # assigned twice: by the time it runs, the second assignment has already won
-  # and the array looks perfectly consistent. That is not a hypothetical. A8 added
-  # a new `pre_explicit_blank` case without noticing the stem was taken, and the
-  # older case it displaced vanished -- silently, because both happened to agree
+  # and the array looks perfectly consistent. That is not hypothetical. A new
+  # `pre_explicit_blank` case was added without noticing the stem was taken, and
+  # the older case it displaced vanished -- silently, because both happened to agree
   # with the reference, so the corpus stayed at 47/47 with one case never running.
-  # A case that does not run cannot fail, which is the P2 shape one level down.
+  # A case that does not run cannot fail, which is the same shape one level down.
   #
   # So the check has to run against the *source text*, where both assignments are
   # still visible, not against the sourced arrays where one has been lost. Any
@@ -102,11 +102,14 @@ alignment_check() {
   #   * "golden differs for a stated reason" -- the case HAS a golden, the
   #     reference does not match it, and the reason says why. The differential
   #     comparison against the reference is still the oracle and still runs.
-  #   * "differential must fail: <reason>" -- the case has NO golden, because
-  #     upstream ships none, and the port deliberately diverges from the
-  #     reference, so a byte comparison cannot be the oracle at all. The entry
-  #     has to say so explicitly, and the differential comparison for that case
-  #     is then expected to fail rather than being silently tolerated.
+  #   * "differential must fail: <reason>" -- the port deliberately diverges
+  #     from the reference, so a byte comparison cannot be the oracle at all.
+  #     The entry has to say so explicitly, and the differential comparison for
+  #     that case is then expected to fail rather than being silently tolerated.
+  #     This is honest whether or not upstream also ships a golden: when one
+  #     exists it records the reference's lossy output, which is exactly what
+  #     the port is departing from (list-advanced), and the differential is
+  #     still required to mismatch.
   #
   # Without the second kind, "opt_injection" would have had to be written as a
   # golden-shaped NOGOLDEN entry to get past the check below, which is exactly
@@ -121,10 +124,8 @@ alignment_check() {
     fi
     case "${NOGOLDEN[$stem]}" in
       "differential must fail:"*)
-        if [ -f "$goldendir/good_$stem.html" ]; then
-          echo "ALIGN: NOGOLDEN['$stem'] claims no golden exists but one does"
-          bogus=1
-        fi
+        # Only that the case exists, checked above. A golden may or may not
+        # exist; either way the port is required to differ from the reference.
         ;;
       *)
         if [ ! -f "$goldendir/good_$stem.html" ]; then

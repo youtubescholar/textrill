@@ -1,56 +1,15 @@
 //! A sound required-substring prefilter for link rules.
 //!
-//! The link pass asks every rule to `captures()` every paragraph, which is
-//! 257,140 invocations for the shipped 52-rule dictionary and a 2 MB
-//! document. Most of them match nothing. The prefilter answers "could this
-//! rule possibly match here?" with a byte scan instead of a regex call, and
-//! only runs the regex once the answer is yes.
-//!
-//! # Soundness
-//!
-//! The only property that matters is one-directional:
-//!
-//! ```text
-//! prefilter_rejects(haystack)  ==>  !regex.is_match(haystack)
-//! ```
-//!
-//! A false *accept* only costs the time the regex would have spent anyway.
-//! A false *reject* silently drops a link, which is the one failure mode
-//! this project cares most about, so the extractor is built to give up
-//! (return `None`, i.e. "always run the regex") whenever it cannot prove a
-//! literal is genuinely required. Every branch that returns a literal is
-//! one where that literal appears in *every* string the regex can match.
-//!
-//! # How a required literal is found
-//!
-//! [`regex_syntax::hir`] gives the parsed pattern, and the analysis walks it
-//! with that bias. `required` returns a set of *alternatives*, where a
-//! match requires at least one alternative to be present:
-//!
-//! - a literal contributes itself;
-//! - a single-character class contributes that character;
-//! - a repetition with `min >= 1` contributes its body's requirement, because
-//!   it must match at least once, and nothing at all when `min == 0`;
-//! - an alternation contributes the union of its branches, because matching
-//!   it means matching exactly one of them;
-//! - a group is transparent;
-//! - anchors, look-around and `\b` contribute nothing, which is sound because
-//!   they match the empty string and so constrain position, not content;
-//! - anything else -- a multi-character class, a back-reference, a named
-//!   group we cannot see inside -- contributes nothing.
-//!
-//! A concatenation must match *all* of its children, so it inherits the
-//! single child with the longest guaranteed literal rather than combining
-//! them. That is weaker than intersecting the children, and being weaker is
-//! the safe direction: it can only reject less often.
-//!
-//! # Case folding
-//!
-//! Rules compiled case-insensitively carry `nocase`. Rather than reasoning
-//! about Unicode case tables, both the literal and the haystack are compared
-//! in `to_ascii_lowercase`. That is sound: ASCII case folding is exact, and
-//! for non-ASCII bytes the comparison is on the original bytes, which only
-//! makes the prefilter accept more often than a matching regex would.
+//! Answers "could this rule match here?" with a byte scan instead of a regex
+//! call. Sound one-directionally: a reject guarantees the regex cannot match, so
+//! a false accept only costs time while a false reject would silently drop a
+//! link. The extractor therefore returns `None` ("always run the regex") unless
+//! it can prove a literal is required, deriving it from the parsed HIR:
+//! alternations union their branches (unconstrained if any branch is), `min >= 1`
+//! repetitions and captures pass through, a concatenation keeps its most
+//! selective child, and anchors/look-around/`\b` add no requirement because they
+//! match empty and constrain position, not content. Both literal and haystack
+//! are ASCII-folded, which accepts more often, never less.
 
 use regex_syntax::hir::{Class, Hir, HirKind};
 
@@ -59,14 +18,9 @@ use regex_syntax::hir::{Class, Hir, HirKind};
 pub struct RequiredLiteral {
     /// Lowercased, so the haystack must be lowercased to match against it.
     bytes: Vec<u8>,
-    /// A prebuilt searcher over `bytes`.
-    ///
-    /// `memmem::Finder` rather than a hand-written scan: this runs once per rule
-    /// per paragraph (202,745 times on the 2 MB benchmark, 92% of them
-    /// rejections), and `memmem` uses SIMD with a rare-byte skip heuristic.
-    /// A naive `windows().any()` on a 150-byte paragraph for a short literal is
-    /// byte-at-a-time, and that was measurably enough to make the filter cost
-    /// more than the regex calls it removed.
+    /// A prebuilt searcher over `bytes`. `memmem::Finder` uses SIMD; a naive
+    /// `windows().any()` scan was measurably slower than the regex calls it
+    /// removed.
     finder: memchr::memmem::Finder<'static>,
 }
 
@@ -83,13 +37,8 @@ impl RequiredLiteral {
 
 /// Build a searchable lowercased literal.
 ///
-/// The bytes are leaked so the `Finder` can borrow them for `'static`. The leak
-/// is bounded by the pattern set: literals are only ever built from dictionary
-/// and option patterns, of which there are tens, once each at load time. That
-/// is the same reasoning as `ascii_re_cached` -- the input set is fixed and
-/// small -- but unlike that one this is not enforced by the type system, so it
-/// is worth stating. `memmem::Finder::new` can only be avoided by reimplementing
-/// its search, which is the thing being avoided.
+/// The bytes are leaked so the `Finder` can borrow them for `'static`; the leak
+/// is bounded because literals are only built from the fixed pattern set at load.
 fn literal(s: &str) -> RequiredLiteral {
     let owned = s.to_ascii_lowercase().into_bytes();
     let bytes: &'static [u8] = Box::leak(owned.into_boxed_slice());
@@ -106,9 +55,7 @@ pub type Alternatives = Vec<RequiredLiteral>;
 
 /// Does `hir` force any literal to be present in a match?
 ///
-/// `Ok(None)` is the honest answer "I cannot prove one"; the caller then
-/// runs the regex. `Err` is only for a pattern that will not parse, which
-/// `fancy_regex` has already rejected by the time we get here.
+/// `Ok(None)` means "I cannot prove one"; the caller then runs the regex.
 fn required(hir: &Hir) -> Result<Option<Alternatives>, Box<regex_syntax::Error>> {
     Ok(match hir.kind() {
         HirKind::Empty | HirKind::Look(_) => None,
@@ -116,10 +63,8 @@ fn required(hir: &Hir) -> Result<Option<Alternatives>, Box<regex_syntax::Error>>
         HirKind::Literal(lit) => Some(alternatives_of(lit)),
 
         HirKind::Class(class) => {
-            // A class of exactly one character is that character. Unicode
-            // ranges collapse to their representative char, which is
-            // unsound for the *content* but harmless in practice only if we
-            // reject rather than accept -- so only an exact singleton is used.
+            // A singleton class is that character; multi-character and Unicode
+            // ranges are not used, since a representative char is unsound.
             class_singleton(class).map(|c| vec![literal(&c.to_string())])
         }
 
@@ -136,9 +81,8 @@ fn required(hir: &Hir) -> Result<Option<Alternatives>, Box<regex_syntax::Error>>
         }
 
         HirKind::Concat(parts) => {
-            // Every part must match, so any one part's requirement is a
-            // valid necessary condition. Take the longest guaranteed
-            // literal: the most selective filter, and any is sound.
+            // Every part must match, so any one part's requirement is valid;
+            // take the longest guaranteed literal, the most selective filter.
             let mut best: Option<Alternatives> = None;
             for part in parts {
                 let candidate = required(part)?;
@@ -155,17 +99,13 @@ fn required(hir: &Hir) -> Result<Option<Alternatives>, Box<regex_syntax::Error>>
         }
 
         HirKind::Alternation(branches) => {
-            // Exactly one branch matches, so the union of the branches'
-            // requirements is a necessary condition: at least one holds.
+            // Exactly one branch matches, so the union is a necessary condition;
+            // an unconstrained branch makes the whole alternation unconstrained.
             let mut union = Alternatives::new();
             for branch in branches {
                 if let Some(alts) = required(branch)? {
                     union.extend(alts);
                 } else {
-                    // One branch is unconstrained, so the alternation as a
-                    // whole is unconstrained. Returning the union would be
-                    // unsound: the unconstrained branch may match while none
-                    // of the collected literals appear.
                     return Ok(None);
                 }
             }
@@ -185,19 +125,16 @@ fn alt_len(alts: &Alternatives) -> usize {
 }
 
 fn alternatives_of(lit: &regex_syntax::hir::Literal) -> Alternatives {
-    // A `Literal` is one contiguous byte string, so it is searchable as-is.
-    // The bytes are always valid UTF-8 in Unicode mode, but the lossy path is
-    // avoided rather than assumed: a literal we cannot decode is dropped,
-    // which only makes the prefilter run the regex more often.
+    // One contiguous byte string, searchable as-is. A literal we cannot decode
+    // is dropped, which only makes the prefilter run the regex more often.
     match std::str::from_utf8(&lit.0) {
         Ok(s) => vec![literal(s)],
         Err(_) => Vec::new(),
     }
 }
 
-/// The single character of a class, but only when it is exactly one ASCII
-/// character. `Class::literal` already refuses empty and multi-element
-/// classes, so this cannot return a partial match set.
+/// The class's single character, only when it is exactly one ASCII character.
+/// `Class::literal` already refuses empty and multi-element classes.
 fn class_singleton(class: &Class) -> Option<char> {
     let bytes = class.literal()?;
     if bytes.len() == 1 && bytes[0].is_ascii() {
@@ -209,12 +146,9 @@ fn class_singleton(class: &Class) -> Option<char> {
 
 /// Extract the required literal for a pattern, if one can be proven.
 ///
-/// `pattern` must be the *translated* pattern -- the exact string handed to
-/// `fancy_regex` -- because the HIR is parsed from it and must describe the
-/// regex that actually runs. Case folding needs no parameter because the
-/// analysis lowercases both sides unconditionally, which is always sound and
-/// costs nothing: a case-sensitive rule simply sees a haystack whose case
-/// happens to be folded, so it may accept more often, never less.
+/// `pattern` must be the translated pattern actually handed to `fancy_regex`.
+/// Case folding needs no parameter: both sides are folded unconditionally, which
+/// is always sound.
 pub fn required_literal(pattern: &str) -> Option<Alternatives> {
     // Translation can leave constructs `regex-syntax` rejects only in exotic
     // cases; a parse failure must never be read as "no literal required" in
@@ -230,16 +164,9 @@ pub fn required_literal(pattern: &str) -> Option<Alternatives> {
 
 /// The runtime half: does `haystack` contain any of the literals?
 ///
-/// Folding happens here rather than at the call site on purpose. The literals
-/// are stored lowercased, so a caller that forgot to fold the haystack would
-/// make the prefilter reject uppercase text that the case-insensitive regex
-/// would have matched -- a silently dropped link, caused by an invisible
-/// precondition. Taking a `&str` and folding it internally means the
-/// precondition cannot be forgotten.
-///
-/// The cost is one allocation per rule per paragraph, which would defeat the
-/// point, so callers that check many rules against one paragraph should fold
-/// once and use [`may_match_prefolded`].
+/// Folding happens here, not at the call site, so a caller cannot forget it -- a
+/// forgotten fold would silently drop uppercase links. Checking many rules
+/// against one paragraph should fold once and use [`may_match_prefolded`].
 pub fn may_match(haystack: &str, alternatives: &Alternatives) -> bool {
     if alternatives.is_empty() {
         return true;
@@ -276,8 +203,7 @@ mod tests {
 
     #[test]
     fn inner_literal_after_a_class_is_found() {
-        // The shape that defeated prefix extraction: the literal is not at
-        // the start of the pattern.
+        // The literal is not at the start of the pattern.
         assert_eq!(
             lit_of(r"^\s*([^\w]+\s*)?comp\.lang\."),
             Some(vec!["comp.lang.".to_string()])
@@ -332,9 +258,8 @@ mod tests {
 
     #[test]
     fn concat_takes_the_longest_child_literal() {
-        // The alternation scores highest as a whole (3+2 > 1 and > 3), and it
-        // contributes both branches, which is the point: a match takes one of
-        // them, so either being present is enough.
+        // The alternation is most selective as a whole and contributes both
+        // branches: a match takes one, so either being present is enough.
         assert_eq!(
             lit_of("a(bbb|cc)ddd"),
             Some(vec!["bbb".to_string(), "cc".to_string()])
@@ -343,8 +268,7 @@ mod tests {
 
     #[test]
     fn capture_groups_are_transparent() {
-        // Both sides are required and the same length, so either is a sound
-        // choice; the test pins the current tie-break rather than a preference.
+        // Either side is a sound choice; the test pins the tie-break.
         let got = lit_of("(foo)bar").unwrap();
         assert!(got == vec!["foo".to_string()] || got == vec!["bar".to_string()]);
     }
@@ -365,8 +289,8 @@ mod tests {
         assert_eq!(lit_of("a(b"), None);
     }
 
-    // The invariant, checked directly: whenever the prefilter rejects, the
-    // regex really cannot match. Run over a corpus of patterns and haystacks.
+    // The invariant checked directly: whenever the prefilter rejects, the regex
+    // really cannot match. Run over a corpus of patterns and haystacks.
     #[test]
     fn rejection_implies_no_match() {
         let patterns = [

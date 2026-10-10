@@ -39,7 +39,7 @@ REPORT_SUFFIX = re.compile(r"^textrill:\s+report\s+")
 def normalise(path: Path) -> None:
     """Apply the corpus's one canonicalisation (the generator meta), so a
     capture does not go stale the way the crate version bumps. Same rule, same
-    file the corpus and fuzzer use: one copy of a normaliser, or they drift."""
+    file the corpus uses: one copy of a normaliser, or they drift."""
     subprocess.run(
         [sys.executable, str(HERE / "normalize.py"), str(path)],
         check=True,

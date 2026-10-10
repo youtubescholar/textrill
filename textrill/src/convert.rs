@@ -14,22 +14,18 @@ use crate::links::{self, LinkParser};
 use crate::options::{Encoding, Options, SingleByte};
 
 /// One or more inputs that could not be opened, and the output built from
-/// whatever *was* readable (A9). The caller should write that output if it has
-/// anywhere to put it, and exit non-zero regardless.
+/// whatever *was* readable. The caller writes that output and exits non-zero.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnreadableInput {
     /// The input paths that could not be opened, in the order given.
     pub unreadable: Vec<String>,
-    /// The document produced from the inputs that were readable. Empty when
-    /// none of them were.
+    /// The document produced from the inputs that were readable; empty when none
+    /// were.
     pub out: String,
 }
 
-/// How [`read_any_file`] resolved a file's bytes, so a caller can report it
-/// instead of guessing. `Auto` records which of the two decodings actually
-/// happened, because "auto" that silently becomes Latin-1 is indistinguishable
-/// from "auto" that silently became UTF-8 — and the difference is what P7.1's
-/// output divergence is made of.
+/// How [`read_any_file`] resolved a file's bytes. `Single` records which
+/// single-byte decoding the `Auto` path fell back to, so a caller can name it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resolved {
     /// The bytes were valid UTF-8 and were decoded as such.
@@ -37,10 +33,6 @@ pub enum Resolved {
     /// A single-byte encoding, by guess (`Auto`) or because it was named.
     Single(SingleByte),
     /// UTF-16 or UTF-32, little- or big-endian.
-    ///
-    /// These are carried separately from [`SingleByte`] rather than folded into
-    /// one "other" case so a status bar can say `utf-16le` without the caller
-    /// having to re-derive it.
     Wide(Wide),
 }
 
@@ -80,16 +72,8 @@ impl Resolved {
         }
     }
 
-    /// How loudly this result deserves to be reported, when several inputs in
-    /// one run resolved differently and only one can be named.
-    ///
-    /// UTF-8 is the silent default and ranks lowest, so an ASCII file cannot
-    /// hijack the report. A single-byte legacy encoding ranks above it, because
-    /// that is a *guess* and the user most wants to know about it -- a CP1251
-    /// file read as CP1252 is the failure this reporting exists to make visible.
-    /// UTF-16/32 outranks both: it means the bytes needed structural detection to
-    /// be understood at all, so it is the most surprising thing that could have
-    /// happened, and the one most worth naming.
+    /// Rank for choosing which encoding to report when several inputs resolve
+    /// differently: UTF-8 (0) < single-byte guess (1) < UTF-16/32 (2).
     fn notice_rank(self) -> u8 {
         match self {
             Resolved::Utf8 => 0,
@@ -114,67 +98,32 @@ impl Resolved {
 
 /// Read a text file for conversion, reporting which encoding was used.
 ///
-/// Perl reads raw bytes and keeps 8-bit characters intact; mimic that by
-/// decoding UTF-8 when the bytes are valid UTF-8, and falling back to a
-/// single-byte encoding otherwise.
-///
-/// The fallback is **CP1252**, not Latin-1, and this is P7.1's root cause
-/// rather than a stylistic choice. The two agree on `0x00`-`0x7F` and on
-/// `0xA0`-`0xFF` — which is the entire range Latin-1 defines — and differ
-/// only on `0x80`-`0x9F`, where Latin-1 holds C1 control characters and CP1252
-/// holds the typographic punctuation every Windows text file actually uses.
-///
-/// Decoding as Latin-1 made `demoronize` unreachable on exactly the files it
-/// exists to serve. [`crate::chars::demoronize_char`] maps U+201C, U+2019,
-/// U+2013 and the rest — the CP1252 code points. A Latin-1 decode of the same
-/// byte produces U+009C, U+0092, U+0093, none of which are in the table, so
-/// every substitution silently did nothing. Measured on a CP1252 file
-/// containing `0x93 0x94 0x96 0x97`:
-///
-/// ```text
-/// Perl emits the raw bytes; a browser reading the result as CP1252 shows
-///   "hello" and dash -- .
-/// Latin-1 fallback emitted UTF-8 C2 93, C2 94, C2 96, C2 97 -- C1 control
-///   characters, which render as nothing at all.
-/// ```
-///
-/// CP1252 also defines `0x81`, `0x8D`, `0x8F`, `0x90` and `0x9D` as
-/// *undefined*. They are left as the Latin-1 control character, matching what
-/// browsers do, because inventing a glyph for them would be a guess and a
-/// visible one.
+/// Valid UTF-8 is decoded as UTF-8; otherwise the fallback is **CP1252**, not
+/// Latin-1, whose `0x80`-`0x9F` range holds the typographic punctuation
+/// [`crate::chars::demoronize_char`] acts on. CP1252's undefined bytes (`0x81`,
+/// `0x8D`, `0x8F`, `0x90`, `0x9D`) are left as their Latin-1 control character.
 pub fn read_any_file_with_encoding(path: &str) -> Option<(String, Resolved)> {
     read_with(path, Encoding::Auto)
 }
 
-/// [`read_any_file_with_encoding`], but honouring an explicit `--encoding`.
-///
-/// The probe in [`Encoding::Auto`] cannot tell a CP1252 file whose bytes happen
-/// to be valid UTF-8 from a genuine UTF-8 file, and that is not a rare edge: a
-/// short CP1252 document can be valid UTF-8 by accident. `Utf8` and `Cp1252`
-/// exist so the caller can settle it, which is why this is a separate function
-/// rather than a parameter bolted onto the other.
+/// [`read_any_file_with_encoding`], but honouring an explicit `--encoding`. An
+/// explicit `Utf8`/`Cp1252` settles the case `Auto` cannot: a short CP1252
+/// document whose bytes happen to be valid UTF-8.
 pub fn read_with(path: &str, encoding: Encoding) -> Option<(String, Resolved)> {
     let bytes = std::fs::read(path).ok()?;
     Some(decode_bytes_with(&bytes, encoding))
 }
 
-/// Decode `bytes` under `encoding`. Split out from [`read_with`] because the
-/// GUI needs the same rule without a file, and because it is directly testable
-/// that way — the detection order is the substance of this function and it
-/// should not only be reachable through the filesystem.
+/// Decode `bytes` under `encoding`. Split out from [`read_with`] so the GUI can
+/// reuse it without a file and so the detection order is directly testable.
 pub fn decode_bytes_with(bytes: &[u8], encoding: Encoding) -> (String, Resolved) {
     match encoding {
         Encoding::Auto => detect(bytes),
-        // Lossy on purpose, and only reachable when the caller has declared the
-        // encoding. `String::from_utf8_lossy` substitutes U+FFFD rather than
-        // failing, because a converter that aborts on one bad byte is not
-        // useful; the substitution is visible in the output instead of silent.
+        // Lossy on purpose: bad bytes become visible U+FFFD rather than aborting.
         Encoding::Utf8 => (String::from_utf8_lossy(bytes).into_owned(), Resolved::Utf8),
         wide @ (Encoding::Utf16Le | Encoding::Utf16Be | Encoding::Utf32Le | Encoding::Utf32Be) => {
-            // An explicitly named encoding still has to cope with a BOM: the
-            // user names the *encoding*, not the absence of a mark, and leaving
-            // the mark in would emit U+FEFF as the first character of the
-            // document.
+            // A named encoding still has to cope with a BOM, or U+FEFF would
+            // become the document's first character.
             let skip = bom(bytes).map_or(0, |(_, n)| n);
             decode_utf16_or_32(bytes, wide, skip)
         }
@@ -192,9 +141,7 @@ pub fn decode_bytes_with(bytes: &[u8], encoding: Encoding) -> (String, Resolved)
 /// structure, then UTF-8 validity, then the single-byte guess.
 fn detect(bytes: &[u8]) -> (String, Resolved) {
     if let Some((encoding, skip)) = bom(bytes) {
-        // A UTF-8 BOM is not an encoding change -- everything after it is UTF-8
-        // either way -- so it is deliberately kept in the text. The UTF-16 and
-        // UTF-32 marks are metadata and go.
+        // A UTF-8 BOM is kept in the text; the UTF-16/32 marks are skipped.
         if encoding != Encoding::Utf8 {
             return decode_utf16_or_32(bytes, encoding, skip);
         }
@@ -211,17 +158,10 @@ fn detect(bytes: &[u8]) -> (String, Resolved) {
     }
 }
 
-/// The byte-order mark, if there is one, as the encoding it declares and how
-/// many bytes it occupies.
-///
-/// A BOM is a declaration by the writer and outranks every heuristic, which is
-/// why it is checked first and why the pre-P7.4 code was wrong to treat `FF FE`
-/// as a decode error: those two bytes are a guarantee, not garbage.
+/// The byte-order mark, if present, as the encoding it declares and its length
+/// in bytes. A BOM outranks every heuristic, so it is checked first.
 fn bom(bytes: &[u8]) -> Option<(Encoding, usize)> {
-    // UTF-32LE's BOM starts with UTF-16LE's, so the longer mark must be tested
-    // first or every UTF-32LE file with a BOM decodes as UTF-16LE and comes out
-    // as pairs of Latin-1 characters -- which is a wrong answer that still looks
-    // like text, the most expensive kind.
+    // UTF-32LE's BOM starts with UTF-16LE's, so the longer mark is tested first.
     for (encoding, mark) in [
         (Encoding::Utf32Le, &[0xFF, 0xFE, 0x00, 0x00][..]),
         (Encoding::Utf32Be, &[0x00, 0x00, 0xFE, 0xFF][..]),
@@ -238,28 +178,18 @@ fn bom(bytes: &[u8]) -> Option<(Encoding, usize)> {
 
 /// Structural UTF-16 detection for BOM-less files.
 ///
-/// This is a heuristic, and the ordering is the substance of it. UTF-16LE text
-/// is *valid UTF-8* whenever every code unit is below `0x80` -- which is ASCII
-/// prose, i.e. most documents -- so a UTF-8 validity check cannot distinguish it
-/// and must not run first. What UTF-16 does have is a NUL every second byte, in
-/// one alignment or the other, and no other encoding this port decodes produces
-/// that by accident.
-///
-/// UTF-32 is deliberately not inferred. Its three NULs per unit are distinctive,
-/// but a document with no NULs at all is ambiguous in a way that does not
-/// resolve, and a confident wrong guess is worse than the mojibake. UTF-32
-/// without a BOM is read as UTF-16, which at least gets the ASCII range right.
+/// UTF-16LE ASCII prose is valid UTF-8, so a validity check must not run first;
+/// UTF-16 has a NUL every second byte in one alignment and nothing else this port
+/// decodes does. UTF-32 is deliberately not inferred: without a BOM it is
+/// ambiguous, so it is read as UTF-16 rather than risk a confident wrong guess.
 fn sniff_utf16_or_32(bytes: &[u8]) -> Option<Encoding> {
     const WINDOW: usize = 4096;
     let sample = &bytes[..bytes.len().min(WINDOW)];
     if sample.len() < 8 {
         return None;
     }
-    // Counted from the bytes rather than derived from `len / 2`: an odd-length
-    // sample (a truncated final code unit is normal in real files) puts one
-    // more byte on the even side, and a budget that silently overcounts one
-    // alignment would loosen exactly the threshold that keeps this from firing
-    // on ordinary text.
+    // Counted from the bytes rather than `len / 2`: an odd-length sample puts one
+    // more byte on the even side, which would loosen the threshold.
     let nulls_even = sample.iter().step_by(2).filter(|&&b| b == 0).count();
     let nulls_odd = sample
         .iter()
@@ -275,30 +205,10 @@ fn sniff_utf16_or_32(bytes: &[u8]) -> Option<Encoding> {
             .step_by(2)
             .filter(|&&b| b != 0)
             .count();
-    // The threshold is 1/8, which is a measured number rather than a round one.
-    // An earlier draft used 2/3, on the assumption that real prose is mostly
-    // ASCII and therefore mostly NUL; measuring the NUL fraction per alignment
-    // on representative text says otherwise:
-    //
-    //   UTF-16LE, ASCII prose      1.00     UTF-16LE, Russian prose   0.21
-    //   UTF-16LE, Greek prose      0.20     UTF-16LE, dense Cyrillic 0.15
-    //   UTF-16BE, ASCII prose      1.00     UTF-16LE, short Russian   0.25
-    //
-    // Two thirds therefore catches only the English case, which is the case a
-    // validity check already gets *wrong* and the easy one to miss. Against it,
-    // nothing that ought to stay UTF-8 comes close:
-    //
-    //   ASCII document   0.00   UTF-8 Russian  0.00   UTF-8 CJK  0.00
-    //   UTF-8 with NULs  0.04   HTML          0.00   raw bytes  0.01
-    //
-    // So 1/8 sits with a 3x margin above the worst negative and below the
-    // weakest positive. The cross-alignment factor rejects files that merely
-    // contain a few scattered NULs, where the two counts would be similar.
-    //
-    // The residual limit is real and not hidden by the threshold: BOM-less
-    // UTF-16 with very little ASCII in it -- 0.15 is the floor for real prose,
-    // and a document of nothing but Cyrillic letters reaches 0 -- is not
-    // detectable by any rule short of a statistical model. That is what
+    // Threshold 1/8, measured: the NUL fraction runs 0.15-0.25 for real
+    // non-ASCII UTF-16 prose and 1.00 for ASCII, against a worst UTF-8 negative
+    // of 0.04; 2/3 would catch only ASCII. The `* 4` factor rejects scattered
+    // NULs. BOM-less UTF-16 with almost no ASCII is undetectable, which is what
     // `--encoding utf-16le` is for.
     if nulls_even * 8 > even && nulls_even > nulls_odd * 4 {
         Some(Encoding::Utf16Be)
@@ -309,29 +219,15 @@ fn sniff_utf16_or_32(bytes: &[u8]) -> Option<Encoding> {
     }
 }
 
-/// Decode UTF-16 or UTF-32, skipping `skip` leading bytes (a BOM, normally).
+/// Decode UTF-16/32 code units into text, joining UTF-16 surrogate pairs.
 ///
-/// A lone surrogate is not a character; `char::from_u32` rejects it and U+FFFD
-/// is what every other decoder substitutes, so a malformed or truncated file
-/// yields visible replacement characters instead of a panic. Trailing bytes
-/// that do not make a whole code unit are dropped rather than padded, since the
-/// alternative would invent a character from half a unit.
-/// Turn code units into text, joining UTF-16 surrogate pairs.
-///
-/// `char::from_u32` returns `None` for a surrogate code point, because a
-/// surrogate is half a character and not one. Feeding UTF-16 units straight to
-/// it therefore replaced every astral character with *two* U+FFFD: a file
-/// containing a single emoji decoded as a pair of replacement glyphs. That was
-/// a real defect, not a theoretical one -- anything outside the BMP is
-/// unrepresentable as one UTF-16 unit, so the failure hits all of them.
-///
-/// A *lone* surrogate is still a replacement character, which is the correct
-/// reading of a file that is genuinely malformed rather than one that is merely
-/// using the encoding properly.
+/// A lone surrogate is not a character: `char::from_u32` rejects it and U+FFFD
+/// is substituted. Units are paired first, or every astral character would
+/// become two U+FFFD.
 fn units_to_string(units: Vec<u32>, wide: Wide) -> String {
     if wide != Wide::Utf16Le && wide != Wide::Utf16Be {
-        // UTF-32 holds whole code points, so there is nothing to pair. Values
-        // above U+10FFFF are still not characters, and `from_u32` says so.
+        // UTF-32 holds whole code points, so there is nothing to pair; values
+        // above U+10FFFF are still not characters.
         return units
             .into_iter()
             .map(|u| char::from_u32(u).unwrap_or('\u{FFFD}'))
@@ -344,10 +240,8 @@ fn units_to_string(units: Vec<u32>, wide: Wide) -> String {
     while i < units.len() {
         let u = units[i];
         if HIGH.contains(&u) {
-            // A high surrogate followed by a low one is one character. Anything
-            // else -- a high surrogate at the end of the file, or followed by a
-            // normal unit -- is malformed, so the surrogate becomes U+FFFD and
-            // the next unit is decoded on its own.
+            // A high surrogate followed by a low one is one character; anything
+            // else is malformed, so the surrogate becomes U+FFFD.
             match units.get(i + 1) {
                 Some(&next) if LOW.contains(&next) => {
                     let cp = 0x1_0000 + ((u - 0xD800) << 10) + (next - 0xDC00);
@@ -372,10 +266,8 @@ fn decode_utf16_or_32(bytes: &[u8], encoding: Encoding, skip: usize) -> (String,
     let wide = Wide::from_encoding(encoding)
         .unwrap_or_else(|| unreachable!("decode_utf16_or_32 is only reached for UTF-16/32"));
     let body = bytes.get(skip..).unwrap_or_default();
-    // `as_chunks` rather than `chunks_exact` for the lint, but the semantics
-    // wanted here are `chunks_exact`'s: a trailing fragment shorter than one code
-    // unit is *dropped*, not zero-padded, because padding would invent a
-    // character from half a unit.
+    // `as_chunks` rather than `chunks_exact` for the lint, but a trailing
+    // fragment shorter than one code unit is *dropped*, not zero-padded.
     let units: Vec<u32> = match wide {
         Wide::Utf16Le => body
             .as_chunks::<2>()
@@ -492,12 +384,8 @@ fn cp1252_char(b: u8) -> char {
     single_byte_char(SingleByte::Cp1252, b)
 }
 
-/// The high half of `enc`, indexed by `byte - 0x80`.
-///
-/// Public so [`crate::encode`] can build the *reverse* mapping from the same
-/// table rather than keeping a second copy of it. A second table would be free
-/// to drift from this one, and a drifted encoder corrupts a file on save, which
-/// is worse than not having the feature.
+/// The high half of `enc`, indexed by `byte - 0x80`. Public so [`crate::encode`]
+/// can build the reverse mapping from the same table rather than a second copy.
 pub fn encoding_table(enc: SingleByte) -> &'static [u32; 128] {
     ENCODING_TABLES
         .iter()
@@ -512,8 +400,8 @@ fn single_byte_char(enc: SingleByte, b: u8) -> char {
     }
     let cp = encoding_table(enc)[(b - 0x80) as usize];
     if cp == 0 {
-        // Undefined in this encoding: keep the Latin-1 reading so the result is
-        // still a character rather than a panic or a replacement glyph.
+        // Undefined here: keep the Latin-1 reading rather than a panic or a
+        // replacement glyph.
         b as char
     } else {
         char::from_u32(cp).unwrap_or(b as char)
@@ -525,30 +413,18 @@ pub fn read_any_file(path: &str) -> Option<String> {
     read_any_file_with_encoding(path).map(|(text, _)| text)
 }
 
-/// [`read_any_file`], honouring an explicit `--encoding`. Used for the
-/// `append_file` / `append_head` / `prepend_file` options, which are read
-/// during the same run and so should obey the same encoding rule as the input
-/// rather than silently re-probing each one.
+/// [`read_any_file`], honouring an explicit `--encoding`; append/prepend files
+/// obey the same rule rather than being re-probed.
 pub fn read_file_with(path: &str, encoding: Encoding) -> Option<String> {
     read_with(path, encoding).map(|(text, _)| text)
 }
 
-/// Chop trailing whitespace and a DOS CR, i.e. what the Perl
-/// `s/[ \t]*\x0D$//` did.
+/// Chop trailing whitespace and a DOS CR, i.e. Perl's `s/[ \t]*\x0D$//`.
 ///
-/// This started life as a regular expression, and it is still written as
-/// `[ \t]*\x0D$` in the Perl source. It cannot stay one here: `links.rs`
-/// rewrites every `$` into the lookahead `(?=\n?$)`, which takes the pattern
-/// off fancy-regex's fast automaton and onto the backtracker, where a large
-/// paragraph exhausts the step budget and panics. A 1 MB paragraph with no
-/// blank lines is enough.
-///
-/// It is anchored at the end of the paragraph, so it is just string surgery,
-/// and string surgery has no budget to exhaust.
-///
-/// The subtlety is that Perl's `$` means "end of text, *or* before a single
-/// trailing newline", so this cannot be `trim_end()` followed by a check for
-/// `\r`: a trailing `\r\n` has to be recognised as well.
+/// Not a regex: `links.rs` rewrites `$` to the lookahead `(?=\n?$)`, which moves
+/// the pattern onto fancy-regex's backtracker, where a large paragraph exhausts
+/// the step budget and panics. It is anchored at the end, so string surgery
+/// suffices, and Perl's `$` also matches before one trailing newline.
 fn chop_trailing_cr(s: &str) -> String {
     let (body, had_nl) = match s.strip_suffix('\n') {
         Some(b) => (b, true),
@@ -557,8 +433,8 @@ fn chop_trailing_cr(s: &str) -> String {
     if !body.ends_with('\r') {
         return s.to_string(); // no match, so the paragraph is left alone
     }
-    // The `[ \t]*` sits *before* the CR, so the CR comes off first and the
-    // spaces and tabs are trimmed afterwards. Trimming first leaves a stray CR.
+    // The `[ \t]*` sits *before* the CR, so the CR is removed first and the
+    // spaces and tabs trimmed afterwards; trimming first leaves a stray CR.
     let trimmed = body[..body.len() - 1].trim_end_matches([' ', '\t']);
     let mut out = String::with_capacity(trimmed.len() + 1);
     out.push_str(trimmed);
@@ -568,13 +444,9 @@ fn chop_trailing_cr(s: &str) -> String {
     out
 }
 
-/// Chop leading whitespace and a DOS CR, i.e. what the Perl
-/// `s/^[ \t]*\x0D//` did. See [`chop_trailing_cr`] for why this is not a
-/// regular expression.
-///
-/// The leading pattern only removes anything when a CR actually follows the run
-/// of whitespace. Trimming the leading whitespace unconditionally would
-/// corrupt every indented paragraph in the document.
+/// Chop leading whitespace and a DOS CR, i.e. Perl's `s/^[ \t]*\x0D//`; see
+/// [`chop_trailing_cr`] for why this is not a regex. Leading whitespace goes only
+/// when a CR follows it, or every indented paragraph would be corrupted.
 fn chop_leading_cr(s: &str) -> String {
     match s.trim_start_matches([' ', '\t']).strip_prefix('\r') {
         Some(rest) => rest.to_string(),
@@ -614,19 +486,9 @@ const TAG_START: u8 = 1;
 const TAG_END: u8 = 2;
 const TAG_EMPTY: u8 = 3;
 
-// P1.1. The generator meta is provenance: it names what produced this file.
-// textrill produced it, and stating otherwise is a false claim in every
-// document the tool writes -- including the ones a reader may inspect years
-// later to work out what made them.
-//
-// This is deliberately NOT the Perl module's name. It is also deliberately not
-// an attribution mechanism: the credit for HTML::TextToHTML belongs in
-// LICENSE, where it is, permanently and correctly. Provenance and attribution
-// are different claims, and conflating them is what put "HTML::TextToHTML" in a
-// place it does not belong.
-//
-// The version comes from the crate rather than being written out, so bumping
-// Cargo.toml cannot leave a stale string in every generated document.
+// The generator meta names what produced the file. Deliberately not the Perl
+// module's name -- credit for HTML::TextToHTML belongs in LICENSE -- and the
+// version comes from the crate so bumping Cargo.toml cannot leave it stale.
 const PROG: &str = "textrill";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -642,8 +504,13 @@ fn is_word_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
 
-/// Split a string into lines the way `split(/^/, $para)` does
-/// (each line keeps its trailing newline, except a final un-terminated one).
+/// Number of leading whitespace characters, counting tabs as one each.
+fn leading_spaces(s: &str) -> usize {
+    s.chars().take_while(|c| is_perl_space(*c)).count()
+}
+
+/// Split into lines the way `split(/^/, $para)` does; each line keeps its
+/// trailing newline except a final un-terminated one.
 fn split_lines(s: &str) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();
@@ -679,33 +546,24 @@ pub struct Converter {
     preformat_enabled: bool,
     re_cache: HashMap<String, Regex>,
     print_count: u32,
-    /// P7.3. Set by `try_convert`; read back with `resolved_encoding()`.
+    /// Set by `try_convert`; read back with `resolved_encoding()`.
     resolved: Resolved,
-    /// P5.5. The text between `<head>` and `</head>` the last `do_file_start`
-    /// emitted, exposed to a template as `{{textrill:head}}`.
+    /// The text between `<head>` and `</head>`, for `{{textrill:head}}`.
     head_inner: String,
-    /// P5.5. The final, escaped document title, for `{{textrill:title}}`.
+    /// The final, escaped document title, for `{{textrill:title}}`.
     title_text: String,
-    /// P5.5. The template file's contents, read once in [`Converter::new`].
-    /// Empty means no template is active.
+    /// The template file's contents, read once in [`Converter::new`]; empty if
+    /// there is no template.
     template_text: String,
     /// Set when a note or glossary set is unusable, so the caller can report it
-    /// and write nothing.
-    ///
-    /// Conversion cannot return this as an error without changing the signature
-    /// the reference and the Python bindings use, and it must not be reported by
-    /// printing and carrying on: a document whose citations lost a definition
-    /// would otherwise reach disk with a dangling `[1]`.
+    /// and write nothing: a dangling `[1]` must not reach disk.
     pub notes_error: Option<String>,
-    /// P5.5. True when `template_text` is a whole-document template rather than
-    /// a wrapper fragment.
+    /// True when `template_text` is a whole-document template, not a wrapper.
     document_template: bool,
-    /// A11. The scheme policy, built once in [`Converter::new`] so the scrub
-    /// does not rebuild it per paragraph. Kept beside `links` because the two
-    /// must agree; `links::load_links` is given this same value.
+    /// The scheme policy, built once in [`Converter::new`] so the scrub does not
+    /// rebuild it per paragraph; `links::load_links` is given this same value.
     url_policy: crate::urlscheme::UrlPolicy,
-    /// A11. Schemes already reported on standard error, so a document with two
-    /// hundred `javascript:` links says so once instead of two hundred times.
+    /// Schemes already reported, so two hundred `javascript:` links warn once.
     dropped_schemes: Vec<String>,
 }
 
@@ -723,19 +581,15 @@ impl Converter {
             }
         }
 
-        // P5.5/S4. Resolve the template once, at construction, so conversion
-        // cannot fail on IO. `Options::validate` has already reported a missing
-        // or malformed template, or an unknown shipped template, on the
-        // command-line path; a library caller that skips validation simply gets
-        // no templating when the template is unresolvable, rather than an error
-        // part-way through output.
+        // Resolve the template once at construction so conversion cannot fail on
+        // IO; a caller that skips validation gets no templating, not an error.
         let (template_text, document_template) = match opts.template_source() {
             Ok((2, _, _)) => (String::new(), false),
             Ok((whole, body, _)) => (body, whole == 1),
             Err(_) => (String::new(), false),
         };
 
-        // A11. One policy, shared with the dictionary loader, so a rule kept at
+        // One policy, shared with the dictionary loader, so a rule kept at
         // load and a paragraph scrubbed later can never disagree.
         let url_policy = opts.url_policy();
         let links = links::load_links(&opts);
@@ -776,37 +630,24 @@ impl Converter {
         }
     }
 
-    /// The most compiled patterns [`Converter::re_cache`] will hold (A10).
+    /// The most compiled patterns [`Converter::re_cache`] will hold; mirrors
+    /// `links::ascii_re_cached`'s 128.
     ///
-    /// Mirrors `links::ascii_re_cached`'s 128, so the two caches in the engine
-    /// are bounded the same way. Measured rather than guessed: a document
-    /// exercising every construct that reaches `re` -- lists, definition lists,
-    /// all four inline delimiters, tables, hrules, preformatted blocks, caps and
-    /// short lines -- compiles 19 distinct patterns with default options, and 19
-    /// with *every* pattern-varying option set to a distinct value at once
-    /// (bullets, bullets_ordered, all three delimiters, hrule_min, both preformat
-    /// markers, custom heading patterns). So 128 is roughly 6x the worst
-    /// realistic case rather than an arbitrary round number, and the same input
-    /// does not grow the cache: these are memoised per *pattern*, not per line.
+    /// A document exercising every pattern-building construct compiles 19
+    /// patterns, so 128 is ~6x the worst realistic case. Patterns are memoised
+    /// per *pattern*, so the same input does not grow it.
     const RE_CACHE_MAX: usize = 128;
 
-    /// Insert into the pattern cache, keeping it bounded (A10).
-    ///
-    /// Clears the whole cache when it is full rather than evicting one entry.
-    /// A compiled `Regex` is expensive to build and cheap to keep, and the
-    /// working set of any real conversion is small, so clearing occasionally
-    /// costs a few recompiles; an LRU would cost a lookup on the hot path that
-    /// this function exists to avoid. It cannot change the output either way --
-    /// the cache is a pure memo of `pattern -> compiled`, and a miss recompiles
-    /// exactly what a hit would have returned.
+    /// Insert into the pattern cache, clearing it wholesale when full. The cache
+    /// is a pure memo, so clearing cannot change the output; a compiled `Regex`
+    /// is expensive to build and the working set is small, so this beats an LRU.
     fn cache_pattern(&mut self, key: &str, re: Regex) -> &Regex {
         if self.re_cache.len() >= Self::RE_CACHE_MAX {
             self.re_cache.clear();
         }
         self.re_cache.insert(key.to_string(), re);
-        // Looked up rather than reached for, because after a `clear()` above
-        // this is the only entry but without one it is not, and
-        // `values().next()` would then be free to return a *different*
+        // Looked up rather than reached for: after a `clear()` this is the only
+        // entry, but without one `values().next()` could return a different
         // pattern's Regex.
         self.re_cache.get(key).expect("just inserted")
     }
@@ -814,11 +655,9 @@ impl Converter {
     fn re(&mut self, pat: &str) -> &Regex {
         let key = format!("(?s){pat}");
         if !self.re_cache.contains_key(&key) {
-            // A pattern the caller supplied is compiled by `Options::validate`
-            // before conversion starts and reported as a clean error, so getting
-            // here with a bad one means validation was bypassed -- an internal
-            // bug, and a panic is the right response to an internal bug. Every
-            // other pattern reaching this line is a literal in this file.
+            // User patterns are compiled and reported by `Options::validate`
+            // before conversion, so reaching here with a bad one means validation
+            // was bypassed -- an internal bug, and a panic is the right response.
             let re = links::try_compile_pattern(pat, false)
                 .unwrap_or_else(|e| panic!("bad regex {pat:?}: {e}"));
             return self.cache_pattern(&key, re);
@@ -843,12 +682,10 @@ impl Converter {
         let mut tag_prefix = String::new();
 
         if self.opts.xhtml {
-            // Two conditions per close, merged with `||` where they close the
-            // same tag: a `p` is closed by a nested `p` *or* by a block element
-            // that cannot live inside one, and a `li` by a nested `li` *or* by
-            // the end of its list. The reference states these as separate
-            // branches; identical bodies make that a repetition rather than a
-            // distinction, and the corpus is what pins the result.
+            // A `p` is closed by a nested `p` or by a block element that cannot
+            // live inside one; an `li` by a nested `li` or the end of its list.
+            // The reference states these as separate branches with identical
+            // bodies, and the corpus pins the result.
             if open_tag == "p"
                 && ((in_tag == "p" && tag_type != TAG_END)
                     || in_tag.starts_with("hr")
@@ -985,8 +822,7 @@ impl Converter {
             let tag2 = self.get_tag("br", TAG_EMPTY, "");
             rows[0] = format!("<!-- New Message -->\n{tag}{}{tag2}\n", rows[0]);
             // Every row but the last is terminated with a `<br/>`; the last is
-            // left for the paragraph that follows it. Splitting the tail apart
-            // says that directly, where the index form needed `rlen` to say it.
+            // left for the paragraph that follows it.
             if rows.len() > 1 {
                 let (final_row, br_rows) = rows[1..].split_last_mut().unwrap();
                 for row in br_rows {
@@ -1041,11 +877,10 @@ impl Converter {
         }
     }
 
-    // The parameters of the three state-machine dispatchers below are the
+    // The parameters of the three state-machine dispatchers below match the
     // reference's argument list for the same routine. Threading this state
     // through a struct would hide which state each routine reads and writes,
-    // and that mapping is what the differential corpus tests. So the argument
-    // counts are what they are on purpose.
+    // which is what the differential corpus tests.
     #[allow(clippy::too_many_arguments)]
     fn paragraph(
         &mut self,
@@ -1217,10 +1052,19 @@ impl Converter {
         let num_truthy = !number.is_empty();
         let tag;
         if num_truthy {
-            if number != "1" && number != "a" && number != "A" {
+            // A numeric marker starts an ordered list whatever number it carries;
+            // the starting number is carried on the tag. The reference starts only
+            // on 1/a/A and would drop a list structure starting at 3.
+            let is_digit = number.bytes().all(|b| b.is_ascii_digit());
+            if !is_digit && number != "a" && number != "A" {
                 return false;
             }
-            tag = self.get_tag("ol", TAG_START, "");
+            let inside = if is_digit && number != "1" {
+                format!(" start=\"{}\"", number)
+            } else {
+                String::new()
+            };
+            tag = self.get_tag("ol", TAG_START, &inside);
             prev.push_str(&format!("{}{tag}\n", self.list_nice_indent));
             while self.list.len() <= self.listnum {
                 self.list.push(0);
@@ -1417,6 +1261,17 @@ impl Converter {
             self.endlist(nl, prev, &mut actions[ind]);
             islist = false;
         } else if self.listnum == 0 || i as usize != self.listnum {
+            // No open list matched this marker. A list indented no deeper than
+            // the innermost open one is a sibling, not a child, so close the
+            // open list(s) first; a deeper indent still nests.
+            if i == 0
+                && self.listnum > 0
+                && leading_spaces(&lines[ind])
+                    <= leading_spaces(&self.list_prefix[self.listnum - 1])
+            {
+                let nl = self.listnum;
+                self.endlist(nl, prev, &mut actions[ind]);
+            }
             if indents[ind] > 0
                 || ind == 0
                 || (ind > 0 && prev.trim().is_empty())
@@ -1885,52 +1740,16 @@ impl Converter {
     fn split_end_explicit_preformat(&mut self, para: &mut String) -> String {
         let mut pre_str = String::new();
         if self.mode & PRE_EXPLICIT != 0 {
-            // The reference's test here is *always false*, and that is load
-            // bearing. TextToHTML.pm:3868 reads
+            // The reference's test here is *always false*: TextToHTML.pm:3868
+            // reads `if (${para_ref} =~ /$pe_mark/io)`, and in Perl `para_ref`
+            // without `$` is a symbolic reference to an unassigned global, so the
+            // body is dead code and every call falls through to "no end -- the
+            // whole thing is preformatted".
             //
-            //     if (${para_ref} =~ /$pe_mark/io)
-            //
-            // -- note there is no `$` before `para_ref`. In Perl that is a
-            // symbolic reference: the string "para_ref" is treated as the *name*
-            // of a variable, so the regex is matched against `$main::para_ref`,
-            // a global that nothing in the module ever assigns (it is not
-            // `our`-declared either, and the module does not `use strict refs`,
-            // so it is simply undef). Undef never matches, so the `if` body is
-            // dead code and every call falls through to the comment Perl labels
-            // "no end -- the whole thing is preformatted".
-            //
-            // Adding the missing deref changes the output, which is how this was
-            // confirmed rather than assumed. With `${$para_ref}` in place of
-            // `${para_ref}`:
-            //
-            //   printf '<pre>\na\n\n</pre>\n' | textrill --use_preformat_marker
-            //   reference      <pre class='quote_explicit'>\na\n&lt;/pre&gt;\n</pre>
-            //   with deref     ...&lt;/pre&gt;</pre>\n<p>&lt;/pre&gt;</p>
-            //
-            // Three consequences, all of which the port has to reproduce:
-            //
-            // 1. The whole paragraph is emitted as preformatted text, escaped
-            //    like ordinary text. So a literal `</pre>` reaches the output as
-            //    `&lt;/pre&gt;` -- visible to the reader, and the reason this
-            //    diverged.
-            // 2. PRE_EXPLICIT is *not* cleared. The block therefore does not end
-            //    at the marker: everything after it in the chunk stays inside
-            //    the preformatted block, and the `</pre>` that eventually closes
-            //    it comes from the document's own tag cleanup at the end.
-            // 3. `para` is emptied, so the marker is not reprocessed as a fresh
-            //    paragraph.
-            //
-            // Concretely, for input `<pre>\na\n\n</pre>\nb\n` the reference
-            // emits `b` *inside* the pre block:
-            //
-            //   <pre class='quote_explicit'>\na\n&lt;/pre&gt;\nb\n</pre>
-            //
-            // The end marker only has any effect at all when the block and its
-            // marker are in the *same* paragraph, because then `endpreformat`
-            // (a different function, correctly dereferenced) is what ends it.
-            // That is why a blank line before the marker is all it takes to
-            // reach this path, and why the same document with the blank line
-            // removed behaves correctly.
+            // The port reproduces the consequences: the whole paragraph is emitted
+            // as preformatted text (a literal `</pre>` is escaped), PRE_EXPLICIT is
+            // not cleared (the block does not end at the marker), and `para` is
+            // emptied so the marker is not reprocessed.
             pre_str = if self.opts.escape_html_chars {
                 chars::escape(para)
             } else {
@@ -2305,18 +2124,12 @@ impl Converter {
             self.delim_replace(line_ref, &re2, not_preceded_by(dch), ltag);
         } else {
             // Perl interpolates `${delim}` straight into these patterns, so a
-            // delimiter holding a regex metacharacter (`**` being the
-            // obvious one) makes Perl itself raise "Quantifier follows
-            // nothing in regex" and drop the substitution. The port used to
-            // panic on the same input; escaping makes the pattern mean what
-            // it obviously meant. Identical output for any delimiter Perl
-            // could actually compile.
-            //
-            // The `(?<!...)` on the first one is a fixed-width literal
-            // assertion, so it moves into `accept` like the others: left in
-            // the regex it is a lookbehind, and a paragraph carrying a
-            // multi-character delimiter run put it through the backtracking
-            // VM for tens of seconds.
+            // metacharacter delimiter (e.g. `**`) makes Perl raise "Quantifier
+            // follows nothing" and drop the substitution; escaping makes the
+            // pattern mean what it obviously meant. The `(?<!...)` on the first
+            // one is a fixed-width literal, so it moves into `accept` too: left in
+            // the regex it is a lookbehind, which a multi-character delimiter run
+            // put through the backtracking VM for tens of seconds.
             let d = fancy_regex::escape(delim);
             let re1 = self
                 .re(&format!(
@@ -2331,14 +2144,12 @@ impl Converter {
         }
     }
 
-    /// Perl-style `s///g` for a *linear* regex (one with no lookaround, `\B`
-    /// or backrefs, so the regex crate stays on its non-backtracking path).
+    /// Perl-style `s///g` for a *linear* regex (no lookaround, `\B` or backrefs,
+    /// so the regex crate stays on its non-backtracking path).
     ///
-    /// `captures_from_pos` locates each candidate match; `accept` then applies
-    /// whatever condition the original regex expressed with a lookbehind/`\B`
-    /// (which fancy-regex would otherwise run through its exploding
-    /// backtracking VM). Rejected candidates are kept verbatim and scanning
-    /// continues just past them, mirroring how Perl's engine advances.
+    /// `captures_from_pos` locates each candidate; `accept` applies whatever
+    /// condition the original expressed with a lookbehind/`\B`. Rejected
+    /// candidates are kept verbatim and scanning continues just past them.
     ///
     /// Returns whether anything was replaced.
     fn delim_replace(
@@ -2350,11 +2161,9 @@ impl Converter {
     ) -> bool {
         let text = std::mem::take(line_ref);
         let mut out = String::with_capacity(text.len());
-        // `last` is how much of `text` has already been appended to `out`;
-        // `pos` is where the next candidate is searched for.  Rejected
-        // candidates are left in place (advancing `pos` just past their first
-        // character) so their bytes are flushed unmodified by a later accept
-        // or by the final tail.
+        // `last` is how much of `text` was appended to `out`; `pos` is where the
+        // next candidate is searched. Rejected candidates stay in place so their
+        // bytes are flushed by a later accept or the final tail.
         let mut last = 0;
         let mut pos = 0;
         let mut changed = false;
@@ -2404,11 +2213,8 @@ impl Converter {
                     if !accept(&cur, m.start(), m.end()) {
                         // A rejected candidate is not consumed: the original
                         // regex retries one character along, so a candidate
-                        // starting *inside* this one can still match. Skipping
-                        // the whole span loses it -- which is how a `#` run
-                        // spanning a `</p><p>` boundary used to swallow the
-                        // pair that followed. The skipped character is
-                        // ordinary text and is emitted verbatim.
+                        // starting *inside* this one can still match. The skipped
+                        // character is emitted verbatim.
                         let keep = m.start() + char_len(&cur, m.start());
                         line_with_links.push_str(&cur[..keep]);
                         *line_ref = cur[keep..].to_string();
@@ -2443,16 +2249,11 @@ impl Converter {
     fn apply_links(&mut self, para_ref: &mut String, para_action: &mut u32) {
         if self.opts.make_links && !self.links.rules.is_empty() {
             self.links.check_dictionary_links(para_ref);
-            // A11. The single point where document text and dictionary URLs
-            // become an `href`, so it is also the single point that decides
-            // whether the scheme is one a browser will act on. Placed here
-            // rather than at each construction site so that `links.rs` stays a
-            // faithful port and so a producer added later is covered without
-            // remembering this rule.
-            //
-            // Runs over the finished paragraph rather than per substitution, so
-            // it costs one scan per paragraph and not one per match -- the same
-            // reasoning as the P6 prefilter.
+            // The single point where document text and dictionary URLs become an
+            // `href`, so it decides whether the scheme is one a browser will act
+            // on. Placed here rather than at each construction site so `links.rs`
+            // stays a faithful port and a future producer is covered. Runs over
+            // the finished paragraph, so one scan per paragraph, not per match.
             let mut dropped = Vec::new();
             if let Some(scrubbed) =
                 crate::urlscheme::scrub_hrefs(para_ref, &self.url_policy, &mut dropped)
@@ -2546,26 +2347,10 @@ impl Converter {
             }
 
             // The explicit-preformat continuation above swallows the whole
-            // paragraph when the end marker is absent: everything left is
-            // verbatim preformatted text, and there is nothing for the
-            // paragraph machinery below to do.  `para = done_lines.join("")`
-            // lives *inside* that block, so without this the buffered lines
-            // were dropped on the floor and only the tags survived:
-            //
-            //   printf '<pre>\n\nX' | textrill --use_preformat_marker
-            //   reference  <pre class='quote_explicit'>\nX\n</pre>
-            //   port       <pre class='quote_explicit'>\n\n</pre>     (before)
-            //
-            // Everything after the first blank line of an explicit quote was
-            // lost, since a blank line is what ends a paragraph.
-            //
-            // This is not a `return`: the continuation text still has to reach
-            // the tail of this function, because the reference runs every
-            // paragraph through apply_links (TextToHTML.pm:1375) and then the
-            // demoronize/entities passes.  Returning early left the
-            // bold/italic/underline delimiters unprocessed inside an explicit
-            // quote -- "*d*" stayed literal where the reference emitted
-            // "<em>d</em>".
+            // paragraph when the end marker is absent, so the buffered lines must
+            // be joined back or they are dropped. Not a `return`: the text still
+            // has to reach apply_links and the demoronize/entities passes at the
+            // tail, or delimiters inside an explicit quote stay unprocessed.
             let pre_continuation = para.is_empty();
             if pre_continuation {
                 para = done_lines.join("");
@@ -2863,11 +2648,9 @@ impl Converter {
             let first_line = para.split('\n').next().unwrap_or("").to_string();
 
             if !self.opts.doctype.is_empty() {
-                // XHTML is checked first even though HTML5 is the default:
-                // tests and front ends flip `opts.xhtml` on a converter that
-                // already carries the default `html5: true`, and the doctype
-                // that was asked for explicitly must be the one emitted. The
-                // CLI mode flags keep the two exclusive anyway (cli.rs).
+                // XHTML is checked first even though HTML5 is the default: tests
+                // and front ends flip `opts.xhtml` on a converter carrying the
+                // default `html5: true`, and the explicit doctype must win.
                 if self.opts.xhtml {
                     out.push_str("<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"\n");
                     out.push_str("\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">\n");
@@ -2878,13 +2661,10 @@ impl Converter {
                     ));
                     out.push('\n');
                 } else if self.opts.html5 {
-                    // P5.1. HTML5 serialisation: the short doctype, and an
-                    // <html> element with no namespace. Tag case follows
-                    // lower_case_tags as everywhere else; the mode flags set
-                    // it, so the default is lower-case HTML5. The charset meta
-                    // below is forced on with the doctype: an HTML5 document
-                    // without a declared encoding is the exact thing the mode
-                    // exists to fix, and a validator warns about it.
+                    // HTML5 serialisation: the short doctype and an <html>
+                    // element with no namespace. The charset meta is forced on
+                    // with the doctype, because an HTML5 document with no declared
+                    // encoding is the thing the mode exists to fix.
                     out.push_str("<!DOCTYPE html>\n");
                     out.push_str(&self.get_tag("html", TAG_START, ""));
                     out.push('\n');
@@ -2919,34 +2699,17 @@ impl Converter {
         out
     }
 
-    /// P5.5. The contents of the document `<head>`: the `<title>`, any
-    /// `--append_head` file, the generator and charset metas, and the
-    /// stylesheet link.
+    /// The contents of the document `<head>`: the `<title>`, any `--append_head`
+    /// file, the generator and charset metas, and the stylesheet link.
     ///
-    /// Split out of `do_file_start` with no behaviour change: the returned
-    /// string is exactly the bytes that used to be written between `<head>` and
-    /// `</head>`. It also records the final escaped title in `self.title_text`
-    /// so a template can use it as `{{textrill:title}}`.
+    /// Records the final escaped title in `self.title_text` for
+    /// `{{textrill:title}}`.
     fn build_head(&mut self, first_line: &str) -> String {
         let mut out = String::new();
 
-        // A title reaches the document by two routes, and they need
-        // different treatment. An explicit `--title` is an option value
-        // interpolated into element text with nothing stopping it from
-        // closing the tag (A8) -- `--title '</title><script>alert(3)</script>'`
-        // was emitted verbatim -- so it is always escaped, and `"` too
-        // because an option value can reach an attribute. A `--titlefirst`
-        // title is instead lifted out of the document's own first line, so
-        // it is already document text, and the reference's rule for document
-        // text (`escape_html_chars`) is both correct and sufficient: `<`, `>`
-        // and `&` are all that can break out of element text.
-        //
-        // Escaping both with `escape_attr` would be wrong in a way the fuzzer
-        // caught: it ignores `escape_html_chars`, so
-        // `--titlefirst --no-escape_HTML_chars` on `a & b` emitted
-        // `<title>a &amp; b</title>` where the reference emits
-        // `<title>a & b</title>`. That is a Tier 1 divergence introduced by
-        // an over-broad fix, so the derived route keeps the flag.
+        // An explicit `--title` can close the element, so it is always escaped
+        // (including `"`); a `--titlefirst` title comes from the document's own
+        // first line, so it follows `escape_html_chars`: only `<`, `>` and `&`.
         let title_escaped = if self.opts.titlefirst && self.opts.title.is_empty() {
             // ($tit) = $first_line =~ /^ *(.*)/
             let tit = first_line.trim_start_matches(' ').to_string();
@@ -2990,18 +2753,9 @@ impl Converter {
                 &format!(" NAME=\"generator\" CONTENT=\"{PROG} v{VERSION}\""),
             ));
         }
-        // P7.4. Optional, off by default, because the reference emits no
-        // charset declaration and byte-identical output is a stated goal of
-        // this port -- turning this on by default would move every golden.
-        // A GUI turns it on, because there the consumer is a browser that
-        // is about to guess, and it will guess wrong for exactly the
-        // CP1252-derived input this port decodes.
-        // The line break belongs to the element, not to the option: the
-        // generator meta above is written without one, and adding this
-        // second meta after it means someone has to. When meta_charset is
-        // off the push below is the only newline, so the generator keeps
-        // the exact single trailing newline it has always had and no golden
-        // moves.
+        // Off by default because the reference emits no charset declaration and
+        // byte-identical output is a goal; a GUI turns it on. The line break
+        // belongs to the element, so the generator keeps its single newline.
         if self.opts.meta_charset || self.opts.html5 {
             out.push('\n');
             out.push_str(&self.get_tag(
@@ -3035,28 +2789,17 @@ impl Converter {
         out
     }
 
-    /// Convert the whole input (could already be pre-split paragraphs)
-    /// through the full conversion pipeline.
-    ///
-    /// A9: an input file that cannot be read is reported to the caller instead
-    /// of being skipped. The reference prints `Could not open …` to stderr and
-    /// carries on, which means the process exits 0 having written a 0-byte
-    /// output file -- a Makefile or CI job reads that as success. This returns
-    /// `Err` so the caller can exit non-zero.
-    ///
-    /// The *output* is unchanged, so no golden moves: a file that cannot be read
-    /// contributes nothing either way. When several inputs are given, the ones
-    /// that are readable are still converted and the error carries that partial
-    /// output, so this differs from the reference only in the exit code.
+    /// Convert the whole input through the full pipeline. An unreadable input is
+    /// returned to the caller rather than skipped: the reference prints to stderr
+    /// and exits 0 with a 0-byte output, which a Makefile reads as success. Only
+    /// the exit code differs; readable inputs are still converted.
     pub fn try_convert(&mut self) -> Result<String, UnreadableInput> {
         let mut sources: Vec<String> = Vec::new();
         let source_type;
         let mut unreadable: Vec<String> = Vec::new();
-        // P7.3. The most notable encoding seen across the inputs, so
-        // `resolved_encoding` can report the one that actually mattered. UTF-8
-        // is the floor: an ASCII file is valid UTF-8, so it must not be reported
-        // as some legacy encoding merely because another input in the same run
-        // was.
+        // The most notable encoding seen across the inputs. UTF-8 is the floor:
+        // an ASCII file is valid UTF-8 and must not be reported as a legacy
+        // encoding just because another input in the run was.
         let mut worst = Resolved::Utf8;
         if !self.opts.infile.is_empty() {
             source_type = "file".to_string();
@@ -3077,10 +2820,9 @@ impl Converter {
                         }
                         None => {
                             eprintln!("Could not open {f}\n");
-                            // Kept going rather than bailing out, so that a
-                            // multi-file invocation still converts the files
-                            // that *are* readable. What changed is the exit
-                            // code, not which files get read.
+                            // Keep going rather than bailing out, so a
+                            // multi-file invocation still converts the readable
+                            // files; only the exit code changes.
                             unreadable.push(f.clone());
                         }
                     }
@@ -3103,20 +2845,15 @@ impl Converter {
     }
 
     /// The encoding [`Converter::try_convert`] resolved the input with, for a
-    /// caller that wants to say so — a status bar, a `--verbose` line, or a GUI
-    /// that has to write the text back out in the encoding it came in.
-    ///
-    /// Only file inputs carry an encoding. `instring` and `process_chunk` hand
-    /// over a `str`, which is already decoded, so this reports `Utf8` for them
-    /// because UTF-8 is the encoding the port writes.
+    /// status bar or GUI writing the text back out. Only file inputs carry an
+    /// encoding; `instring` and `process_chunk` are already-decoded `str`s.
     pub fn resolved_encoding(&self) -> Resolved {
         self.resolved
     }
 
     /// As [`Converter::try_convert`], but discarding the unreadable-file error
-    /// so the output is always produced. This is the behaviour the reference
-    /// has; it is what the Python bindings and the in-process tests use, and it
-    /// is kept so that A9 is a change to the CLI's exit code only.
+    /// so output is always produced. This is the reference's behaviour, used by
+    /// the Python bindings and the in-process tests.
     pub fn convert(&mut self) -> String {
         match self.try_convert() {
             Ok(out) => out,
@@ -3124,9 +2861,8 @@ impl Converter {
         }
     }
 
-    /// Convert text held in memory exactly as if it had been read from a
-    /// file: paragraph records, the file-start document header, the
-    /// append/prepend files and so on. This is what the Python bindings use.
+    /// Convert text held in memory exactly as if it had been read from a file:
+    /// paragraph records, the file-start document header, append/prepend files.
     pub fn convert_text(&mut self, text: &str) -> String {
         self.convert_sources(vec![text.to_string()], false)
     }
@@ -3134,24 +2870,23 @@ impl Converter {
     fn convert_sources(&mut self, sources: Vec<String>, string_mode: bool) -> String {
         self.notes_error = None;
         let (start, body, tail) = self.convert_to_parts(sources, string_mode);
-        // P5.3. Number before sectioning so the TOC labels carry the numbers.
+        // Number before sectioning so the TOC labels carry the numbers.
         let body = if self.opts.number_headings {
             crate::section::number_headings(&body)
         } else {
             body
         };
-        // P5.2. Sectioning is a pure post-pass over the body, so the reference
-        // path is untouched when all these flags are off. The TOC is kept
-        // separate from the sectioned body so a template can place it.
+        // Sectioning is a pure post-pass over the body, so the reference path is
+        // untouched when the flags are off. The TOC is kept separate so a
+        // template can place it.
         let (toc, body) = if self.opts.section || self.opts.toc {
             crate::section::sectionize_parts(&body, self.opts.toc)
         } else {
             (String::new(), body)
         };
         // Collect the note sets over the finished body, so definition content
-        // is rendered markup rather than source text. On failure the body is
-        // left exactly as it was and the error is recorded: the caller writes
-        // nothing, so a refused document produces no output at all.
+        // is rendered markup. On failure the body is left as it was and the
+        // error recorded: a refused document produces no output.
         let (stripped, citations, glossary) = match self.collect_notes(&body) {
             Ok(n) => n,
             Err(e) => {
@@ -3160,16 +2895,16 @@ impl Converter {
             }
         };
         let body = if stripped.is_empty() { body } else { stripped };
-        // P5.5. A template replaces the default arrangement. `--body_template`
-        // wraps the body inside the engine's own prolog and epilog; a
+        // A template replaces the default arrangement. `--body_template` wraps
+        // the body inside the engine's own prolog and epilog; a
         // `--document_template` owns the whole page, so neither is emitted.
         if !self.template_text.is_empty() {
             return self.apply_template(&start, &body, &toc, &tail, &citations, &glossary);
         }
         let mut body = body;
         // Without a template there is nowhere to put the lists, so they go at
-        // the end of the body -- after the prose, where a reader expects an
-        // endnotes section, and inside `--extract`'s output too.
+        // the end of the body -- after the prose, and inside `--extract`'s
+        // output too.
         body.push_str(&citations);
         body.push_str(&glossary);
         let mut out = String::with_capacity(start.len() + toc.len() + body.len() + tail.len());
@@ -3180,11 +2915,9 @@ impl Converter {
         out
     }
 
-    /// Collect and validate the note sets, returning the finished lists.
-    ///
-    /// Returns `(stripped body, citations HTML, glossary HTML)`. All three are
-    /// empty when both modes are off, which is the default and must leave the
-    /// body untouched.
+    /// Collect and validate the note sets, returning `(stripped body, citations
+    /// HTML, glossary HTML)`. All three are empty when both modes are off, which
+    /// must leave the body untouched.
     fn collect_notes(&self, body: &str) -> Result<(String, String, String), String> {
         if !self.opts.citations && !self.opts.glossary {
             return Ok((String::new(), String::new(), String::new()));
@@ -3199,13 +2932,10 @@ impl Converter {
         ))
     }
 
-    /// P5.5. Fill the active template's slots and assemble the page.
-    ///
-    /// `{{textrill:content}}` is the sectioned body (with the TOC already
-    /// separated out), `{{textrill:toc}}` the generated navigation,
-    /// `{{textrill:title}}` and `{{textrill:head}}` the escaped title and the
-    /// `<head>` contents the engine produced, and `{{textrill:pager}}` empty
-    /// (pagers belong to `--chunk`, which is refused with a template).
+    /// Fill the active template's slots and assemble the page:
+    /// `{{textrill:content}}` (the sectioned body), `toc`, `title`, `head`,
+    /// `pager` (always empty; pagers belong to `--chunk`), `citations` and
+    /// `glossary`.
     fn apply_template(
         &self,
         start: &str,
@@ -3216,9 +2946,7 @@ impl Converter {
         glossary: &str,
     ) -> String {
         // A template that names neither slot would silently drop the notes, so
-        // the fallback is the same end-of-body placement the untemplated path
-        // uses. Falling back keeps a template working without change when the
-        // author has no notes; requiring the slots would not.
+        // fall back to the same end-of-body placement the untemplated path uses.
         let has_slot = |name: &str| {
             self.template_text
                 .contains(&format!("{{{{textrill:{name}}}}}"))
@@ -3239,8 +2967,8 @@ impl Converter {
             ("citations", citations),
             ("glossary", glossary),
         ];
-        // P5.5. User parameters extend the fixed set with `var:name` keys, owned by
-        // this frame so the borrows stay live through `apply`. The values go in
+        // User parameters extend the fixed set with `var:name` keys, owned by
+        // this frame so the borrows stay live through `apply`. Values go in
         // verbatim, exactly as `--var` bound them.
         let var_keys: Vec<String> = self
             .opts
@@ -3263,10 +2991,7 @@ impl Converter {
     }
 
     /// One top-level page produced by `--chunk`: a full document and the file
-    /// name it should be written to.
-    ///
-    /// The name is suggested by the caller's `--outfile`; this method only
-    /// derives it. See [`Converter::try_convert_chunked`].
+    /// name it should be written to, derived from the caller's `--outfile`.
     fn convert_to_parts(
         &mut self,
         sources: Vec<String>,
@@ -3316,10 +3041,8 @@ impl Converter {
 
     /// The state-dependent close-out appended to the body after the last
     /// paragraph: end an open list or preformatted block, close any remaining
-    /// XHTML tags, then append `--append_file`.
-    ///
-    /// Shared by the buffered path and [`Converter::convert_stream`] so the two
-    /// cannot drift.
+    /// XHTML tags, then append `--append_file`. Shared by the buffered path and
+    /// [`Converter::convert_stream`].
     fn finish_body(&mut self, body: &mut String) {
         if self.mode & LIST != 0 {
             let nl = self.listnum;
@@ -3357,32 +3080,24 @@ impl Converter {
         tail
     }
 
-    /// P5.4. Convert `input` to `out` one paragraph at a time.
+    /// Convert `input` to `out` one paragraph at a time.
     ///
-    /// The engine's only cross-paragraph state lives in `self` (list number,
-    /// open tags, section headers, link rules), so feeding the records from a
-    /// reader in order produces exactly the bytes [`Converter::convert_text`]
-    /// would produce from the same text — while holding only one paragraph at a
-    /// time instead of the whole document and its markup. The record boundary
-    /// is the reference's `$/ = ""` paragraph mode; see [`ParagraphReader`].
+    /// All cross-paragraph state lives in `self`, so records in order produce
+    /// exactly the bytes [`Converter::convert_text`] would while holding one
+    /// paragraph at a time. The record boundary is the reference's `$/ = ""`
+    /// paragraph mode (see [`ParagraphReader`]).
     ///
-    /// Input must be valid UTF-8; a UTF-16/UTF-32 byte-order mark or NUL
-    /// structure, or any byte sequence that is not valid UTF-8, is an
-    /// [`io::ErrorKind::InvalidData`] error rather than a silent
-    /// replacement-`char` — because the buffered `Auto` path would have decoded
-    /// such a file as CP1252, and quietly emitting something different is the
-    /// one thing this path must not do. The caller is responsible for refusing
-    /// whole-body post-passes (`--number_headings`, `--section`, `--toc`,
-    /// `--chunk`) and `--instring`, which need the assembled body.
+    /// Input must be valid UTF-8; a UTF-16/32 BOM or NUL structure is an
+    /// [`io::ErrorKind::InvalidData`] error rather than a silent replacement
+    /// `char`, since the buffered `Auto` path would have decoded it as CP1252.
     pub fn convert_stream<R: BufRead, W: Write>(
         &mut self,
         mut input: R,
         out: &mut W,
     ) -> io::Result<()> {
-        // Refuse a wide encoding up front, before a byte is written. The NUL
+        // Refuse a wide encoding up front, before a byte is written: the NUL
         // structure that marks UTF-16 is decodable as UTF-8 (a NUL is U+0000),
-        // so per-line validation alone would let a UTF-16 file through with a
-        // NUL between every character.
+        // so per-line validation alone would let a UTF-16 file through.
         let head = input.fill_buf()?;
         if let Some((encoding, _)) = bom(head) {
             if encoding != Encoding::Utf8 {
@@ -3417,17 +3132,10 @@ impl Converter {
         Ok(())
     }
 
-    /// Phase 5.2. Convert and split the body into one full document per
-    /// top-level section, for `--chunk`.
-    ///
-    /// "Top-level" is the shallowest heading level present in the body; its
-    /// subsections are kept in the same page. Body content before the first
-    /// heading becomes the first page. The `(name, html)` pairs are returned in
-    /// document order; the caller writes them.
-    ///
-    /// Only `infile` inputs are chunked. `--chunk` with `--extract`, with
-    /// stdout, or with `instring` is a caller error and is reported by the
-    /// command line, not here.
+    /// Convert and split the body into one full document per top-level section,
+    /// for `--chunk`. "Top-level" is the shallowest heading level present; its
+    /// subsections stay in the same page, and content before the first heading
+    /// becomes page one. Only `infile` inputs are chunked.
     pub fn try_convert_chunked(&mut self) -> (Vec<(String, String)>, Vec<String>) {
         let mut sources: Vec<String> = Vec::new();
         let mut unreadable: Vec<String> = Vec::new();
@@ -3473,8 +3181,7 @@ impl Converter {
         let top = sections.iter().map(|s| s.level).min().unwrap_or(1);
         let mut pages: Vec<String> = Vec::new();
         // The `chunk-N` id of the top-level section each page holds, in page
-        // order. Needed so a cross-file TOC can point *into* a page rather than
-        // only at its top, and so `--section` has something to do here.
+        // order, so a cross-file TOC can point *into* a page.
         let mut page_ids: Vec<String> = Vec::new();
         let mut leading = String::new();
         let mut current: Option<String> = None;
@@ -3499,8 +3206,9 @@ impl Converter {
             pages.push(page);
             page_ids.push(current_id);
         } else if !leading.trim().is_empty() {
-            // No top-level section at all, which cannot happen while `top` is the
-            // minimum level present, but a page still needs an id to be a target.
+            // No top-level section at all, which cannot happen while `top` is
+            // the minimum level present; a page still needs an id to be a
+            // target.
             pages.push(leading);
             page_ids.push(String::new());
         }
@@ -3529,15 +3237,9 @@ impl Converter {
                 if let Some(toc) = &toc {
                     out.push_str(toc);
                 }
-                // `--section` under `--chunk` used to be silently ignored, because
-                // a page *is* one top-level section and there was nothing left to
-                // wrap.
-                //
-                // The wrapper is emitted for `--toc` as well as `--section`, and
-                // that is the point: it is the anchor the TOC's own `file#chunk-N`
-                // points at. Single-file `--toc` already implies its targets, since
-                // `sectionize_parts` wraps whenever either flag is set, and a TOC
-                // that can emit a dangling link is worse than a redundant `<article>`.
+                // The wrapper is emitted for `--toc` as well as `--section`:
+                // it is the anchor the TOC's `file#chunk-N` points at, and a
+                // dangling link is worse than a redundant `<article>`.
                 if (self.opts.section || self.opts.toc) && !page_ids[i].is_empty() {
                     out.push_str("<article class=\"section\" id=\"");
                     out.push_str(&page_ids[i]);
@@ -3594,9 +3296,9 @@ impl Converter {
                 out.push_str(&s.level.to_string());
                 out.push_str("\"><a href=\"");
                 out.push_str(&names[page]);
-                // Deep-link into the page. Harmless when the page has no anchor
-                // of its own, and the fragment is skipped rather than emitted
-                // empty so the href stays a clean relative path.
+                // Harmless when the page has no anchor of its own, and the
+                // fragment is skipped rather than emitted empty so the href
+                // stays a clean relative path.
                 if let Some(id) = page_ids.get(page).filter(|id| !id.is_empty()) {
                     out.push('#');
                     out.push_str(id);
@@ -3639,20 +3341,11 @@ impl Options {
     }
 }
 
-/// The condition the `\B` assertions in `\B delim ([A-Za-z]) delim \B`
-/// place on the characters flanking a match, expressed in code.
-///
-/// A `\B` position is not a word boundary, i.e. the two sides agree on
-/// word-ness. One side is always the delimiter itself, so the neighbouring
-/// character must be a word character exactly when the delimiter is; `_` is
-/// the delimiter in common use that is a word character, which is why the
-/// test asserts `_a_` is *not* turned into markup while ` #a# ` is.
-///
-/// The neighbours are examined a byte at a time, which is what Perl's `\b`
-/// does on the bytes it was given: every byte of a multi-byte character is
-/// `>= 0x80` and so is not a word byte. The delimiter's own word-ness has to
-/// come from the character, though -- `delim as u8` truncates `é` to `0xE9`,
-/// which is not a byte that appears in its UTF-8 encoding.
+/// The condition the `\B` in `\B delim ([A-Za-z]) delim \B` places on the
+/// flanking characters: both sides must agree on word-ness. One side is the
+/// delimiter, so the neighbour must be a word character exactly when the
+/// delimiter is (`_a_` stays literal, ` #a# ` is marked up). Neighbours are
+/// checked byte-wise; the delimiter's word-ness comes from the character.
 fn non_boundary(delim: char) -> impl Fn(&str, usize, usize) -> bool {
     let d_word = delim_is_word(delim);
     move |t: &str, s: usize, e: usize| {
@@ -3662,29 +3355,22 @@ fn non_boundary(delim: char) -> impl Fn(&str, usize, usize) -> bool {
     }
 }
 
-/// `\w` (word char) on a **byte**, which is what Perl's `\b` sees when it is
-/// handed a byte string: ASCII alphanumeric or underscore. Every byte of a
-/// multi-byte character is `>= 0x80` and so is not a word byte, which is why
-/// this is the right test for a *neighbour* even when the text is UTF-8.
+/// `\w` (word char) on a **byte**, as Perl's `\b` sees it: ASCII alphanumeric
+/// or underscore. Every byte of a multi-byte character is `>= 0x80`, so not a
+/// word byte.
 fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// The same question about a delimiter, which has to be asked of the
-/// character rather than a byte: `d as u8` truncates `é` to `0xE9`, and
-/// `0xE9` is not a byte that appears in `é`'s own UTF-8 encoding. No
-/// non-ASCII character is ever a word character.
+/// The same question about a delimiter, asked of the character: `d as u8`
+/// truncates `é` to `0xE9`, which is not a byte of `é`'s own UTF-8 encoding.
 fn delim_is_word(delim: char) -> bool {
     delim.is_ascii() && is_word_byte(delim as u8)
 }
 
-/// `(?<![delim])` from the single-character general pattern: the delimiter
-/// must not be the character immediately before the match.
-///
-/// The check is on the preceding *character*. `delim as u8` truncates the code
-/// point -- `é` becomes `0xE9`, which is not a byte of its own UTF-8 encoding
-/// -- so a byte-wise test never rejects anything, and `ééwordé` came out
-/// marked up where Perl leaves it alone.
+/// `(?<![delim])`: the delimiter must not be the character immediately before
+/// the match. Checked on the preceding *character*, since a byte-wise test with
+/// `delim as u8` never rejects anything (`ééwordé` would be marked up).
 fn not_preceded_by(delim: char) -> impl Fn(&str, usize, usize) -> bool {
     move |t: &str, s: usize, _e: usize| !t[..s].ends_with(delim)
 }
@@ -3703,17 +3389,10 @@ fn not_preceded_by_str(delim: String) -> impl Fn(&str, usize, usize) -> bool {
     }
 }
 
-/// The bold pattern's `(?![^#]*(?:<li>|<LI>|<P>|<p>))`, applied in code.
-///
-/// It only ever inspects the match's own interior: every character of the
-/// group is `[^#]`, so the `[^#]*` inside the assertion cannot reach past the
-/// closing `#` -- it starts one character in, after the group's leading
-/// `[^\d#]`, and stops at that `#`.
-///
-/// Byte-wise on purpose. The tags are ASCII and no UTF-8 continuation byte can
-/// be part of one, so this is exactly equivalent -- and unlike slicing a `str`
-/// it cannot panic when `s + 2` is not a character boundary, which it need not
-/// be in a paragraph of 8-bit characters.
+/// The bold pattern's `(?![^#]*(?:<li>|<LI>|<P>|<p>))`, applied in code. It only
+/// inspects the match's own interior, since every group character is `[^#]`.
+/// Byte-wise on purpose: slicing a `str` could panic when `s + 2` is not a
+/// character boundary.
 fn no_list_or_para_tag(t: &str, s: usize, e: usize) -> bool {
     none_of(
         t.as_bytes(),
@@ -3731,13 +3410,9 @@ fn char_len(text: &str, byte_pos: usize) -> usize {
     }
 }
 
-/// Whether none of `needles` occurs in `hay[from..to]`.
-///
-/// Byte-wise, so `from`/`to` may fall inside a multi-byte character (which
-/// is what a regex match position can do inside a run of 8-bit text) without
-/// panicking the way slicing a `str` would. Every caller passes ASCII
-/// needles, which no UTF-8 continuation byte can be part of, so the answer
-/// is the same as a `str` search.
+/// Whether none of `needles` occurs in `hay[from..to]`. Byte-wise, so indices may
+/// fall inside a multi-byte character without panicking; callers pass ASCII
+/// needles.
 fn none_of(hay: &[u8], from: usize, to: usize, needles: &[&[u8]]) -> bool {
     let window = &hay[from..to];
     !needles
@@ -3924,8 +3599,6 @@ fn byte_len(s: &str) -> usize {
     s.len()
 }
 
-/// Split a string into paragraphs the way Perl's paragraph mode (`$/ = ""`)
-/// does for LF text: on runs of blank (empty) lines.
 /// The error [`Converter::convert_stream`] returns for input that is not UTF-8.
 fn not_utf8_error() -> io::Error {
     io::Error::new(
@@ -3934,15 +3607,10 @@ fn not_utf8_error() -> io::Error {
     )
 }
 
-/// Yields paragraph records from a reader the way [`paragraph_records`] does
-/// from a string: a record ends at the first line that is exactly `"\n"`, blank
-/// lines before a record are skipped, repeated blank lines are discarded, and a
-/// line holding only whitespace is not blank.
-///
-/// Unlike [`paragraph_records`], the input is not held whole: each line is
-/// validated as UTF-8 on its own. That is safe because a newline byte can never
-/// occur inside a UTF-8 multi-byte sequence, so no character is split across a
-/// line boundary.
+/// Yields paragraph records from a reader the way [`paragraph_records`] does from
+/// a string: a record ends at the first line that is exactly `"\n"`, and a
+/// whitespace-only line is not blank. Each line is validated as UTF-8 on its own,
+/// which is safe because a newline byte never occurs inside a UTF-8 sequence.
 struct ParagraphReader<R> {
     inner: R,
     line: Vec<u8>,
@@ -3982,11 +3650,9 @@ impl<R: BufRead> ParagraphReader<R> {
 }
 
 fn paragraph_records(s: &str) -> Vec<String> {
-    // Perl `$/ = ""` paragraph slurp mode: a record ends at the first
-    // blank (empty) line, that line's newline included.  Blank lines
-    // before a record are skipped, repeated blank lines are discarded,
-    // and a trailing blank run yields no record.  Whitespace-only lines
-    // are not blank.
+    // Perl `$/ = ""` paragraph slurp mode: a record ends at the first blank line,
+    // that line's newline included; blank lines before a record are skipped and a
+    // whitespace-only line is not blank.
     let mut out = Vec::new();
     let mut cur = String::new();
     for line in s.split_inclusive('\n') {
@@ -4061,13 +3727,9 @@ fn split_blank_lines(s: &str) -> Vec<String> {
     if start < n {
         out.push(chars[start..].iter().collect());
     }
-    // Perl's `split` drops *every* trailing empty field, not just a missing
-    // one. A string that is nothing but the separator therefore yields no
-    // fields at all: `split(/\r?\n\r?\n/, "\r\n\r\n")` is empty, because
-    // the only field is empty and it is trailing. The `if start < n` above
-    // only covers the absent tail, so the empty field a separator at the very
-    // end pushes in the loop was surviving here as a phantom paragraph --
-    // which is E3, two stray blank lines from an input ending in a blank line.
+    // Perl's `split` drops *every* trailing empty field, not just a missing one,
+    // so a string that is nothing but the separator yields no fields; without
+    // this the field pushed by a separator at the very end would survive.
     while out.last().is_some_and(|f| f.is_empty()) {
         out.pop();
     }
@@ -4107,15 +3769,10 @@ impl ReplAll for Regex {
 mod cr_chop_tests {
     use super::{chop_leading_cr, chop_trailing_cr, split_blank_lines};
 
-    /// The patterns the two helpers replaced, compiled exactly as the engine
-    /// compiled them.
-    ///
-    /// They have to go through `ascii_re_cached`, not `Regex::new`, because
-    /// that is where Perl's `$` is restored: `$` here is rewritten to the
-    /// lookahead `(?=\n?$)` so it matches before a trailing newline as Perl's
-    /// does. A bare fancy-regex `$` is end-of-text only, so compiling the
-    /// pattern directly would have made this test assert the wrong thing --
-    /// it did, until the exhaustive pass caught it.
+    /// The patterns the two helpers replaced, compiled as the engine compiled
+    /// them. They must go through `ascii_re_cached`, not `Regex::new`, because
+    /// that is where Perl's `$` is restored: `$` is rewritten to the lookahead
+    /// `(?=\n?$)` so it matches before a trailing newline.
     fn re_trailing() -> &'static fancy_regex::Regex {
         crate::links::ascii_re_cached(r"[ \t]*\x0D$")
     }
@@ -4123,10 +3780,9 @@ mod cr_chop_tests {
         crate::links::ascii_re_cached(r"^[ \t]*\x0D")
     }
 
-    /// Exhaustive over the alphabet that matters here. The helpers are string
-    /// surgery standing in for a regex, and the failure mode is a silent
-    /// difference on one awkward input, so this checks all of them rather than
-    /// a handful of examples someone thought of.
+    /// Exhaustive over the alphabet that matters. The helpers stand in for a
+    /// regex and the failure mode is a silent difference on one awkward input,
+    /// so this checks every string up to length 4 rather than a few examples.
     #[test]
     fn matches_the_regex_it_replaced() {
         let alphabet = ['a', ' ', '\t', '\r', '\n'];
@@ -4154,16 +3810,11 @@ mod cr_chop_tests {
         }
     }
 
-    /// E3. `split_blank_lines` stands in for `split(/\r?\n\r?\n/, $s)`,
-    /// which is why the exhaustive treatment above did not reach it: the two
-    /// helpers it covers are the only ones checked against their regex, and
-    /// this one -- the one that decides where paragraphs begin and end -- was
-    /// not. It is now, over the same alphabet, against the regex itself.
+    /// `split_blank_lines` stands in for `split(/\r?\n\r?\n/, $s)`; this checks
+    /// it over the same alphabet against the regex itself.
     ///
-    /// Perl's trailing-empty-field rule is the part that is easy to get wrong
-    /// and impossible to notice by reading: it is a property of `split` rather
-    /// than of the pattern, and a hand-written splitter has no reason to know
-    /// about it.
+    /// Perl's trailing-empty-field rule is a property of `split`, not of the
+    /// pattern, and is easy to get wrong by reading.
     #[test]
     fn split_blank_lines_matches_perl_split() {
         let seps = crate::links::ascii_re_cached(r"\r?\n\r?\n");
@@ -4199,16 +3850,12 @@ mod cr_chop_tests {
         }
     }
 
-    /// The E3 repro, pinned at the level it was reported: a document whose only
-    /// record ends in a blank line must produce no paragraph from that
-    /// separator. It used to produce one empty paragraph, which is where the two
-    /// extra blank lines in the body came from.
+    /// A record whose only separator is a trailing blank line yields no
+    /// paragraph.
     #[test]
     fn a_trailing_blank_line_is_not_a_paragraph() {
-        // Every expected value below was produced by running
-        // `split(/\r?\n\r?\n/, ...)` under Perl, not by reasoning about the
-        // pattern. Reasoning got two of them wrong while writing this test,
-        // which is why they are transcribed rather than derived.
+        // Expected values produced by running `split(/\r?\n\r?\n/, ...)` under
+        // Perl, not by reasoning about the pattern.
         assert_eq!(split_blank_lines("\r\n\r\n"), Vec::<String>::new());
         assert_eq!(split_blank_lines("\n\n"), Vec::<String>::new());
         assert_eq!(split_blank_lines("\r\n\r\n\r\n\r\n"), Vec::<String>::new());
@@ -4217,8 +3864,7 @@ mod cr_chop_tests {
         // ... but an empty field is kept whenever it is not the last one
         assert_eq!(split_blank_lines("\r\n\r\na"), vec!["", "a"]);
         assert_eq!(split_blank_lines("a\r\n\r\nb"), vec!["a", "b"]);
-        // only one separator fits in `a\r\n\r\n\r\nb`, so the tail is one
-        // field rather than an empty one plus a field
+        // only one separator fits in `a\r\n\r\n\r\nb`, so the tail is one field
         assert_eq!(split_blank_lines("a\r\n\r\n\r\nb"), vec!["a", "\r\nb"]);
         assert_eq!(split_blank_lines("\r\n\r\n\r\n"), vec!["", "\r\n"]);
         assert_eq!(split_blank_lines("a\r\n\r\n\r"), vec!["a", "\r"]);
@@ -4230,8 +3876,8 @@ mod cr_chop_tests {
 
     #[test]
     fn trailing_chop_handles_crlf() {
-        // `$` also matches before one trailing newline, so a DOS line ending
-        // has to be recognised. A plain `ends_with('\r')` would miss these.
+        // `$` matches before one trailing newline, so a DOS line ending must be
+        // recognised; a plain `ends_with('\r')` would miss these.
         assert_eq!(chop_trailing_cr("abc \r"), "abc");
         assert_eq!(chop_trailing_cr("abc \r\n"), "abc\n");
         assert_eq!(chop_trailing_cr("abc\r\n"), "abc\n");
@@ -4245,8 +3891,8 @@ mod cr_chop_tests {
 
     #[test]
     fn leading_chop_needs_a_cr() {
-        // Trimming leading whitespace unconditionally would destroy the
-        // indentation of every paragraph in the document.
+        // Trimming leading whitespace unconditionally would destroy every
+        // paragraph's indentation.
         assert_eq!(chop_leading_cr("  \tabc"), "  \tabc");
         assert_eq!(chop_leading_cr("  abc"), "  abc");
         assert_eq!(chop_leading_cr("  \rabc"), "abc");
@@ -4256,14 +3902,9 @@ mod cr_chop_tests {
     }
 }
 
-/// Differential test for the linear (`delim_replace`) delimiter substitution.
-///
-/// The `\B` and `(?<!...)` variants these replace drove fancy-regex's
-/// backtracking VM, which explodes (or errors) on paragraphs of ~500 KB --
-/// see the `do_delim` comment. The linear form must agree with the original
-/// regexes on every input, so this compares them directly. The original
-/// patterns run fine on the short strings used here; the explosion only
-/// shows up at scale.
+/// Differential test for the linear (`delim_replace`) delimiter substitution:
+/// the `\B` and `(?<!...)` variants it replaces drove fancy-regex's backtracking
+/// VM, which explodes on ~500 KB paragraphs. The linear form must agree.
 #[cfg(test)]
 mod delim_linear_tests {
     use super::*;
@@ -4277,7 +3918,7 @@ mod delim_linear_tests {
     }
 
     /// The original `replace_all_captures`: iterate matches with
-    /// `captures_iter`, i.e. what the engine used to do everywhere.
+    /// `captures_iter`.
     fn orig_replace(re: &fancy_regex::Regex, text: &str, tag: &str) -> String {
         let mut out = String::new();
         let mut last = 0;
@@ -4370,12 +4011,9 @@ mod delim_linear_tests {
             " a ",
             "1*2*3",
             "*a*#b#_c_^d^",
-            // A non-ASCII delimiter immediately before another one. The
-            // assertion is `(?<!é)`, and the byte the code point truncates to
-            // -- 0xE9 for `é` -- is not a byte that `é` actually contains, so
-            // a byte-wise check rejects nothing and the assertion is
-            // vacuous. `ééwordé` is the shape that came back from a customer
-            // file marked up as emphasis where Perl leaves it alone.
+            // Non-ASCII delimiter before another: the `(?<!é)` assertion is
+            // vacuous byte-wise, since `é` truncates to 0xE9, not one of its
+            // bytes, so `ééwordé` was marked up where Perl leaves it alone.
             "ééwordé",
             "üüxü",
             "ééé",
@@ -4392,11 +4030,9 @@ mod delim_linear_tests {
         }
     }
 
-    /// The delimiters exercised everywhere below. The last two are not ASCII,
-    /// and they are here because the byte-oriented shortcut `delim as u8` is
-    /// silently wrong for them: `é` truncates to `0xE9`, which is not a byte of
-    /// its own UTF-8 encoding, so a preceding-delimiter test built on it never
-    /// rejects anything and `ééwordé` got marked up where Perl leaves it.
+    /// The delimiters exercised below; the last two are not ASCII, for which
+    /// `delim as u8` is silently wrong (`é` truncates to 0xE9, not one of its
+    /// bytes), so a preceding-delimiter test built on it never rejects anything.
     pub(crate) const DELIMS: &[(char, &str)] = &[
         ('*', "em"),
         ('#', "strong"),
@@ -4406,10 +4042,9 @@ mod delim_linear_tests {
         ('ü', "strong"),
     ];
 
-    /// Randomized differential: the alphabet is the union of delimiter chars
-    /// and word/punct characters, so the generator keeps producing the shapes
-    /// the boundary and lookbehind conditions care about (adjacent delimiters,
-    /// single-char content, delimiter right after a word char, ...).
+    /// Randomized differential: the alphabet is the union of delimiter and
+    /// word/punct characters, so it keeps producing the shapes the boundary and
+    /// lookbehind conditions care about.
     #[test]
     fn linear_delim_matches_on_random_strings() {
         let alphabet: &[char] = &[
@@ -4437,9 +4072,8 @@ mod delim_linear_tests {
     }
 }
 
-/// Same differential check for the two remaining `do_delim` rewrites: the
-/// bold `#...#` pattern and the underscore pattern, both of which lost a
-/// lookaround to `delim_replace`'s `accept` callback.
+/// Same differential check for the two remaining `do_delim` rewrites: the bold
+/// `#...#` pattern and the underscore pattern.
 #[cfg(test)]
 mod delim_wide_linear_tests {
     use super::delim_linear_tests::check_pair;
@@ -4552,9 +4186,7 @@ mod delim_wide_linear_tests {
     }
 
     /// The multi-character delimiter branch, whose leading `(?<!delim)` also
-    /// moved into `accept`. `d` is a metachar-free multi-character delimiter
-    /// so the original pattern compiles the way it does for every delimiter
-    /// Perl can actually handle.
+    /// moved into `accept`. `delim` is metachar-free.
     fn check_multi(c: &mut Converter, text: &str, delim: &str) {
         let tag = "em";
         let ltag = |s: &str| format!("<{tag}>{s}</{tag}>");
@@ -4571,12 +4203,10 @@ mod delim_wide_linear_tests {
         assert_eq!(got, expect, "multi mismatch for {text:?} delim={delim}");
     }
 
-    /// `delim_loop` has to behave like the regex it replaces when a candidate
-    /// is rejected: the engine retries one character along, so a match that
-    /// starts *inside* the rejected span must still be found. Regression test
-    /// for the `#`/`</p><p>` case the P3 fuzzer found -- the first `#` pair
-    /// spans a paragraph boundary and is rejected, and the pair nested in it
-    /// has to be picked up on the retry.
+    /// `delim_loop` must behave like the regex it replaces when a candidate is
+    /// rejected: the engine retries one character along, so a match starting
+    /// *inside* the rejected span is still found. Regression test for the
+    /// `#`/`</p><p>` case.
     #[test]
     fn wide_delim_retry_finds_match_inside_rejected_span() {
         let cases = [
@@ -4611,10 +4241,9 @@ mod delim_wide_linear_tests {
     }
 
     /// 8-bit characters: a regex match position can land in the middle of a
-    /// multi-byte character, so any code that indexes a `str` by a match
-    /// offset has to cope. Regression test for the panic
-    /// "start byte index N is not a char boundary" that the bold rewrite hit
-    /// on the reference's own `umlauttest` fixture.
+    /// multi-byte character, so any code indexing a `str` by a match offset must
+    /// cope. Regression test for the "start byte index N is not a char boundary"
+    /// panic on the reference's own `umlauttest` fixture.
     #[test]
     fn linear_delim_handles_multibyte_text() {
         let cases = [
@@ -4648,8 +4277,8 @@ mod delim_wide_linear_tests {
         }
     }
 
-    /// Same, at random: multi-byte characters mixed with delimiters, so
-    /// match offsets land off character boundaries often.
+    /// Same, at random: multi-byte characters mixed with delimiters, so match
+    /// offsets land off character boundaries often.
     #[test]
     fn linear_delim_handles_multibyte_random() {
         let alphabet: &[char] = &[
@@ -4657,8 +4286,7 @@ mod delim_wide_linear_tests {
             '\u{c4}', '\u{20ac}', '\u{4e2d}', '\u{2192}', '\n', '\t',
         ];
         // a delimiter is 0xC3 0xA9, which shares its trailing byte 0xA9 with
-        // several other characters, so a byte-wise "is the previous character
-        // the delimiter" test gets the wrong answer on exactly these inputs
+        // several other characters, so a byte-wise "previous char" test is wrong
         const NONASCII: &[(char, &str)] = &[('\u{e9}', "em"), ('\u{fc}', "strong")];
         let mut c = conv();
         let mut state = 0x2545_F491_4F6C_DD1Du64;
@@ -4782,9 +4410,8 @@ mod re_cache_tests {
     use super::*;
     use crate::options::Options;
 
-    /// The cap, restated here so the test does not have to reach into the
-    /// engine for a constant. `re_cache_bounded_by_a_measured_maximum` asserts
-    /// the two agree, so this cannot drift from the real limit unnoticed.
+    /// The cap, restated here so the test need not reach into the engine for a
+    /// constant. `re_cache_bounded_by_a_measured_maximum` asserts the two agree.
     const MAX: usize = 128;
 
     /// Options set so that each one that feeds a pattern gives a *different*
@@ -4807,9 +4434,8 @@ mod re_cache_tests {
         }
     }
 
-    /// A document that reaches every construct that compiles a pattern:
-    /// ordered and bulleted lists, definition lists, all four inline
-    /// delimiters, tables, hrules, preformatted blocks, caps and short lines.
+    /// A document that reaches every construct that compiles a pattern: lists,
+    /// definition lists, inline delimiters, tables, hrules, pre chunks, caps.
     fn maximal_document(sections: usize) -> String {
         let mut text = String::new();
         for i in 0..sections {
@@ -4824,21 +4450,9 @@ mod re_cache_tests {
         text
     }
 
-    /// A10, part 1: the cache stays inside its cap.
-    ///
-    /// The growth is reachable, and it is worth being precise about where it
-    /// comes from. Every other pattern the engine builds is either a literal in
-    /// the source or derived from a single-valued option, so no document can
-    /// grow the cache -- the same input twice produces the same entries, and
-    /// `maximal_document` below shows a large document does not either. The one
-    /// unbounded source is `custom_heading_regexp`, which is a user-supplied
-    /// *list*: 500 patterns give 512 entries, because each is compiled and
-    /// cached as it is tried.
-    ///
-    /// So this is insurance against a user option, not a fix for an attack on
-    /// untrusted input, and the plan said as much. It is here for symmetry with
-    /// `links::ascii_re_cached`, which bounds the same kind of thing at the same
-    /// number.
+    /// Part 1: the cache stays inside its cap. The only unbounded source is the
+    /// user-supplied `custom_heading_regexp` list; this is insurance against a
+    /// user option, not a fix for an attack on untrusted input.
     #[test]
     fn re_cache_bounded_by_a_measured_maximum() {
         let mut c = Converter::new(Options {
@@ -4858,15 +4472,9 @@ mod re_cache_tests {
         );
     }
 
-    /// A10, part 2: the cap is above the real working set, so a normal
-    /// conversion never hits it and never pays for a clear.
-    ///
-    /// This is the test that stops the cap from becoming a performance
-    /// regression dressed up as a fix. 19 is measured, not chosen: it is what
-    /// this document compiles with defaults and with every pattern-varying
-    /// option set to a distinct value at once. If a future change pushed the
-    /// working set past 128, the cap would start clearing on real input and this
-    /// would fail rather than quietly getting slower.
+    /// Part 2: the cap is above the real working set, so a normal conversion
+    /// never hits it. 19 is measured: what this document compiles with defaults
+    /// and with every pattern-varying option set to a distinct value at once.
     #[test]
     fn the_cap_is_above_the_measured_working_set() {
         for opts in [
@@ -4887,14 +4495,9 @@ mod re_cache_tests {
         }
     }
 
-    /// A10, part 3: bounding the cache cannot change the output.
-    ///
-    /// The cache is a pure memo of `pattern -> compiled Regex`, so a miss
-    /// recompiles exactly what a hit returned and clearing it is invisible --
-    /// but "invisible" is an argument, and this is the measurement. The same
-    /// document is converted by a converter whose patterns all fit, and by one
-    /// holding 400 uncached-compiling heading patterns that force several
-    /// clears part-way through, and the two outputs must be identical.
+    /// Part 3: bounding the cache cannot change the output. The same document is
+    /// converted with all patterns fitting and with 400 heading patterns forcing
+    /// several clears; the outputs must be identical.
     #[test]
     fn clearing_the_cache_does_not_change_the_output() {
         let text = maximal_document(30);
@@ -4932,7 +4535,7 @@ mod re_cache_tests {
     }
 }
 
-/// P5.4: the streaming path must be byte-for-byte the buffered path for any
+/// The streaming path must be byte-for-byte the buffered path for any
 /// UTF-8 input, and must refuse input it cannot decode identically.
 #[cfg(test)]
 mod stream_tests {
@@ -4958,9 +4561,9 @@ mod stream_tests {
         String::from_utf8(out).unwrap()
     }
 
-    /// Inputs chosen for the record splitter's edges: blank/no blank, leading
-    /// and repeated blanks, no trailing newline, CRLF blank separators, and
-    /// paragraphs that drive the list/pre/table state machines.
+    /// Inputs chosen for the record splitter's edges: blank/no blank, leading and
+    /// repeated blanks, no trailing newline, CRLF separators, and paragraphs that
+    /// drive the list/pre/table state machines.
     const BATTERY: &[&str] = &[
         "plain\n\nsecond para\n",
         "# heading\n\nbody *ital* and #bold#\n",
@@ -5014,7 +4617,7 @@ mod stream_tests {
     }
 
     /// A document large enough to cross the record-by-record state machine many
-    /// times, so an off-by-one in the loop would show rather than hide.
+    /// times.
     #[test]
     fn stream_matches_buffered_on_a_long_document() {
         let mut text = String::new();
@@ -5040,7 +4643,7 @@ mod stream_tests {
     #[test]
     fn stream_rejects_utf16_even_though_ascii_utf16_is_valid_utf8() {
         // 'a','b' in UTF-16LE: the NULs are valid UTF-8, so only the structural
-        // check can catch this.
+        // check catches this.
         let mut out = Vec::new();
         let err = Converter::new(opts())
             .convert_stream(&[0xFF, 0xFE, b'a', 0, b'b', 0, b'\n', 0][..], &mut out)
