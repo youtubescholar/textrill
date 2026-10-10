@@ -273,11 +273,19 @@ distclean: clean
 
 # --- scale probes ------------------------------------------------------------
 
+# The point is the timing. The byte compare keeps it honest: the two tools must
+# be converting the same bytes, or a timing advantage over a differently-shaped
+# run is meaningless. That compare has to use the modes the corpus pins, not the
+# defaults: textrill's default doctype is deliberately HTML5 while the reference
+# defaults to XHTML, and the generator meta line names each tool. `--extract`
+# drops both (no prolog, no generator line), and `--xhtml` pins the one
+# serialization the two share byte-for-byte. The corpus proves this combination
+# is byte-exact (`huge_paragraph`, `huge_paragraph_crlf`).
 scale: build
 	@for f in big_para big_para_crlf; do \
 		in=$(RS)/tests/corpus/inputs/$$f.txt; \
-		$(TIME) $(RELEASE_BIN) --infile $$in --outfile /tmp/scale_mine.html; \
-		$(TIME) perl $(REFDIR)/scripts/txt2html --infile $$in --outfile /tmp/scale_ref.html; \
+		$(TIME) $(RELEASE_BIN) --extract --xhtml --infile $$in --outfile /tmp/scale_mine.html; \
+		$(TIME) perl $(REFDIR)/scripts/txt2html --extract --xhtml --infile $$in --outfile /tmp/scale_ref.html; \
 		cmp -s /tmp/scale_mine.html /tmp/scale_ref.html \
 			&& echo "  $$f: byte-identical" || echo "  $$f: DIFFER"; \
 	done

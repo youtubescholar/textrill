@@ -26,7 +26,7 @@ What is **done**:
   frozen output for every one of the 63 corpus cases, 32 golden comparisons
   against upstream's own `good_*.html` files, and 8 frozen real-document
   examples. The Perl differential remains available as `make diff`.
-- 374 Rust tests and a 74-test native GUI suite.
+- 378 Rust tests and a 74-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the reference-free acceptance against that binary, so it runs on Alpine
   and other glibc-less distros with the same output it produces everywhere.
