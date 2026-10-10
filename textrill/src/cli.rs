@@ -283,6 +283,13 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
         let argline = || -> String { label.to_string() };
         let at = |e: String| -> String { format!("{}: {e}", argline()) };
         let (name, mut inline) = if let Some(rest) = arg.strip_prefix("--") {
+            if rest.is_empty() {
+                // End of options: everything after -- is input filenames
+                for r in it {
+                    opts.infile.push(r.clone());
+                }
+                break;
+            }
             match rest.split_once('=') {
                 Some((n, v)) => (n, Some(v.to_string())),
                 None => (rest, None),
@@ -698,9 +705,7 @@ pub fn usage() -> String {
             if i > 0 {
                 names.push('|');
             }
-            if spec.kind == Kind::Flag {
-                names.push_str("--")
-            }
+            names.push_str("--");
             names.push_str(n);
         }
         let kind = match spec.kind {

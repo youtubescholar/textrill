@@ -570,6 +570,7 @@ impl TextrillApp {
             PendingAction::LoadSample => self.do_load_sample(),
             PendingAction::Quit => {
                 self.persist();
+                self.closing = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
@@ -613,8 +614,8 @@ impl TextrillApp {
             (false, false, false, false, false, false, false);
         ctx.input_mut(|input| {
             new = input.consume_shortcut(&NEW_SHORTCUT);
-            save = input.consume_shortcut(&SAVE_SHORTCUT);
             save_text = input.consume_shortcut(&SAVE_TEXT_SHORTCUT);
+            save = input.consume_shortcut(&SAVE_SHORTCUT);
             convert = input.consume_shortcut(&CONVERT_SHORTCUT);
             copy = input.consume_shortcut(&COPY_HTML_SHORTCUT);
             quit = input.consume_shortcut(&QUIT_SHORTCUT);

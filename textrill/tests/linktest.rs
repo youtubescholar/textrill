@@ -370,6 +370,119 @@ fn link_work_scales_linearly_with_paragraph_count() {
     );
 }
 
+// ---------------------------------------------------------------- glob2regexp
+
+/// `glob2regexp` matches Perl byte-for-byte: the loop walks the *escaped*
+/// string, so the escape consumed by a punctuation character is not skipped
+/// and the tail is not dropped.
+///
+/// The corruption that regressed here: a glob with punctuation (`hyp-phen`)
+/// was sized by the unescaped length but indexed into the escaped text, so the
+/// last characters were chopped and the escaping was one off, producing
+/// `\bhyp-phe\b` -- a pattern that matched `hyp-phe`-minus-the-final-letter.
+///
+/// Note that, like the Perl original, an escaped punctuation character is
+/// emitted *bare*: `foo.bar` becomes `\bfoo.bar\b` and the dot is a wildcard.
+/// Byte-parity with the reference is the requirement; a literal dot would be a
+/// divergence the differential corpus would flag.
+#[test]
+fn glob2regexp_preserves_escaped_metacharacters() {
+    assert_eq!(links::glob2regexp("foo.bar"), r"\bfoo.bar\b");
+    assert_eq!(links::glob2regexp("a?c*"), r"\ba.c.*\b");
+    assert_eq!(links::glob2regexp("x,y"), r"\bx,y\b");
+    assert_eq!(links::glob2regexp("hyphen-ated"), r"\bhyphen-ated\b");
+
+    // The tail must survive: `\bhy.phen\b` (a dropped final `n` would leave
+    // `\bhy.phe\b`, which needs a word break the real text does not have).
+    let re = links::try_compile_pattern(&links::glob2regexp("hy.phen"), false)
+        .expect("glob2regexp output should compile");
+    assert!(
+        re.is_match("see hy.phen here").unwrap(),
+        "the trailing characters were dropped: {re:?}"
+    );
+
+    // The `\b`-wrapped `?` and `*` act as glob metacharacters.
+    let star = links::try_compile_pattern(&links::glob2regexp("a*c"), false).unwrap();
+    assert!(star.is_match("aXYc").unwrap());
+    assert!(star.is_match("ac").unwrap());
+}
+
+/// A glob whose escaped form does not compile (an unbalanced `[`, a dangling
+/// `\`) is reported and skipped like a bad `/.../` regex, never a panic.
+#[test]
+fn a_glob_with_an_unbalanced_bracket_is_reported_and_skipped() {
+    let opts = Options::default();
+    let parser = links::load_links_from_text(&opts, "oops[ -> http://example.invalid/x\n");
+    assert_eq!(
+        parser.rejected_patterns.len(),
+        1,
+        "one glob should be rejected: {:?}",
+        parser.rejected_patterns
+    );
+    let msg = &parser.rejected_patterns[0];
+    assert!(
+        msg.contains("oops"),
+        "the diagnostic should name the offending pattern, got: {msg}"
+    );
+    // and the tool must still be able to run the rules that did load
+    assert!(
+        parser.rules.is_empty(),
+        "no rule should survive the bad glob"
+    );
+}
+
+// ------------------------------------------------- empty-match substitute guard
+
+/// A `/.../` entry that can match the empty string at position 0 without
+/// matching `""` as a whole slips past `can_match_empty` (the look-ahead checks
+/// the following text, not the empty input). The substitution loop must still
+/// terminate: a match that consumes nothing cannot shrink the paragraph.
+#[test]
+fn an_empty_match_at_position_zero_terminates() {
+    let mut parser = links::LinkParser::new(false, textrill::urlscheme::UrlPolicy::default());
+    parser.parse_dict("t.dict", "/(?=Perl)/ -> http://example.invalid/x\n");
+    assert!(
+        parser.rejected_patterns.is_empty(),
+        "the guard reads `is_match(\"\")` and must let this rule through: {:?}",
+        parser.rejected_patterns
+    );
+
+    let mut para = "Perl here".to_string();
+    parser.check_dictionary_links(&mut para);
+    assert_eq!(
+        para, "Perl here",
+        "an empty match must not rewrite the paragraph: {para:?}"
+    );
+}
+
+// ------------------------------------------------- replacement context
+
+/// The replacement template must be expanded against the captures taken from
+/// the paragraph, not ones re-run on the isolated match: an entry like
+/// `(?<=the )word` matches only because of the look-behind, which vanishes when
+/// the matched text is searched on its own.
+#[test]
+fn replacement_sees_text_outside_the_match() {
+    let mut parser = links::LinkParser::new(false, textrill::urlscheme::UrlPolicy::default());
+    parser.parse_dict("t.dict", "/(?<=the )word/ -> http://example.invalid/x\n");
+    assert!(
+        parser.rejected_patterns.is_empty(),
+        "the entry should compile: {:?}",
+        parser.rejected_patterns
+    );
+
+    let mut para = "say the word now".to_string();
+    parser.check_dictionary_links(&mut para);
+    assert!(
+        para.contains("example.invalid/x"),
+        "the look-behind context was lost, so the match was never linked: {para:?}"
+    );
+    assert!(
+        para.contains(">word<"),
+        "the matched text should be the label: {para:?}"
+    );
+}
+
 // --- prefilter integration -------------------------------------------------
 
 /// The prefilter must never lose a link: any `may_match == false` has to be a

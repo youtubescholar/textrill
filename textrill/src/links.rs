@@ -105,15 +105,25 @@ fn expand_ascii_escapes(pat: &str) -> String {
             }
             'b' => {
                 chars.next();
-                out.push_str(
-                    "(?:(?<=[A-Za-z0-9_])(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?=[A-Za-z0-9_]))",
-                );
+                if in_class {
+                    // Perl: `\b` inside a class is the backspace control char,
+                    // not a word-boundary assertion (not representable there).
+                    out.push_str("\\x08");
+                } else {
+                    out.push_str(
+                        "(?:(?<=[A-Za-z0-9_])(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])(?=[A-Za-z0-9_]))",
+                    );
+                }
             }
             'B' => {
                 chars.next();
-                out.push_str(
-                    "(?:(?<=[A-Za-z0-9_])(?=[A-Za-z0-9_])|(?<![A-Za-z0-9_])(?![A-Za-z0-9_]))",
-                );
+                if in_class {
+                    out.push_str("\\x08");
+                } else {
+                    out.push_str(
+                        "(?:(?<=[A-Za-z0-9_])(?=[A-Za-z0-9_])|(?<![A-Za-z0-9_])(?![A-Za-z0-9_]))",
+                    );
+                }
             }
             '>' => {
                 // Perl: `\>` is a literal '>'; regex-crate treats it as an anchor.
@@ -280,58 +290,42 @@ pub fn lower_html_tags(template: &str) -> String {
 
 /// Port of `glob2regexp`.
 pub fn glob2regexp(glob: &str) -> String {
-    let mut re = String::new();
-    let mut prev_backslash = false;
-    let mut regexp = String::new();
-    let mut i = 0;
-    let len = glob.chars().count();
-    let v: Vec<char> = glob.chars().collect();
-    // Escape funky chars
-    let mut escaped_glob = String::new();
-    for c in v.iter() {
+    // Escape funky chars, the same set Perl leaves alone.
+    let mut escaped: Vec<char> = Vec::with_capacity(glob.len());
+    for c in glob.chars() {
         if !(c.is_ascii_alphanumeric()
-            || *c == '_'
-            || *c == '['
-            || *c == ']'
-            || *c == '*'
-            || *c == '?'
-            || *c == '|'
-            || *c == '\\')
+            || c == '_'
+            || c == '['
+            || c == ']'
+            || c == '*'
+            || c == '?'
+            || c == '|'
+            || c == '\\')
         {
-            escaped_glob.push('\\');
+            escaped.push('\\');
         }
-        escaped_glob.push(*c);
+        escaped.push(c);
     }
-    while i < len {
-        let c = escaped_glob.chars().nth(i).unwrap();
+    // Walk the escaped text, as Perl loops over the escaped string: an escape
+    // must line up with a literal, or a `?`/`*` opportunity is misread and the
+    // tail is indexed past.
+    let mut regexp = String::new();
+    let mut prev_backslash = false;
+    for c in escaped {
         if prev_backslash {
             prev_backslash = false;
             regexp.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '\\' {
+        } else if c == '\\' {
             prev_backslash = true;
-            i += 1;
-            continue;
-        }
-        if c == '?' {
+        } else if c == '?' {
             regexp.push('.');
-            i += 1;
-            continue;
-        }
-        if c == '*' {
+        } else if c == '*' {
             regexp.push_str(".*");
-            i += 1;
-            continue;
+        } else {
+            regexp.push(c);
         }
-        regexp.push(c);
-        i += 1;
     }
-    re.push_str("\\b");
-    re.push_str(&regexp);
-    re.push_str("\\b");
-    re
+    format!("\\b{regexp}\\b")
 }
 
 pub struct LinkParser {
@@ -458,6 +452,16 @@ impl LinkParser {
 
     fn add_glob(&mut self, label: &str, pattern: &str, url: &str, switches: u8) {
         let p = glob2regexp(pattern);
+        // A glob becomes a regex, so an unbalanced `[` or a dangling `\` can
+        // still fail to compile; report and skip rather than panic. The regex
+        // is validated, so `compile_pattern`'s `expect` remains an internal
+        // invariant.
+        if let Err(e) = try_compile_pattern(&p, switches & LINK_NOCASE != 0) {
+            let msg = format!("textrill: ignoring link-dictionary pattern {pattern:?}: {e}");
+            eprintln!("{msg}");
+            self.rejected_patterns.push(msg);
+            return;
+        }
         self.add_rule(label, &p, url, switches);
     }
 
@@ -613,7 +617,7 @@ impl LinkParser {
                         line_with_links.push_str(&pre);
                         let mut linkme = matched;
                         if !self.in_link_context(&linkme, &line_with_links) {
-                            linkme = self.repl(i, &linkme);
+                            linkme = self.repl(i, &linkme, &caps);
                         }
                         line_with_links.push_str(&linkme);
                         *para_ref = post;
@@ -634,7 +638,7 @@ impl LinkParser {
                         line_with_links.push_str(&pre);
                         let mut linkme = matched;
                         if !self.in_link_context(&linkme, &line_with_links) {
-                            linkme = self.repl(i, &linkme);
+                            linkme = self.repl(i, &linkme, &caps);
                         }
                         line_with_links.push_str(&linkme);
                         *para_ref = post;
@@ -658,10 +662,18 @@ impl LinkParser {
                         Some(caps) => {
                             let m = caps.get(0).unwrap();
                             let (pre, matched, post) = split_front(para_ref, m.start(), m.end());
+                            // A match that consumed nothing cannot shrink
+                            // `para_ref`, so substituting it again would never
+                            // terminate; a greedy leftmost-first match is never
+                            // the empty string when a longer match exists, so
+                            // stopping here loses no real link.
+                            if post == *para_ref {
+                                break;
+                            }
                             line_with_links.push_str(&pre);
                             let mut linkme = matched;
                             if !self.in_link_context(&linkme, &line_with_links) {
-                                linkme = self.repl(i, &linkme);
+                                linkme = self.repl(i, &linkme, &caps);
                             }
                             line_with_links.push_str(&linkme);
                             *para_ref = post;
@@ -679,14 +691,11 @@ impl LinkParser {
         }
     }
 
-    fn repl(&self, i: usize, matched: &str) -> String {
-        let rule = &self.rules[i];
-        let re = &rule.regex;
-        if let Some(caps) = re.captures(matched).ok().flatten() {
-            expand_template(&rule.replacement, &caps, matched)
-        } else {
-            matched.to_string()
-        }
+    /// Expand a rule's replacement template with the captures taken from the
+    /// paragraph, not re-run on the isolated match: re-running would lose
+    /// context that look-behind and look-ahead may depend on (e.g. `(?<=a)b`).
+    fn repl(&self, i: usize, matched: &str, caps: &fancy_regex::Captures<'_>) -> String {
+        expand_template(&self.rules[i].replacement, caps, matched)
     }
 }
 
