@@ -2068,8 +2068,19 @@ impl Converter {
             line_ref.pop();
         }
         let re = links::ascii_re_cached(r"^\s*(.*)$");
-        let caps = re.captures(&*line_ref).ok().flatten().unwrap();
-        let body = caps.get(1).unwrap().as_str().to_string();
+        // `^\s*(.*)$` matches every line, so the only way `captures` yields no
+        // match is a runtime error: the `$` compiles to the look-ahead
+        // `(?=\n?$)`, which puts the pattern on fancy-regex's backtracking VM,
+        // and that returns `Err` (not a match) if the 1,000,000-step budget is
+        // exhausted. A document must not be able to take the process down, so
+        // fall back to the line itself rather than unwrapping.
+        let body = match re.captures(&*line_ref).ok().flatten() {
+            Some(caps) => caps
+                .get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default(),
+            None => line_ref.clone(),
+        };
         let tag1 = self.get_tag(tag, TAG_START, "");
         let tag2 = self.close_tag(tag);
         *line_ref = format!("{tag1}{body}{tag2}\n");
@@ -3784,6 +3795,15 @@ fn split_blank_lines(s: &str) -> Vec<String> {
 
 // ---------------------------------------------------------------- helper extension
 
+/// `fancy_regex::Regex::replace_all` and `replace` call `try_replacen(..).unwrap()`
+/// internally, so they panic when the engine returns a runtime error -- which is
+/// how the backtracking VM reports an exhausted step budget. Any pattern that
+/// reaches the backtracker (one with a look-around, which this port also
+/// generates from `\b` and `$`, or a back-reference) can therefore panic a
+/// `replace_all`. This helper iterates `captures_iter` and drops the `Err`
+/// results with `flatten`, so a meeting of a backtracker pattern and the budget
+/// is treated as "no further match" rather than a crash. Use it, not
+/// `replace_all`, for any pattern that is not provably linear.
 trait ReplAll {
     fn replace_all_captures(
         &self,
@@ -4578,6 +4598,62 @@ mod re_cache_tests {
         fn re_cache_len_for_test(&self) -> usize {
             self.re_cache.len()
         }
+    }
+}
+
+/// Regex safety: a *compilable* pattern that backtracks catastrophically must
+/// not be able to take a conversion down.
+///
+/// `fancy-regex` runs a pattern on a backtracking VM only when it uses a
+/// look-around, a back-reference or similar; that VM reports an exhausted step
+/// budget as `Err`, never as a match. Every place the engine consumes a
+/// user-supplied pattern must therefore treat that `Err` as "no match" rather
+/// than unwrapping it (an unwrap is a panic, i.e. exit 101). `(a+)+$` is the
+/// classic exponential pattern and `a…a!` is the input that forces the full
+/// search, so if a path unwrapped a runtime error these tests panic; if the
+/// budget were removed they would hang instead of failing fast.
+#[cfg(test)]
+mod regex_safety_tests {
+    use super::*;
+    use crate::options::Options;
+
+    /// A line that makes `(a+)+$` explore its search tree without matching.
+    fn redos_line() -> String {
+        format!("{}!\n", "a".repeat(2000))
+    }
+
+    #[test]
+    fn a_catastrophic_heading_pattern_is_treated_as_no_match() {
+        // Precondition: this input really does drive the engine to its budget,
+        // so a regression that skipped the pattern would not pass vacuously.
+        let re = crate::links::compile_pattern(r"(a+)+$", false);
+        assert!(
+            re.is_match(&redos_line()).is_err(),
+            "the input should exhaust the backtrack budget"
+        );
+
+        let mut c = Converter::new(Options {
+            custom_heading_regexp: vec![r"(a+)+$".to_string()],
+            default_link_dict: String::new(),
+            ..Options::default()
+        });
+        // Returning at all is the assertion: the line is not a heading, so the
+        // pattern is tried and rejected rather than skipped by the prefilter.
+        let html = c.convert_text(&redos_line());
+        assert!(!html.is_empty());
+    }
+
+    #[test]
+    fn a_catastrophic_preformat_marker_is_treated_as_no_match() {
+        let mut c = Converter::new(Options {
+            use_preformat_marker: true,
+            preformat_start_marker: r"(a+)+$".to_string(),
+            preformat_end_marker: r"b(b*)+$".to_string(),
+            default_link_dict: String::new(),
+            ..Options::default()
+        });
+        let html = c.convert_text(&redos_line());
+        assert!(!html.is_empty());
     }
 }
 

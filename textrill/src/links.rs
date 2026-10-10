@@ -493,8 +493,11 @@ impl LinkParser {
     pub fn parse_dict(&mut self, _dictfile: &str, dict: &str) {
         let pattern = r"\s*(.+)\s+\-+([iehos]+\-+)?>\s*(.*\S+)\s*\n";
         let re = Regex::new(pattern).unwrap();
-        for caps in re.captures_iter(dict) {
-            let caps = caps.unwrap();
+        // `.flatten()` drops a runtime error (an exhausted backtrack budget)
+        // instead of panicking: the pattern is linear so this cannot happen
+        // today, but a dictionary is operator input and the old `.unwrap()`
+        // would have turned any engine error into a crash.
+        for caps in re.captures_iter(dict).flatten() {
             if caps.len() < 4 {
                 continue;
             }
@@ -874,4 +877,32 @@ pub fn load_links_from_text(opts: &Options, dict_text: &str) -> LinkParser {
     let filtered = parser.filter_dict(dict_text);
     parser.parse_dict("user", &filtered);
     parser
+}
+
+#[cfg(test)]
+mod regex_safety_tests {
+    use super::*;
+    use crate::options::Options;
+
+    /// The `/regex/` dictionary form reaches the engine verbatim, so a careless
+    /// or hostile dictionary can hand it a catastrophic pattern. Matching one
+    /// against a hostile paragraph must return -- the backtracking VM reports an
+    /// exhausted budget as `Err`, and `check_dictionary_links` treats it as "no
+    /// match" via `.ok().flatten()` -- rather than panic or hang.
+    #[test]
+    fn a_catastrophic_dictionary_pattern_is_treated_as_no_match() {
+        let opts = Options::default();
+        // `-h->` makes the replacement raw HTML, so a match is easy to spot.
+        let mut p = load_links_from_text(&opts, "/^(a+)+$/\t-h-> <X>\n");
+        assert_eq!(p.rules.len(), 1, "the rule should load");
+
+        // `(a+)+$` against `a…a!`: the classic exponential blow-up, forced to
+        // search without matching.
+        let mut para = format!("{}!", "a".repeat(2000));
+        p.check_dictionary_links(&mut para); // must not panic or hang
+        assert!(
+            !para.contains("<X>"),
+            "a catastrophic pattern should not have matched: {para}"
+        );
+    }
 }
