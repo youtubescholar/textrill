@@ -135,6 +135,16 @@ impl Settings {
         self.get("reduce-motion").map(parse_bool)
     }
 
+    /// Whether the built-in file browser was chosen over the desktop chooser.
+    pub fn builtin_browser(&self) -> Option<bool> {
+        self.get("builtin-browser").map(parse_bool)
+    }
+
+    /// Persist the built-in-browser choice.
+    pub fn set_builtin_browser(&mut self, builtin: bool) -> Result<(), String> {
+        self.set("builtin-browser", if builtin { "true" } else { "false" })
+    }
+
     /// Persist the display choices the user owns (theme, text size, motion) in
     /// one atomic write, the way geometry is handled above.
     pub fn store_display(

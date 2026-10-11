@@ -15,8 +15,9 @@ use egui::Ui;
 use textrill::options::Options;
 
 use crate::args::Args;
-use crate::dialogs::{Chooser, NativeChooser};
+use crate::dialogs::{self, Chooser, NativeChooser};
 use crate::document::Document;
+use crate::file_browser::{BrowserOutcome, FileBrowser, FileIntent};
 use crate::options_panel::OptionsPanel;
 use crate::settings::Settings;
 use crate::theme::{self, Theme};
@@ -166,6 +167,15 @@ pub struct TextrillApp {
     /// The file choosers. Tests swap in a stub so the command logic can run
     /// without a desktop portal.
     chooser: Box<dyn Chooser>,
+    /// Use the in-app [`FileBrowser`] instead of the desktop's own chooser.
+    ///
+    /// Defaults on when no usable native dialog is present (see
+    /// [`dialogs::system_dialog_available`]), which is what makes a native
+    /// install on a portal-less desktop work. The user can flip it either way
+    /// from the View menu, and the choice is remembered.
+    use_builtin_browser: bool,
+    /// The built-in browser, when one is open.
+    file_browser: Option<FileBrowser>,
 }
 
 impl Default for TextrillApp {
@@ -207,15 +217,39 @@ impl TextrillApp {
             focus_mode: false,
             applied_style: false,
             chooser: Box::new(NativeChooser),
+            use_builtin_browser: !dialogs::system_dialog_available(),
+            file_browser: None,
         };
         app.restore_settings();
         app
     }
 
     /// Replace the file choosers. Tests use this to answer prompts without a
-    /// desktop portal.
+    /// desktop portal. It also routes file commands to the stub (rather than
+    /// the built-in browser), so a stub always answers them.
     pub fn set_chooser(&mut self, chooser: Box<dyn Chooser>) {
         self.chooser = chooser;
+        self.use_builtin_browser = false;
+    }
+
+    /// Whether file commands use the built-in browser rather than the desktop
+    /// chooser.
+    pub fn uses_builtin_browser(&self) -> bool {
+        self.use_builtin_browser
+    }
+
+    /// Whether the built-in browser is currently on screen.
+    pub fn is_browsing(&self) -> bool {
+        self.file_browser.is_some()
+    }
+
+    /// Choose which chrome file commands use: `true` for the built-in browser,
+    /// `false` for the desktop's own chooser. The choice is remembered.
+    pub fn set_builtin_browser(&mut self, builtin: bool) {
+        self.use_builtin_browser = builtin;
+        if let Err(error) = self.settings.set_builtin_browser(builtin) {
+            self.status = format!("could not save settings: {error}");
+        }
     }
 
     /// The options a conversion actually uses.
@@ -254,6 +288,9 @@ impl TextrillApp {
         }
         if let Some(reduce_motion) = self.settings.reduce_motion() {
             self.reduce_motion = reduce_motion;
+        }
+        if let Some(builtin) = self.settings.builtin_browser() {
+            self.use_builtin_browser = builtin;
         }
     }
 
@@ -522,10 +559,33 @@ impl TextrillApp {
 
     fn do_open(&mut self) {
         let from = self.doc.path.clone();
-        if let Some(path) = self.chooser.open_text(from.as_deref()) {
-            if let Err(error) = self.load_file(&path) {
-                self.status = error;
-            }
+        if self.use_builtin_browser {
+            self.file_browser = Some(FileBrowser::for_open(from.as_deref()));
+        } else if let Some(path) = self.chooser.open_text(from.as_deref()) {
+            self.load_or_report(path);
+        }
+    }
+
+    /// Load `path`, reporting any failure on the status line.
+    fn load_or_report(&mut self, path: PathBuf) {
+        if let Err(error) = self.load_file(&path) {
+            self.status = error;
+        }
+    }
+
+    /// Write the HTML to `path`, reporting the result on the status line.
+    fn save_html_or_report(&mut self, path: PathBuf) {
+        match self.save_html_to(&path) {
+            Ok(()) => self.status = format!("saved {}", path.display()),
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// Write the text to `path`, reporting the result on the status line.
+    fn save_text_or_report(&mut self, path: PathBuf) {
+        match self.save_text_to(&path) {
+            Ok(()) => self.status = format!("saved text to {}", path.display()),
+            Err(error) => self.status = error,
         }
     }
 
@@ -540,27 +600,25 @@ impl TextrillApp {
 
     /// `File → Save As…`: always ask where the HTML should go.
     pub fn save_document_as_command(&mut self) {
-        if let Some(path) = self.chooser.save_html(&self.suggested_output_name()) {
-            match self.save_html_to(&path) {
-                Ok(()) => self.status = format!("saved {}", path.display()),
-                Err(error) => self.status = error,
-            }
+        let suggested = self.suggested_output_name();
+        if self.use_builtin_browser {
+            self.file_browser = Some(FileBrowser::for_save(FileIntent::SaveHtml, &suggested));
+        } else if let Some(path) = self.chooser.save_html(&suggested) {
+            self.save_html_or_report(path);
         }
     }
 
     /// `File → Save text…`: write the text to the opened path, or ask.
     pub fn save_text_command(&mut self) {
         match self.doc.path.clone() {
-            Some(path) => match self.save_text_to(&path) {
-                Ok(()) => self.status = format!("saved text to {}", path.display()),
-                Err(error) => self.status = error,
-            },
+            Some(path) => self.save_text_or_report(path),
             None => {
-                if let Some(path) = self.chooser.save_text(&self.doc.suggested_text_name()) {
-                    match self.save_text_to(&path) {
-                        Ok(()) => self.status = format!("saved text to {}", path.display()),
-                        Err(error) => self.status = error,
-                    }
+                let suggested = self.doc.suggested_text_name();
+                if self.use_builtin_browser {
+                    self.file_browser =
+                        Some(FileBrowser::for_save(FileIntent::SaveText, &suggested));
+                } else if let Some(path) = self.chooser.save_text(&suggested) {
+                    self.save_text_or_report(path);
                 }
             }
         }
@@ -607,7 +665,11 @@ impl TextrillApp {
             SaveAnswer::Discard => self.perform(action, ctx),
             SaveAnswer::Save => {
                 self.save_text_command();
-                if self.doc.dirty {
+                if self.file_browser.is_some() {
+                    // A built-in browser is asking for a name. It will carry
+                    // the waiting command out once it has one, so `pending`
+                    // stays set and the prompt is hidden behind the browser.
+                } else if self.doc.dirty {
                     // Cancelled or failed: drop the waiting command, keep edits.
                     self.pending = None;
                 } else {
@@ -784,6 +846,19 @@ impl TextrillApp {
             });
             ui.menu_button("View", |ui| {
                 ui.checkbox(&mut self.show_options, "Show options");
+                ui.separator();
+                let mut builtin = self.use_builtin_browser;
+                if ui
+                    .checkbox(&mut builtin, "Use built-in file browser")
+                    .on_hover_text(
+                        "Pick files with the in-app browser instead of the \
+                         desktop's dialog. Useful where no file dialog exists \
+                         (for example Sway without xdg-desktop-portal-gtk).",
+                    )
+                    .changed()
+                {
+                    self.set_builtin_browser(builtin);
+                }
                 ui.separator();
                 ui.checkbox(&mut self.focus_mode, "Focus mode")
                     .on_hover_text("Hide every control but the text (Ctrl+Shift+F)");
@@ -1012,6 +1087,35 @@ impl TextrillApp {
         self.resolve_save_prompt(answer, ctx);
     }
 
+    /// Drive the built-in file browser, if one is open, and act on its answer.
+    fn file_browser_window(&mut self, ctx: &egui::Context) {
+        let Some(mut browser) = self.file_browser.take() else {
+            return;
+        };
+        match browser.show(ctx) {
+            BrowserOutcome::Pending => self.file_browser = Some(browser),
+            BrowserOutcome::Cancelled => {
+                // A browser opened for the unsaved-changes prompt drops the
+                // waiting command, exactly as cancelling the native dialog did.
+                self.pending = None;
+            }
+            BrowserOutcome::Chosen(path) => match browser.intent() {
+                FileIntent::OpenText => self.load_or_report(path),
+                FileIntent::SaveHtml => self.save_html_or_report(path),
+                FileIntent::SaveText => {
+                    self.save_text_or_report(path);
+                    // The save may have been the one the unsaved-changes prompt
+                    // was waiting for; carry its command out now.
+                    if !self.doc.dirty {
+                        if let Some(action) = self.pending.take() {
+                            self.perform(action, ctx);
+                        }
+                    }
+                }
+            },
+        }
+    }
+
     /// Draw the whole UI into `ui`.
     pub fn draw(&mut self, ui: &mut Ui) {
         // Apply the chosen look on the first frame. `main` could do it once at
@@ -1048,8 +1152,9 @@ impl TextrillApp {
                 self.pending = Some(PendingAction::Quit);
             }
         }
-        // A pending prompt owns the keyboard, so shortcuts cannot stack commands.
-        if self.pending.is_none() {
+        // A pending prompt or an open browser owns the keyboard, so shortcuts
+        // cannot stack commands behind it.
+        if self.pending.is_none() && self.file_browser.is_none() {
             self.handle_shortcuts(ui.ctx());
             self.accept_dropped_files(ui.ctx());
         }
@@ -1116,7 +1221,12 @@ impl TextrillApp {
         );
 
         self.about_window(ui.ctx());
-        self.save_prompt_window(ui.ctx());
+        if self.file_browser.is_some() {
+            // The browser covers the prompt it may have been opened from.
+            self.file_browser_window(ui.ctx());
+        } else {
+            self.save_prompt_window(ui.ctx());
+        }
     }
 }
 

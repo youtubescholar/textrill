@@ -22,6 +22,7 @@ pub mod app;
 pub mod args;
 mod dialogs;
 pub mod document;
+pub mod file_browser;
 pub mod fonts;
 mod json;
 pub mod options_panel;
@@ -32,6 +33,7 @@ pub mod window_state;
 pub mod worker;
 
 pub use app::{SaveAnswer, TextrillApp};
-pub use dialogs::{Chooser, NativeChooser};
+pub use dialogs::{system_dialog_available, Chooser, NativeChooser};
 pub use document::Document;
+pub use file_browser::{BrowserOutcome, FileBrowser, FileIntent};
 pub use settings::Settings;

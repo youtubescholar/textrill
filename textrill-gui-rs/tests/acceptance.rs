@@ -805,3 +805,127 @@ fn wait_for_conversion(app: &mut TextrillApp, timeout: Duration) {
         app.drain();
     }
 }
+
+// ------------------------------------------------- built-in file browser
+
+/// A fresh scratch directory, unique per call.
+fn scratch_dir(tag: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir =
+        std::env::temp_dir().join(format!("textrill-gui-{tag}-{}-{nanos}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    dir
+}
+
+/// The View menu offers the built-in browser as an explicit choice, which is
+/// the escape hatch when the desktop has no working file dialog.
+#[test]
+fn the_view_menu_offers_the_builtin_browser() {
+    let app = TextrillApp::default();
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    harness.get_by_label("View").click();
+    harness.run();
+    harness.get_by_label("Use built-in file browser");
+}
+
+/// Turning the built-in browser on is remembered across launches.
+#[test]
+fn the_builtin_browser_choice_is_remembered() {
+    let path = temp_settings_path("browser-remember");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+
+    app.set_builtin_browser(true);
+
+    assert!(app.uses_builtin_browser());
+    assert_eq!(
+        Settings::with_path(&path).builtin_browser(),
+        Some(true),
+        "the browser choice was not persisted"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// With the built-in browser on, `Save As` opens it instead of the desktop
+/// chooser.
+#[test]
+fn save_as_opens_the_builtin_browser_when_chosen() {
+    let path = temp_settings_path("browser-dispatch");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.set_builtin_browser(true);
+
+    app.save_document_as_command();
+
+    assert!(app.is_browsing(), "Save As did not open the browser");
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The browser completes a save end to end: it opens on the proposed file, and
+/// confirming writes the HTML there. Focus mode is on so the toolbar's own
+/// "Save" button cannot shadow the modal's in the accessibility tree.
+#[test]
+fn the_builtin_browser_saves_the_html() {
+    let dir = scratch_dir("browser-save");
+    let src = dir.join("doc.txt");
+    std::fs::write(&src, "hello").expect("write source");
+
+    let conf = temp_settings_path("browser-save");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&conf));
+    app.set_builtin_browser(true);
+    app.focus_mode = true;
+    app.load_file(&src).expect("load");
+    app.output = "<p>hello</p>".to_string();
+
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+    harness.state_mut().save_document_as_command();
+    harness.run();
+
+    assert!(harness.state().is_browsing(), "the browser did not open");
+    harness.get_by_label("Save").click();
+    harness.run();
+
+    assert!(!harness.state().is_browsing(), "the browser stayed open");
+    let out = dir.join("doc.html");
+    assert!(out.exists(), "the HTML was not written");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "<p>hello</p>");
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_file(&conf);
+}
+
+/// Cancelling the browser writes nothing and closes it.
+#[test]
+fn cancelling_the_builtin_browser_writes_nothing() {
+    let dir = scratch_dir("browser-cancel");
+    let src = dir.join("doc.txt");
+    std::fs::write(&src, "hello").expect("write source");
+
+    let conf = temp_settings_path("browser-cancel");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&conf));
+    app.set_builtin_browser(true);
+    app.focus_mode = true;
+    app.load_file(&src).expect("load");
+
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+    harness.state_mut().save_document_as_command();
+    harness.run();
+    assert!(harness.state().is_browsing());
+
+    harness.get_by_label("Cancel").click();
+    harness.run();
+
+    assert!(!harness.state().is_browsing(), "Cancel did not close it");
+    assert!(
+        !dir.join("doc.html").exists(),
+        "a cancelled save wrote a file"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_file(&conf);
+}
