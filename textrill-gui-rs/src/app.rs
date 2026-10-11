@@ -1122,6 +1122,20 @@ impl TextrillApp {
 
 impl eframe::App for TextrillApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        self.draw(ui);
+        // eframe's `ui()` is a bare canvas: no margin, no background, and the
+        // framebuffer clears to the window's default clear colour (near-black)
+        // until something paints over it. A central-panel frame gives the whole
+        // surface the theme's `panel_fill`, so the ink always sits on the
+        // theme's paper rather than on that dark canvas. `draw` itself stays a
+        // plain widget pass, which is what the test harness drives.
+        egui::Frame::central_panel(ui.style()).show(ui, |ui| self.draw(ui));
+    }
+
+    /// What the framebuffer is cleared to before egui paints. eframe's default
+    /// is a translucent near-black, which would flash against every theme; this
+    /// clears to the theme's own panel colour, so there is never a dark frame —
+    /// not on the first paint and not between theme switches.
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        visuals.panel_fill.to_normalized_gamma_f32()
     }
 }
