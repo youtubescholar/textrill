@@ -19,6 +19,7 @@ use crate::dialogs::{Chooser, NativeChooser};
 use crate::document::Document;
 use crate::options_panel::OptionsPanel;
 use crate::settings::Settings;
+use crate::theme::{self, Theme};
 use crate::worker::ConversionWorker;
 
 /// How long to wait after the last change before converting.
@@ -48,6 +49,17 @@ const COPY_HTML_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
 );
 const QUIT_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
+/// Toggle the immersive "focus" view that hides every control but the text.
+/// `Ctrl/cmd+Shift+F` is the convention browsers give fullscreen; the *same*
+/// shortcut is how you come back, because the control that does it is hidden.
+const FOCUS_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers {
+        command: true,
+        shift: true,
+        ..egui::Modifiers::NONE
+    },
+    egui::Key::F,
+);
 /// The reset command needs a route that does not depend on any widget being
 /// on screen, because the whole point of it is recovering a layout that is
 /// off-screen or folded away. `Ctrl/Cmd+Alt+0` is outside the set egui's own
@@ -139,6 +151,18 @@ pub struct TextrillApp {
     pub window_maximized: bool,
     /// The UI zoom the user last chose.
     pub zoom: f32,
+    /// The colour theme, from the window's own [`Theme`] set.
+    pub theme: Theme,
+    /// The plain-text size multiplier over the built-in type scale.
+    pub text_size: f32,
+    /// Whether animation is switched off (WCAG `prefers-reduced-motion`).
+    pub reduce_motion: bool,
+    /// Immersive view: menus and controls hidden, only the text on screen.
+    pub focus_mode: bool,
+    /// Whether the chosen theme/text size/motion has been pushed into the egui
+    /// context yet. `draw` does it on the first frame, so the look is applied
+    /// from the very first paint both in the window and under `egui_kittest`.
+    applied_style: bool,
     /// The file choosers. Tests swap in a stub so the command logic can run
     /// without a desktop portal.
     chooser: Box<dyn Chooser>,
@@ -177,6 +201,11 @@ impl TextrillApp {
             window_size: crate::window_state::DEFAULT_SIZE,
             window_maximized: false,
             zoom: 1.0,
+            theme: Theme::default(),
+            text_size: theme::DEFAULT_TEXT_SIZE,
+            reduce_motion: false,
+            focus_mode: false,
+            applied_style: false,
             chooser: Box::new(NativeChooser),
         };
         app.restore_settings();
@@ -217,6 +246,33 @@ impl TextrillApp {
             .unwrap_or(crate::window_state::DEFAULT_SIZE);
         self.window_maximized = self.settings.maximized().unwrap_or(false);
         self.zoom = self.settings.zoom().unwrap_or(1.0);
+        if let Some(theme) = self.settings.theme() {
+            self.theme = theme;
+        }
+        if let Some(text_size) = self.settings.text_size() {
+            self.text_size = text_size;
+        }
+        if let Some(reduce_motion) = self.settings.reduce_motion() {
+            self.reduce_motion = reduce_motion;
+        }
+    }
+
+    /// Persist the display choices the user made (theme, text size, motion).
+    fn store_display_settings(&mut self) {
+        if let Err(error) =
+            self.settings
+                .store_display(self.theme, self.text_size, self.reduce_motion)
+        {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Put the chosen theme, text size and motion into effect on `ctx`.
+    ///
+    /// Called once at startup (so the window never flashes at the stock look)
+    /// and again whenever a control changes one of the three.
+    pub fn apply_ui_style(&self, ctx: &egui::Context) {
+        theme::apply(ctx, self.theme, self.text_size, self.reduce_motion);
     }
 
     /// Persist the current `auto` choice and option set.
@@ -610,8 +666,16 @@ impl TextrillApp {
 
     /// Act on the keyboard shortcuts the menu advertises.
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        let (mut new, mut save, mut save_text, mut convert, mut copy, mut quit, mut reset_window) =
-            (false, false, false, false, false, false, false);
+        let (
+            mut new,
+            mut save,
+            mut save_text,
+            mut convert,
+            mut copy,
+            mut quit,
+            mut reset_window,
+            mut focus,
+        ) = (false, false, false, false, false, false, false, false);
         ctx.input_mut(|input| {
             new = input.consume_shortcut(&NEW_SHORTCUT);
             save_text = input.consume_shortcut(&SAVE_TEXT_SHORTCUT);
@@ -620,9 +684,13 @@ impl TextrillApp {
             copy = input.consume_shortcut(&COPY_HTML_SHORTCUT);
             quit = input.consume_shortcut(&QUIT_SHORTCUT);
             reset_window = input.consume_shortcut(&RESET_WINDOW_SHORTCUT);
+            focus = input.consume_shortcut(&FOCUS_SHORTCUT);
         });
         if reset_window {
             self.reset_window_state(ctx);
+        }
+        if focus {
+            self.focus_mode = !self.focus_mode;
         }
         if new {
             self.new_document();
@@ -717,6 +785,16 @@ impl TextrillApp {
             ui.menu_button("View", |ui| {
                 ui.checkbox(&mut self.show_options, "Show options");
                 ui.separator();
+                ui.checkbox(&mut self.focus_mode, "Focus mode")
+                    .on_hover_text("Hide every control but the text (Ctrl+Shift+F)");
+                if ui
+                    .checkbox(&mut self.reduce_motion, "Reduce motion")
+                    .changed()
+                {
+                    self.apply_ui_style(ui.ctx());
+                    self.store_display_settings();
+                }
+                ui.separator();
                 egui::gui_zoom::zoom_menu_buttons(ui);
                 ui.separator();
                 // The single way back from a size or zoom the user does not
@@ -800,6 +878,84 @@ impl TextrillApp {
             {
                 ui.ctx().set_zoom_factor(1.0);
             }
+
+            // Plain-text size, in the spirit of a browser's font-size control:
+            // it scales the type and therefore the resting size of controls
+            // with it, but leaves the whole-window zoom above alone.
+            ui.separator();
+            ui.label(egui::RichText::new("Text").small());
+            let sizes = theme::TEXT_SIZES;
+            let step = sizes
+                .iter()
+                .enumerate()
+                .min_by(|(_, (a, _)), (_, (b, _))| {
+                    (a - self.text_size)
+                        .abs()
+                        .partial_cmp(&(b - self.text_size).abs())
+                        .unwrap()
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            let smaller = ui
+                .add_enabled(step > 0, egui::Button::new("A−"))
+                .on_hover_text("Smaller text");
+            if smaller.clicked() {
+                self.text_size = sizes[step - 1].0;
+                self.apply_ui_style(ui.ctx());
+                self.store_display_settings();
+            }
+            ui.label(format!("{:.0}%", self.text_size * 100.0));
+            let larger = ui
+                .add_enabled(step + 1 < sizes.len(), egui::Button::new("A+"))
+                .on_hover_text("Larger text")
+                .clicked();
+            if larger {
+                self.text_size = sizes[step + 1].0;
+                self.apply_ui_style(ui.ctx());
+                self.store_display_settings();
+            }
+            if ui
+                .button("Reset text size")
+                .on_hover_text("Back to the default size (100%)")
+                .clicked()
+            {
+                self.text_size = theme::DEFAULT_TEXT_SIZE;
+                self.apply_ui_style(ui.ctx());
+                self.store_display_settings();
+            }
+
+            // The theme picker. Both of egui's internal themes were replaced
+            // with this theme's full style, so switching is one combo change.
+            ui.separator();
+            let mut selected = self.theme;
+            egui::ComboBox::from_id_salt("theme-combo")
+                .selected_text(self.theme.name())
+                .show_ui(ui, |ui| {
+                    for theme in Theme::ALL {
+                        ui.selectable_value(&mut selected, theme, theme.name());
+                    }
+                });
+            if selected != self.theme {
+                self.theme = selected;
+                self.apply_ui_style(ui.ctx());
+                self.store_display_settings();
+            }
+
+            if ui
+                .checkbox(&mut self.reduce_motion, "Reduce motion")
+                .changed()
+            {
+                self.apply_ui_style(ui.ctx());
+                self.store_display_settings();
+            }
+
+            if ui
+                .button("Focus")
+                .on_hover_text("Immersive view: hide every control but the text (Ctrl+Shift+F)")
+                .clicked()
+            {
+                self.focus_mode = true;
+            }
         });
         // The status is its own wrapped row: a long message can then never push
         // a control off the edge, and it stays readable when the buttons fold.
@@ -858,6 +1014,13 @@ impl TextrillApp {
 
     /// Draw the whole UI into `ui`.
     pub fn draw(&mut self, ui: &mut Ui) {
+        // Apply the chosen look on the first frame. `main` could do it once at
+        // startup, but that would leave a test harness (and any other driver)
+        // drawing at the wrong appearance unless it knew to call this first.
+        if !self.applied_style {
+            self.apply_ui_style(ui.ctx());
+            self.applied_style = true;
+        }
         // The worker asks for a redraw when a result lands, so the preview does
         // not wait for the next input event to appear.
         if !self.waker_installed {
@@ -892,7 +1055,37 @@ impl TextrillApp {
         }
 
         self.menu_bar(ui);
-        self.toolbar(ui);
+        if self.focus_mode {
+            // In focus mode the chrome is gone; the first thing on screen is a
+            // single visible way back, so immersion is one click deep, never
+            // unreachable (and `Ctrl+Shift+F` works too).
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .button("Exit focus")
+                    .on_hover_text("Back to the window chrome (Ctrl+Shift+F)")
+                    .clicked()
+                {
+                    self.focus_mode = false;
+                }
+                ui.separator();
+                ui.label(&self.status);
+            });
+        } else {
+            self.toolbar(ui);
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Title");
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut self.opts.title)
+                        .hint_text("Document title: shown as a heading in the HTML"),
+                )
+                .changed()
+            {
+                self.schedule_convert(Instant::now());
+            }
+        });
 
         ui.label("Input");
         if ui

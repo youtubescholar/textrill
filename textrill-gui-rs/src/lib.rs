@@ -27,6 +27,7 @@ mod json;
 pub mod options_panel;
 pub mod options_store;
 pub mod settings;
+pub mod theme;
 pub mod window_state;
 pub mod worker;
 

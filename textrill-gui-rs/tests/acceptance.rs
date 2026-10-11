@@ -18,6 +18,7 @@ use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use textrill::options::Options;
 use textrill_gui::options_panel::OptionsPanel;
+use textrill_gui::theme::Theme;
 use textrill_gui::{Chooser, SaveAnswer, Settings, TextrillApp};
 
 /// A chooser that answers `None`, as if the user closed the dialog.
@@ -587,6 +588,195 @@ fn the_command_line_sets_options_and_opens_a_file() {
     assert_eq!(app.doc.path.as_deref(), Some(src.as_path()));
     assert_eq!(app.doc.text, "hello");
     let _ = std::fs::remove_file(&src);
+}
+
+// ------------------------------------------------------ theme and type size
+
+/// A unique settings path that cannot touch a developer's real configuration.
+fn temp_settings_path(tag: &str) -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!(
+        "textrill-{tag}-{}-{nanos}.conf",
+        std::process::id()
+    ))
+}
+
+/// The theme picker reaches the app's theme and its style, and the choice is
+/// remembered in the settings file the window reads on the next launch.
+#[test]
+fn the_theme_picker_switches_and_remembers_the_theme() {
+    let path = temp_settings_path("theme");
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    assert_eq!(harness.state().theme, Theme::Light, "stem from the default");
+    let combo = harness.get_by_role(egui::accesskit::Role::ComboBox);
+    combo.click();
+    harness.run();
+    harness.get_by_label(Theme::Dark.name()).click();
+    harness.run();
+
+    assert_eq!(
+        harness.state().theme,
+        Theme::Dark,
+        "the picker did not switch"
+    );
+    let style = harness.ctx.style_of(harness.ctx.theme());
+    assert!(style.visuals.dark_mode, "the dark theme is not dark");
+    assert_eq!(
+        Settings::with_path(&path).theme(),
+        Some(Theme::Dark),
+        "the choice was not persisted"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The high-contrast theme asks for the AAA target size (44 px on a clickable
+/// control), not the AA 24 px of the ordinary themes.
+#[test]
+fn high_contrast_ups_the_clickable_height() {
+    let mut app = TextrillApp::default();
+    app.theme = Theme::HighContrast;
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    let style = harness.ctx.style_of(harness.ctx.theme());
+    assert_eq!(
+        style.spacing.interact_size.y, 44.0,
+        "High contrast should use the AAA target size"
+    );
+
+    let ctx = harness.ctx.clone();
+    harness.state_mut().theme = Theme::Light;
+    harness.state_mut().apply_ui_style(&ctx);
+    let style = harness.ctx.style_of(harness.ctx.theme());
+    assert_eq!(
+        style.spacing.interact_size.y, 24.0,
+        "an ordinary theme should keep the AA target size"
+    );
+}
+
+/// The text-size buttons step the plain-text scale up and down around 100%,
+/// and the multiplier is remembered.
+#[test]
+fn the_text_size_buttons_scale_the_type_and_are_remembered() {
+    let path = temp_settings_path("text-size");
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    assert_eq!(harness.state().text_size, 1.0);
+    harness.get_by_label("A+").click();
+    harness.run();
+    harness.get_by_label("A+").click();
+    harness.run();
+
+    assert_eq!(harness.state().text_size, 1.5, "two A+ steps from 100%");
+    let style = harness.ctx.style_of(harness.ctx.theme());
+    let body = style.text_styles[&egui::TextStyle::Body].size;
+    assert!(
+        (body - 13.0 * 1.5).abs() < 1e-3,
+        "the body face did not scale to 150%: {body}"
+    );
+    assert_eq!(
+        Settings::with_path(&path).text_size(),
+        Some(1.5),
+        "the text size was not persisted"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Reduce motion is a real, remembered choice: it zeroes egui's animation
+/// time, so nothing slides or fades.
+#[test]
+fn reduce_motion_zeroes_the_animation_time_and_is_remembered() {
+    let path = temp_settings_path("motion");
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    harness.get_by_label("Reduce motion").click();
+    harness.run();
+
+    assert!(harness.state().reduce_motion);
+    let style = harness.ctx.style_of(harness.ctx.theme());
+    assert_eq!(style.animation_time, 0.0, "reduced motion still animates");
+    assert_eq!(
+        Settings::with_path(&path).reduce_motion(),
+        Some(true),
+        "the motion choice was not persisted"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Focus mode hides the whole chrome — the one visible control left tells you
+/// how to leave, and `Ctrl+Shift+F` is an equally explicit path back.
+#[test]
+fn focus_mode_hides_the_chrome_and_offers_a_way_back() {
+    let app = TextrillApp::default();
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    harness.get_by_label("Focus").click();
+    harness.run();
+
+    assert!(harness.state().focus_mode, "Focus did not engage");
+    assert!(
+        harness.query_by_label("New").is_none(),
+        "the toolbar is still on screen in focus mode"
+    );
+    harness.get_by_label("Exit focus").click();
+    harness.run();
+
+    assert!(!harness.state().focus_mode, "Exit focus did not disengage");
+    assert!(
+        harness.query_by_label("New").is_some(),
+        "the toolbar did not come back"
+    );
+}
+
+/// The Title field feeds `--title`, and the preview leads with the header
+/// landmark the engine now emits for a titled document.
+#[test]
+fn the_title_field_reaches_the_preview_as_a_heading() {
+    let mut app = TextrillApp::default();
+    app.doc.text = "Hello.\n".to_string();
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    // The Title field is the first text input egui draws (it precedes Input).
+    let title_field = harness
+        .get_all_by_role(egui::accesskit::Role::TextInput)
+        .next()
+        .expect("a title field");
+    title_field.focus();
+    title_field.type_text("The Book");
+    harness.run();
+
+    assert_eq!(
+        harness.state().opts.title,
+        "The Book",
+        "the field missed the options"
+    );
+
+    let ctx = harness.ctx.clone();
+    harness.state_mut().convert_now();
+    wait_for_conversion(harness.state_mut(), Duration::from_secs(10));
+    let _ = ctx;
+
+    assert!(
+        harness
+            .state()
+            .output
+            .contains("<header class=\"document-header\">\n<h1>The Book</h1>\n</header>"),
+        "unexpected preview: {}",
+        harness.state().output
+    );
 }
 
 fn wait_for_conversion(app: &mut TextrillApp, timeout: Duration) {

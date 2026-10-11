@@ -65,6 +65,10 @@ fn main() -> eframe::Result<()> {
             // 100% and then jumps.
             cc.egui_ctx.set_zoom_factor(zoom);
             let mut app = textrill_gui::TextrillApp::with_settings(settings);
+            // Apply the theme/text-size/motion before the first frame, so the
+            // window never appears at egui's stock look for even one paint
+            // (the first `draw` would apply it anyway; this removes the flash).
+            app.apply_ui_style(&cc.egui_ctx);
             app.apply_command_line(&parsed);
             Ok(Box::new(app))
         }),

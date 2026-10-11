@@ -245,3 +245,103 @@ fn the_parity_modes_keep_the_bare_html_element() {
     assert!(!out.contains("lang="), "{out:?}");
     assert!(out.contains("<html>\n"), "{out:?}");
 }
+
+/// A titled document in HTML5 mode opens its body with the header landmark the
+/// GUI's Title field is wired to: `--title` becomes an `<h1>` at the top of
+/// the default (untemplated) body.
+#[test]
+fn a_titled_document_leads_its_body_with_a_header() {
+    let out = render(Options {
+        html5: true,
+        title: "Chapter One".to_string(),
+        ..Options::default()
+    });
+    // Straight after the `<body>` the paragrapher emits, before any prose.
+    assert!(
+        out.contains(
+            "<body>\n<header class=\"document-header\">\n<h1>Chapter One</h1>\n</header>\n"
+        ),
+        "{out:?}"
+    );
+    assert!(
+        out.contains("<title>Chapter One</title>"),
+        "the title element is untouched: {out:?}"
+    );
+}
+
+/// An untitled document emits no header, so a heading is never left empty.
+#[test]
+fn an_untitled_document_emits_no_header() {
+    let out = render(Options::default());
+    assert!(!out.contains("document-header"), "{out:?}");
+    assert!(!out.contains("<h1>"), "{out:?}");
+}
+
+/// The title goes into the heading text escaped exactly as it went into the
+/// `<title>` element, so a title that could break out of its element cannot.
+#[test]
+fn the_header_escapes_the_title() {
+    let out = render(Options {
+        html5: true,
+        title: "</header><script>alert(1)</script>".to_string(),
+        ..Options::default()
+    });
+    assert!(
+        out.contains("<h1>&lt;/header&gt;&lt;script&gt;alert(1)&lt;/script&gt;</h1>"),
+        "{out:?}"
+    );
+    assert!(!out.contains("<script>"), "{out:?}");
+}
+
+/// The parity modes keep the reference's byte-for-byte output, so the header
+/// landmark is HTML5-mode-only: `--xhtml` and `--no-html5` titled documents
+/// emit no `<h1>`, exactly as the corpus pins them.
+#[test]
+fn the_parity_modes_keep_no_header() {
+    let mut xhtml = Options::default();
+    cli::set_value(&mut xhtml, "xhtml", "1").expect("xhtml");
+    xhtml.title = "Chapter One".to_string();
+    let out = render(xhtml);
+    assert!(!out.contains("document-header"), "{out:?}");
+
+    let mut legacy = Options::default();
+    cli::set_value(&mut legacy, "html5", "0").expect("no-html5");
+    legacy.title = "Chapter One".to_string();
+    let out = render(legacy);
+    assert!(!out.contains("document-header"), "{out:?}");
+}
+
+/// The header landmark opens the TOC too: the title comes before the contents.
+#[test]
+fn the_header_precedes_a_generated_toc() {
+    // A heading must end its paragraph to be seen by the sectioning pass, so
+    // this goes through a real file (as `sectiontest` explains for itself).
+    let dir = std::env::temp_dir().join(format!(
+        "textrill-h5-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let input = dir.join("in.txt");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(&input, "One\n===\n\nfirst\n").unwrap();
+    let mut opts = Options {
+        html5: true,
+        toc: true,
+        title: "Chapter One".to_string(),
+        ..Options::default()
+    };
+    opts.infile = vec![input.to_string_lossy().into_owned()];
+    let out = Converter::new(opts).try_convert().expect("readable input");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let header_at = out
+        .find("document-header")
+        .expect("header should be present");
+    let toc_at = out
+        .find("<nav class=\"toc\"")
+        .expect("toc should be present");
+    assert!(header_at < toc_at, "{out:?}");
+}

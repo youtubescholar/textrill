@@ -2992,12 +2992,44 @@ impl Converter {
         if self.opts.lang_runs {
             body = crate::langdetect::wrap_runs(&body, &self.opts.lang);
         }
-        let mut out = String::with_capacity(start.len() + toc.len() + body.len() + tail.len());
+        let header = self.default_document_header();
+        let mut out =
+            String::with_capacity(start.len() + header.len() + toc.len() + body.len() + tail.len());
         out.push_str(&start);
+        out.push_str(&header);
         out.push_str(&toc);
         out.push_str(&body);
         out.push_str(&tail);
         out
+    }
+
+    /// The titled landmark the default (untemplated) body opens with, or
+    /// nothing at all.
+    ///
+    /// This is the mirror of the `header` slot [`Self::apply_template`] fills;
+    /// the exact string is kept in step with it, including the rule that an
+    /// empty title vanishes the whole block rather than rendering an empty
+    /// `<h1>`. It is emitted only in HTML5 mode: the parity modes
+    /// (`--xhtml`, `--no-html5`) stay byte-identical to the reference, which
+    /// prints no such landmark. The GUI's dedicated Title field feeds
+    /// `--title`, so the preview of a titled document leads with this heading.
+    fn default_document_header(&self) -> String {
+        if !self.opts.html5 {
+            return String::new();
+        }
+        // `build_head` already recorded the escaped title in `title_text` in a
+        // document run. `--extract` skips it, so fall back to the raw option
+        // escaped for the same text context.
+        let title = if self.title_text.is_empty() {
+            chars::escape_attr(&self.opts.title)
+        } else {
+            self.title_text.clone()
+        };
+        if title.is_empty() {
+            String::new()
+        } else {
+            format!("<header class=\"document-header\">\n<h1>{title}</h1>\n</header>\n")
+        }
     }
 
     /// Collect and validate the note sets, returning `(stripped body, citations

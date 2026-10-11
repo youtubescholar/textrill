@@ -118,6 +118,44 @@ impl Settings {
         self.get("zoom").and_then(crate::window_state::parse_zoom)
     }
 
+    /// The saved theme, by its stored name; `None` when unset or unknown.
+    pub fn theme(&self) -> Option<crate::theme::Theme> {
+        self.get("theme").and_then(crate::theme::Theme::from_stored)
+    }
+
+    /// The saved text-size multiplier, clamped; `None` when unset or unreadable.
+    pub fn text_size(&self) -> Option<f32> {
+        self.get("text-size")
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .map(crate::theme::clamp_text_size)
+    }
+
+    /// The saved reduce-motion choice.
+    pub fn reduce_motion(&self) -> Option<bool> {
+        self.get("reduce-motion").map(parse_bool)
+    }
+
+    /// Persist the display choices the user owns (theme, text size, motion) in
+    /// one atomic write, the way geometry is handled above.
+    pub fn store_display(
+        &mut self,
+        theme: crate::theme::Theme,
+        text_size: f32,
+        reduce_motion: bool,
+    ) -> Result<(), String> {
+        self.values
+            .insert("theme".to_string(), theme.stored().to_string());
+        self.values.insert(
+            "text-size".to_string(),
+            crate::theme::clamp_text_size(text_size).to_string(),
+        );
+        self.values.insert(
+            "reduce-motion".to_string(),
+            if reduce_motion { "true" } else { "false" }.to_string(),
+        );
+        self.write()
+    }
+
     /// Persist the whole geometry in a single atomic write: the normal size,
     /// whether the window was maximized, and the zoom. Position is deliberately
     /// absent; see [`crate::window_state`].

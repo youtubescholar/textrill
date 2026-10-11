@@ -111,6 +111,27 @@ cd textrill-gui-rs
 cargo run --release
 ```
 
+The window is a live preview: an editor on the left, the converted HTML5 body
+on the right, an option panel along the bottom, and a toolbar between them.
+Preview pane, zoom and window geometry are remembered across runs in the same
+settings file as the options. The display control strip is an accessibility
+set, not chrome for its own sake:
+
+- **Theme** — `Light`, `Dark`, `Sepia` and `High contrast`, every one a fixed
+  pair of ink-on-paper colours with its text/background pairs held to WCAG AAA
+  (7:1). High contrast also enlarges the click targets to the AAA touch target.
+- **Text size** — A− / A+ step the whole interface typeface around 100% and are
+  remembered.
+- **Reduce motion** — turns egui's 200 ms animations off (0 ms), with or
+  without the operating-system hint.
+- **Focus** — hides every control (and the menu bar) so only the document
+  remains; the one visible control (`Exit focus`) and `Ctrl+Shift+F` bring the
+  chrome back.
+
+The **Title** field above the toolbar feeds `--title`; the untemplated preview
+then leads with the same `<header class="document-header">` landmark the engine
+emits (see "Document title" below).
+
 Packaging as a Flatpak is planned; there is no wheel or installed entry point
 yet.
 
@@ -237,6 +258,30 @@ tag:
 
 The pass runs over the finished body (the notes slots too, in the templated
 arrangement) and needs the whole document, so it is refused with `--stream`.
+
+### Document title
+
+`--title "…"` names the document. The name is escaped for the output and, where
+there is no template to place it, the untemplated HTML5 body leads with it as a
+landmark:
+
+```sh
+textrill --title "Psalm 23" psalm.txt
+```
+
+```html
+<!DOCTYPE html>
+<html lang="en">…
+<header class="document-header">
+<h1>Psalm 23</h1>
+</header>
+…body…
+```
+
+Without a title nothing is emitted, and the reference-compatible `--xhtml` and
+`--no-html5` bodies are unchanged by the flag — the `<h1>` is a HTML5-mode
+addition, never a change to the parity record. In a template the title and its
+header are the `{{textrill:title}}` and `{{textrill:header}}` slots instead.
 
 ### Sectioning, TOC and multi-file output
 
@@ -516,7 +561,7 @@ HTML5 mode the engine emits no inline `style=`, so a strict
 | `id="toc"`, `class="toc"`, `class="toc-list"` | the table-of-contents `<nav>` and its `<ol>` | `--toc` |
 | `class="toc-hN"` (`toc-h1` … `toc-h6`) | each TOC entry; the level lets CSS indent | `--toc` |
 | `class="section"`, `id="chunk-N"` | each section wrapper | `--section`, `--toc`, `--chunk` |
-| `class="document-header"` | the `<header>` wrapping the title `<h1>` | `{{textrill:header}}` |
+| `class="document-header"` | the `<header>` wrapping the title `<h1>` | `--title` in the untemplated HTML5 body, and `{{textrill:header}}` in a template |
 | `class="pager"` | the prev/next `<nav>` on a chunked page | `--chunk` |
 | `class="align-right"`, `class="align-center"` | a right/centre-aligned table cell | `--make_tables` (HTML5) |
 | `class="notes"`, `id="notes"`, `class="notes-heading"` | the citation section | `--citations` |
