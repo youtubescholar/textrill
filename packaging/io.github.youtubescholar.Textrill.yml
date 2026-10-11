@@ -7,9 +7,10 @@
 #
 # One thing is unresolved and is recorded in packaging/README.md:
 #
-#   `cargo-sources.json`, referenced by both modules below. It is generated,
-#   not committed, and generating it needs `flatpak-cargo-generator` (pip),
-#   which is not installed on this host. `make cargo-sources` does it.
+#   `cargo-sources-*.json`, referenced by the modules below. They are
+#   generated, not committed, and generating them needs
+#   `flatpak-cargo-generator` (pip), which is not installed on this host.
+#   `make cargo-sources` does it.
 #
 # Offline/vendored dependencies are preferred for reproducibility, and
 # `cargo vendor` would avoid the generator entirely at the cost of a large
@@ -24,60 +25,65 @@ runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
 command: textrill-gui
 
+# The Rust toolchain lives in an SDK extension rather than in the base SDK. It
+# is a build-time extension only, so it is declared here instead of being
+# installed into the SDK by a module.
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+
 finish-args:
   - --share=ipc
-  - --socket=x11
+  # Wayland first; X11 (XWayland) only when the compositor offers no Wayland.
   - --socket=wayland
+  - --socket=fallback-x11
   - --device=dri
+  # Open/Save can reach anywhere under the user's home.
   - --filesystem=home
-  - --talk-name=org.freedesktop.portal.OpenURI
+  # No portal talk-name is needed: Flatpak always allows the
+  # org.freedesktop.portal.* interfaces used by the file chooser.
 
 modules:
-  # The rust-stable SDK extension is not in the 24.08 runtime's default SDK, and
-  # building egui against the SDK's own toolchain would pin a rustc the project
-  # does not otherwise require.
-  - name: rust-stable
-    buildsystem: simple
-    build-commands:
-      - install -d /usr/lib/sdk/rust-stable/bin
-      - ln -s rustc /usr/lib/sdk/rust-stable/bin/rustc
-      - ln -s cargo /usr/lib/sdk/rust-stable/bin/cargo
-    sources:
-      - type: file
-        path: rust-stable.sh
-        dest-filename: rust-stable.sh
-
   # Engine first: textrill-gui-rs depends on it by path, so the CLI has to exist
   # before the GUI module configures. Installed to /app/bin so the single artifact
   # ships both.
   - name: textrill
     buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/textrill/cargo
     build-commands:
-      - cargo build --release --locked
-      - install -Dm755 target/release/textrill /app/bin/textrill
+      # There is no workspace Cargo.toml at the repo root, so each crate is
+      # built by manifest path; the target directory lands beside its manifest.
+      - cargo build --release --locked --offline --manifest-path textrill/Cargo.toml
+      - install -Dm755 textrill/target/release/textrill ${FLATPAK_DEST}/bin/textrill
     sources:
       - type: dir
         path: ..
         skip:
           - target
+          - textrill/target
+          - textrill-gui-rs/target
           - ref
           - research
           - stubs
           - packaging
           - .git
       - type: file
-        path: cargo-sources.json
+        path: cargo-sources-textrill.json
 
   - name: textrill-gui
     buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/textrill-gui/cargo
     build-commands:
-      - cd textrill-gui-rs
-      - cargo build --release --locked
-      # The bundled fonts are loaded from a path relative to the executable, so
-      # they travel with the binary.
-      - install -Dm755 target/release/textrill-gui /app/bin/textrill-gui
-      - install -d /app/share/textrill/fonts
-      - cp -r assets/fonts/. /app/share/textrill/fonts/
+      - cargo build --release --locked --offline --manifest-path textrill-gui-rs/Cargo.toml
+      # The fonts are compiled into the binary via include_bytes!; there is
+      # nothing to install alongside it.
+      - install -Dm755 textrill-gui-rs/target/release/textrill-gui ${FLATPAK_DEST}/bin/textrill-gui
     sources:
       # The repo root, not the crate directory: textrill-gui-rs depends on
       # ../textrill by path, so the sibling has to be inside the module.
@@ -85,10 +91,12 @@ modules:
         path: ..
         skip:
           - target
+          - textrill/target
+          - textrill-gui-rs/target
           - ref
           - research
           - stubs
           - packaging
           - .git
       - type: file
-        path: cargo-sources.json
+        path: cargo-sources-textrill-gui.json

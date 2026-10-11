@@ -249,13 +249,17 @@ ref-large:
 # every clean is a good way to make the gate mysteriously unavailable.
 # --- Flatpak packaging (draft; see packaging/README.md) --------------------------
 
-# Generates packaging/cargo-sources.json from Cargo.lock, which the Flatpak
-# manifest's two modules both consume. The file is generated rather than
-# committed because it is a few thousand lines of vendored crate metadata that
-# only has to agree with one lockfile, and a stale copy of it is a build failure
-# nobody can read. Requires flatpak-cargo-generator (pip), which is NOT installed
-# on this host. The generate-vs-vendor decision is open; see packaging/README.md.
-CARGO_SOURCES := packaging/cargo-sources.json
+# Generates one packaging/cargo-sources-<crate>.json per crate, from that
+# crate's Cargo.lock. The manifest's two modules each consume their own file:
+# the two lockfiles pin different versions of shared crates (e.g. bit-set), so
+# a single shared file could not satisfy both `--locked` builds. The files are
+# generated rather than committed because they are thousands of lines of
+# vendored crate metadata that only has to agree with a lockfile, and a stale
+# copy is a build failure nobody can read. Requires flatpak-cargo-generator
+# (pip), which is NOT installed on this host. The generate-vs-vendor decision is
+# open; see packaging/README.md.
+CARGO_SOURCES := packaging/cargo-sources-textrill.json \
+                 packaging/cargo-sources-textrill-gui.json
 
 .PHONY: cargo-sources
 cargo-sources:
@@ -263,9 +267,8 @@ cargo-sources:
 	  { echo "ERROR: flatpak-cargo-generator is not installed."; \
 	    echo "       pip install flatpak-cargo-generator"; \
 	    echo "       Or vendor instead: cargo vendor (see packaging/README.md)"; exit 1; }
-	@for crate in textrill textrill-gui-rs; do \
-	  flatpak-cargo-generator -o $(CARGO_SOURCES) $$crate/Cargo.lock; \
-	done
+	flatpak-cargo-generator -o packaging/cargo-sources-textrill.json textrill/Cargo.lock
+	flatpak-cargo-generator -o packaging/cargo-sources-textrill-gui.json textrill-gui-rs/Cargo.lock
 	@echo "wrote $(CARGO_SOURCES)"
 
 distclean: clean
