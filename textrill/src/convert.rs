@@ -3918,10 +3918,10 @@ mod cr_chop_tests {
     /// them. They must go through `ascii_re_cached`, not `Regex::new`, because
     /// that is where Perl's `$` is restored: `$` is rewritten to the lookahead
     /// `(?=\n?$)` so it matches before a trailing newline.
-    fn re_trailing() -> &'static fancy_regex::Regex {
+    fn re_trailing() -> std::sync::Arc<fancy_regex::Regex> {
         crate::links::ascii_re_cached(r"[ \t]*\x0D$")
     }
-    fn re_leading() -> &'static fancy_regex::Regex {
+    fn re_leading() -> std::sync::Arc<fancy_regex::Regex> {
         crate::links::ascii_re_cached(r"^[ \t]*\x0D")
     }
 
@@ -4252,9 +4252,9 @@ mod delim_wide_linear_tests {
         let orig = ascii_re_cached(r"#([^\d#](?![^#]*(?:<li>|<LI>|<P>|<p>))[^#]*[^# \t\n])#");
         let lin = ascii_re_cached(r"#([^\d#][^#]*[^# \t\n])#");
         let no_tag = no_list_or_para_tag;
-        let expect = orig_replace(orig, text, tag);
+        let expect = orig_replace(&orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, lin, no_tag, ltag);
+        c.delim_replace(&mut got, &lin, no_tag, ltag);
         assert_eq!(got, expect, "bold re2 mismatch for {text:?}");
     }
 
@@ -4264,9 +4264,9 @@ mod delim_wide_linear_tests {
         let orig = ascii_re_cached(r#"(?<![_A-Za-z0-9])_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#);
         let lin = ascii_re_cached(r#"_([^_]+?[A-Za-z0-9"'.?&;:<>])_"#);
         let not_word = not_preceded_by_word_or_underscore;
-        let expect = orig_replace(orig, text, tag);
+        let expect = orig_replace(&orig, text, tag);
         let mut got = text.to_string();
-        c.delim_replace(&mut got, lin, not_word, ltag);
+        c.delim_replace(&mut got, &lin, not_word, ltag);
         assert_eq!(got, expect, "under re2 mismatch for {text:?}");
     }
 
@@ -4376,7 +4376,7 @@ mod delim_wide_linear_tests {
             let re = c.re(r"#([^\d#][^#]*[^# \t\n])#").clone();
             let no_tag = no_list_or_para_tag;
             let expect = orig_replace(
-                ascii_re_cached(r"#([^\d#](?![^#]*(?:<li>|<LI>|<P>|<p>))[^#]*[^# \t\n])#"),
+                &ascii_re_cached(r"#([^\d#](?![^#]*(?:<li>|<LI>|<P>|<p>))[^#]*[^# \t\n])#"),
                 text,
                 "strong",
             );

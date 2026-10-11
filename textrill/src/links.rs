@@ -4,6 +4,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use fancy_regex::Regex;
 
@@ -202,27 +203,30 @@ pub fn ascii_re(pat: &str) -> Regex {
 /// Memoized `ascii_re`, for fixed patterns that sniff every paragraph (list
 /// prefixes, table shapes, mail headers).
 ///
-/// The `&'static str` parameter is load-bearing: this returns a leaked
-/// `&'static Regex`, so a document-derived pattern is a compile error rather
-/// than unbounded cache growth. Use [`ascii_re`] for dynamic patterns.
-pub fn ascii_re_cached(pat: &'static str) -> &'static Regex {
+/// The `&'static str` parameter is load-bearing: it makes a document-derived
+/// pattern a compile error rather than unbounded cache growth. Use [`ascii_re`]
+/// for dynamic patterns.
+///
+/// Returns an owned `Arc<Regex>` rather than a leaked `&'static Regex`, so the
+/// cache releases its patterns when the thread exits and nothing is retained
+/// forever. The `Arc` also lets the cache be a plain per-thread map without
+/// tying the returned handle to the map's borrow.
+pub fn ascii_re_cached(pat: &'static str) -> Arc<Regex> {
     thread_local! {
-        static CACHE: RefCell<HashMap<String, &'static Regex>> = RefCell::new(HashMap::new());
+        static CACHE: RefCell<HashMap<&'static str, Arc<Regex>>> = RefCell::new(HashMap::new());
     }
     CACHE.with(|cache| {
         // Bounded so a caller using dynamic patterns cannot grow it forever.
         const MAX_CACHED: usize = 128;
         let mut cache = cache.borrow_mut();
         if let Some(re) = cache.get(pat) {
-            return *re;
+            return Arc::clone(re);
         }
         if cache.len() >= MAX_CACHED {
             cache.clear();
         }
-        let re: &'static Regex = Box::leak(Box::new(
-            Regex::new(&translate_pattern(pat)).expect("valid pattern"),
-        ));
-        cache.insert(pat.to_string(), re);
+        let re = Arc::new(Regex::new(&translate_pattern(pat)).expect("valid pattern"));
+        cache.insert(pat, Arc::clone(&re));
         re
     })
 }

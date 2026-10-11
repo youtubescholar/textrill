@@ -61,29 +61,14 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
 
-/// The allocation defects this file is built to detect, that the port still has.
-/// They are *measured and printed on every run*
-/// rather than deleted, so the numbers stay visible; each is recorded by an
-/// explicit `known_open(..)` call at the site that measures it, so removing a
-/// defect is a two-line change and cannot be done by accident.
-///
-/// This list is the audit trail. If a budget below is exceeded and its site does
-/// not call `known_open`, the run fails -- which is the point: a *new*
-/// allocation regression is not excusable, only the two recorded ones are.
-///
-///   The `Box::leak` in `links::ascii_re_cached` retains ~3.9 KB per distinct
-///   compiled pattern, forever. Reachable from document content through the
-///   table path, and from the fixed literal patterns in `do_delim`.
-const KNOWN_OPEN: &[&str] = &["regex leak: Box::leak retains ~3.9 KB per distinct pattern"];
-
-fn known_open(item: &str, what: String) {
-    assert!(
-        KNOWN_OPEN.iter().any(|k| k.starts_with(item)),
-        "{item} is recorded as known-open but is not in the KNOWN_OPEN audit list: \
-         add it there, or fix it"
-    );
-    eprintln!("  KNOWN-OPEN [{item}]: {what}");
-}
+// There are no known-open allocation defects. Every budget below is a hard
+// gate: exceeding it is a regression, not a recorded exception.
+//
+// Two used to be recorded here and printed on every run -- the `Box::leak` in
+// `links::ascii_re_cached` and the one in `prefilter::literal`. Both are now
+// closed (the cache holds `Arc<Regex>` and releases it when the thread exits;
+// the prefilter's finder owns its needle), so this file no longer needs a
+// `KNOWN_OPEN` list or a `known_open` printer to excuse a red budget.
 
 /// Serialises the tests in this file.
 ///
@@ -179,29 +164,18 @@ fn printable_delimiters() -> Vec<char> {
         .collect()
 }
 
-// ------------------------------------------------------------------ regex leak, part 1
-// The leak is real and unbounded in principle. `ascii_re_cached` returns a
-// `&'static Regex` produced by `Box::leak`, so nothing is ever freed; the
-// 128-entry cap clears the map, which drops references without releasing
-// memory. This drives it directly, which is the only way to reach that state:
-// only ~90 printable delimiter characters exist, so no real document can
-/// The leak was one `Regex` kept per distinct pattern, forever.
-///
-/// The fix is not to free those `Regex`es -- the function cannot, it returns
-/// `&'static` -- but to make the set of patterns *fixed*, so there is nothing
-/// unbounded left. The parameter is now `&'static str`, which makes that a
-/// compile-time guarantee rather than a convention: a caller holding a
-/// document-derived pattern gets a type error, and this file's own direct-call
-/// test was rewritten by that error, which is how the guarantee is known to
-/// hold.
-///
-/// What remains is a bounded, one-time cost for the fixed literals, and that is
-/// what this measures. It is a real allocation the process never gives back, so
-/// it is recorded here rather than ignored; `valgrind` flags it. Closing it
-/// entirely would mean changing the return type at 39 call
-/// sites, which is a larger change than the defect warrants.
+// -------------------------------------------------- the fixed-pattern regex cache
+// `links::ascii_re_cached` memoizes a compiled pattern per distinct pattern on
+// each thread. It used to return a `Box::leak`ed `&'static Regex`, so those
+// allocations were never freed -- a real, if bounded, leak that `valgrind`
+// flagged. It now returns an owned `Arc<Regex>`, so the per-thread cache drops
+// its patterns when the thread exits.
+//
+// The `&'static str` parameter stays: it makes a document-derived pattern a
+// compile-time error rather than unbounded cache growth, which is the guarantee
+// this test's fixed pattern list relies on.
 #[test]
-fn literal_cache_retention_is_bounded() {
+fn the_fixed_pattern_cache_is_released_with_its_thread() {
     let _guard = exclusive();
     /// The patterns `do_delim` and the table sniffs actually use. Literals, so
     /// they are what the cache is for.
@@ -239,55 +213,82 @@ fn literal_cache_retention_is_bounded() {
         r"^\s*!",
     ];
 
-    // One thread, so the measurement is of a cold cache: what a process pays to
-    // reach the steady state it then keeps.
-    let live: isize = std::thread::spawn(|| {
-        let (_alloc, live) = measure(|| {
+    // Compile every pattern in a fresh thread and then let it exit. The cache is
+    // a `thread_local`, so what the thread's exit returns is exactly what the old
+    // `Box::leak` retained.
+    let (alloc, live) = measure(|| {
+        std::thread::spawn(|| {
             for pat in LITERALS {
                 let re = links::ascii_re_cached(pat);
                 // Touch it, so the result cannot be optimised away.
                 assert!(!re.as_str().is_empty());
             }
-        });
-        live
-    })
-    .join()
-    .expect("measurement thread panicked");
+        })
+        .join()
+        .expect("measurement thread panicked");
+    });
 
     eprintln!(
-        "literal cache: {} fixed patterns, {live:+} bytes retained",
+        "literal cache: {} patterns compiled in a thread, {alloc} B allocated, \
+         {live:+} B retained after it exited",
         LITERALS.len()
     );
 
-    // Before the fix this was unbounded in the number of *distinct* patterns and
-    // the same ~3.9 KB applied to each of them. Now the count is fixed by the
-    // source, so the budget is simply "the literals, times the per-pattern
-    // cost, plus room for the converter's own state".
-    const BUDGET: isize = 512 * 1024;
-    if live >= BUDGET {
-        known_open(
-            "regex leak",
-            format!(
-                "the fixed-literal cache retains {live} bytes, over the {BUDGET} byte \
-                 budget for {} patterns",
-                LITERALS.len()
-            ),
-        );
-    }
+    // The patterns are compiled (so `alloc` is large) and released when the
+    // thread ends, so nothing is retained. Before the fix this window ended with
+    // the whole cache still live -- ~3.9 KB per pattern, forever.
+    assert!(
+        live.abs() < 64 * 1024,
+        "a thread compiled {} patterns but retained {live} bytes after exiting",
+        LITERALS.len()
+    );
 }
 
-// ------------------------------------------------------------------ regex leak, part 2
-// What a *real* document can actually cost, and the regression budget the fix
-// must keep under.
+// ------------------------------------------------------------------ prefilter literal retention
+// `prefilter::literal` builds a `RequiredLiteral` per link rule, and the GUI
+// builds a `Converter` per conversion. When the literal's bytes were leaked, the
+// CLI paid that once but the GUI paid it on every conversion. The fix makes the
+// `memmem::Finder` own its needle, so nothing outlives the `Converter`. This
+// measures the *second and third* build on one thread: the thread-local regex
+// cache is already warm (its one-time retention is `literal_cache_retention_is_bounded`'s
+// subject), so what is left is the per-`Converter` cost.
+#[test]
+fn rebuilding_a_converter_retains_nothing() {
+    let _guard = exclusive();
+    // Warm the thread-local caches off the measured window.
+    drop(converter(false));
+
+    let (_alloc, live) = measure(|| {
+        drop(converter(false));
+        drop(converter(false));
+    });
+    eprintln!("  two further Converter builds retained {live:+} bytes");
+
+    // The fix retains nothing across builds (measured 0). When the literal
+    // leaked, each build added the lowercased literals of the system-dictionary
+    // rules -- measured 320 bytes per build, 640 for these two -- so the budget
+    // sits below the defect and above the (zero) noise.
+    const BUDGET: isize = 256;
+    assert!(
+        live < BUDGET,
+        "building further Converters retained {live} bytes; something is leaked per \
+         Converter, and the GUI builds one per conversion"
+    );
+}
+
+// ------------------------------------------- document-derived patterns do not retain
+// A real document can make the engine compile a pattern per distinct table
+// delimiter. That must not grow retained memory with the number of delimiters,
+// which is what a per-distinct-pattern leak would look like from document
+// content.
 //
 // The assertion is on **marginal retained bytes per distinct delimiter**, not on
 // total allocation. Two reasons. Total allocation is dominated by ordinary churn
 // -- the long-paragraph path alone accounts for tens of megabytes of
 // allocate-and-free for a small document, which `long_paragraph_allocation_is_linear`
-// covers -- and a total-allocation budget would be measuring that instead of the
-// leak. And the leak's signature is retention, so marginal cost per delimiter is
-// both the sensitive and the specific signal: the converter's fixed overhead
-// cancels out.
+// covers -- and a total-allocation budget would be measuring that instead. And a
+// leak's signature is retention, so marginal cost per delimiter is both the
+// sensitive and the specific signal: the converter's fixed overhead cancels out.
 //
 // `--make_tables` is required and off by default. Without it no table is
 // detected and the delimiter is never compiled.
@@ -317,7 +318,7 @@ fn delim_document(n: usize, delims: &[char]) -> String {
 ///
 /// The regex cache is a `thread_local`, so two measurements on the same thread
 /// share it: the second run would reuse the first run's compiled patterns and
-/// the marginal cost would read as zero no matter how badly the cache leaked.
+/// the marginal cost would read as zero no matter how much the cache retained.
 /// A new thread gets an empty cache, which is the only way to measure this
 /// honestly in-process.
 fn retained_for(n: usize, delims: &[char]) -> (usize, isize) {
@@ -352,20 +353,14 @@ fn retained_bytes_do_not_scale_with_delimiter_count() {
          marginal {marginal:.0} B per additional delimiter"
     );
 
-    // After the fix this is zero. While the leak is present it is measured at
-    // ~3.9 KB per pattern, so the real-input figure lands in the thousands. The
-    // threshold sits well above the noise and well below the defect.
+    // The threshold sits well above the noise floor and well below the ~3.9 KB
+    // per distinct pattern a per-pattern leak would show.
     const BUDGET_PER_DELIMITER: f64 = 2_048.0;
-    if marginal >= BUDGET_PER_DELIMITER {
-        known_open(
-            "regex leak",
-            format!(
-                "each additional distinct delimiter retains {marginal:.0} bytes, over the \
-                 {BUDGET_PER_DELIMITER:.0} byte budget -- the same Box::leak, reached from \
-                 real document content"
-            ),
-        );
-    }
+    assert!(
+        marginal < BUDGET_PER_DELIMITER,
+        "each additional distinct delimiter retained {marginal:.0} bytes, over the \
+         {BUDGET_PER_DELIMITER:.0} byte budget"
+    );
 }
 
 // ---------------------------------------------------------------------- long-paragraph allocation

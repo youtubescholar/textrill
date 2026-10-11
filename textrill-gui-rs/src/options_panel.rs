@@ -246,24 +246,41 @@ fn string(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) -> bool {
 fn string_array(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) -> bool {
     let mut text = cli::get_value(opts, key).unwrap_or_default();
     ui.label(help);
-    if ui
+    if !ui
         .add(egui::TextEdit::multiline(&mut text).desired_rows(3))
         .changed()
     {
-        // `set_value` appends to a `StrArray`; the panel edits the whole list,
-        // so replace it. The four array options are the only ones that need
-        // this, and naming them here keeps the engine free of a GUI-shaped API.
-        let entries: Vec<String> = text.lines().map(str::to_string).collect();
-        match key {
-            "custom_heading_regexp" => opts.custom_heading_regexp = entries,
-            "infile" => opts.infile = entries,
-            "instring" => opts.instring = entries,
-            "links_dictionaries" => opts.links_dictionaries = entries,
-            _ => {}
+        return false;
+    }
+    // `set_value` appends to a `StrArray`; the panel edits the whole list, so
+    // clear it and re-add. `var` is a `Vec<(String, String)>` rather than a
+    // `Vec<String>`, but `set_value` parses its `name=value` lines, so the
+    // replace-and-re-add loop is the same for every array option and the engine
+    // keeps the validation. Reading the list back (rather than assigning the
+    // widgets directly) is what stops a new array option from being silently
+    // dropped, as `var` was.
+    clear_array(opts, key);
+    let mut error = None;
+    for line in text.lines() {
+        if let Err(message) = cli::set_value(opts, key, line) {
+            error.get_or_insert(message);
         }
-        true
-    } else {
-        false
+    }
+    if let Some(message) = error {
+        ui.colored_label(egui::Color32::RED, message);
+    }
+    true
+}
+
+/// Empty the `StrArray` `key` names, so [`string_array`] can re-add its lines.
+fn clear_array(opts: &mut Options, key: &str) {
+    match key {
+        "custom_heading_regexp" => opts.custom_heading_regexp.clear(),
+        "infile" => opts.infile.clear(),
+        "instring" => opts.instring.clear(),
+        "links_dictionaries" => opts.links_dictionaries.clear(),
+        "var" => opts.vars.clear(),
+        _ => {}
     }
 }
 

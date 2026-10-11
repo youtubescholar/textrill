@@ -37,15 +37,15 @@ impl RequiredLiteral {
 
 /// Build a searchable lowercased literal.
 ///
-/// The bytes are leaked so the `Finder` can borrow them for `'static`; the leak
-/// is bounded because literals are only built from the fixed pattern set at load.
+/// The finder is made owned with [`Finder::into_owned`], which copies the needle,
+/// so the bytes are not leaked: a `RequiredLiteral` is built once per link rule
+/// per `Converter`, and the GUI builds a `Converter` per conversion, where a
+/// leaked literal would compound. Keeping `bytes` alongside the owned finder
+/// costs one copy and buys [`as_bytes`].
 fn literal(s: &str) -> RequiredLiteral {
-    let owned = s.to_ascii_lowercase().into_bytes();
-    let bytes: &'static [u8] = Box::leak(owned.into_boxed_slice());
-    RequiredLiteral {
-        bytes: bytes.to_vec(),
-        finder: memchr::memmem::Finder::new(bytes),
-    }
+    let bytes = s.to_ascii_lowercase().into_bytes();
+    let finder = memchr::memmem::Finder::new(&bytes).into_owned();
+    RequiredLiteral { bytes, finder }
 }
 
 /// A disjunction of requirements: a match requires at least one of these

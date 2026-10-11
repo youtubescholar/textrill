@@ -59,6 +59,13 @@ fn array_of(opts: &Options, name: &str) -> Vec<String> {
         "infile" => opts.infile.clone(),
         "instring" => opts.instring.clone(),
         "links_dictionaries" => opts.links_dictionaries.clone(),
+        // `get_value` spells a variable `name=value`; the same spelling decodes
+        // back through `push_array`, so the pair form and the flat form agree.
+        "var" => opts
+            .vars
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -116,5 +123,34 @@ fn apply(opts: &mut Options, name: &str, value: &Json) {
                 .join(" ");
             set(&text);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `var` is a `Vec<(String, String)>`, one of the two shapes a `StrArray`
+    /// can take. It must survive a store/restore like the `Vec<String>` arrays:
+    /// a panel edit that is not persisted is the same bug as one that is
+    /// dropped by the widget.
+    #[test]
+    fn template_variables_round_trip() {
+        let mut opts = Options::default();
+        cli::set_value(&mut opts, "var", "name=World").expect("set var");
+        cli::set_value(&mut opts, "var", "color=blue").expect("set var");
+
+        let blob = encode(&opts);
+        assert!(blob.contains("name=World"), "var missing from blob: {blob}");
+
+        let mut restored = Options::default();
+        decode(&blob, &mut restored);
+        assert_eq!(
+            restored.vars,
+            vec![
+                ("name".to_string(), "World".to_string()),
+                ("color".to_string(), "blue".to_string()),
+            ]
+        );
     }
 }

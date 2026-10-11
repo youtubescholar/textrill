@@ -204,6 +204,36 @@ fn reset_options_restores_defaults() {
     );
 }
 
+/// `var` is the one `StrArray` whose elements are `name=value` pairs rather
+/// than bare strings. Editing it must reach `Options.vars`. Regression: the
+/// widget used to fall through to a no-op arm and drop the edit.
+#[test]
+fn the_var_list_edits_through_to_options() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.state_mut().0.filter = "var".to_string();
+    harness.set_size(egui::vec2(1000.0, 600.0));
+    harness.run();
+
+    let field = harness
+        .get_all_by_role(egui::accesskit::Role::MultilineTextInput)
+        .next()
+        .expect("the var editor");
+    field.focus();
+    field.type_text("greeting=hi");
+    harness.run();
+
+    assert_eq!(
+        harness.state().1.vars,
+        vec![("greeting".to_string(), "hi".to_string())],
+        "the var edit did not reach Options.vars"
+    );
+}
+
 /// The example text exercises emphasis, strong, links, tables and lists.
 /// Ported from `test_sample_text_exercises_the_converter`.
 #[test]
@@ -878,6 +908,10 @@ fn the_builtin_browser_saves_the_html() {
     app.set_builtin_browser(true);
     app.focus_mode = true;
     app.load_file(&src).expect("load");
+    // Let the load's conversion finish before pinning the output; otherwise a
+    // result landing during a later `run()` overwrites it and the file gets the
+    // engine's HTML instead of the fixed string this test saves.
+    wait_for_conversion(&mut app, Duration::from_secs(10));
     app.output = "<p>hello</p>".to_string();
 
     let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
