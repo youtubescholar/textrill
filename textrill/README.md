@@ -127,7 +127,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **69 options** with **126 accepted spellings** including short
+There are **71 options** with **129 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names are the upstream ones, unchanged, so a document converts the
@@ -149,6 +149,8 @@ upstream pair. A few are worth calling out:
 | `--no_referrer` | off | Private reading: emit `<meta name="referrer" content="no-referrer">` and `rel="nofollow noreferrer"` on generated external links |
 | `--html5` | on | Emit HTML5: `<!DOCTYPE html>`, no namespace, charset meta; `--no-html5` gives the Perl original's HTML 4.01 |
 | `--xhtml` | off | Emit XHTML 1.0 Strict instead — the Perl original's default |
+| `--lang` | `en` | Declared language of the document, a BCP 47 tag; emitted on the root `<html>` in HTML5 mode, empty disables it (see "Declared language") |
+| `--lang_runs` | off | Wrap runs of a script other than the document language in `<span lang="…">` (disallowed with `--stream`; see "Declared language") |
 | `--section` | off | Wrap each heading section in `<article id="chunk-N">` |
 | `--toc` | off | Prepend a generated table of contents (implies `--section`) |
 | `--chunk` | off | Write one HTML file per top-level section |
@@ -205,6 +207,36 @@ cases when `make diff` is run, pin those modes explicitly, so the default
 change never touches the parity record. Tag case is governed by
 `--lower_case_tags` as usual, and each mode flag sets it as part of entering
 its mode — an explicit `--lower_case_tags` after the flag wins.
+
+### Declared language
+
+A document converts with a declared language so a screen reader and a
+validator know what the prose is. The declaration is `--lang`, a BCP 47 tag
+whose default is `en`; it is emitted as `lang="…"` on the root `<html>`
+element in HTML5 mode only, because the reference-compatible modes must keep
+their byte-for-byte skeleton. An empty `--lang` disables the attribute.
+
+`--lang_runs` goes further and marks passages in a language other than the
+document's with `<span lang="…">`, the HTML-correct way to identify a
+foreign-language passage for a screen reader. The script of a run decides its
+tag:
+
+- CJK runs — kanji, hiragana, katakana and hangul — are grouped and tagged
+  `ja` when they contain kana, `ko` when they contain hangul, otherwise `zh`;
+- the scripts of a single natural language map to it directly (Devanagari to
+  `hi`, Bengali to `bn`, Gurmukhi to `pa`, Gujarati to `gu`, Tamil to `ta`,
+  Telugu to `te`, Kannada to `kn`, Malayalam to `ml`, Sinhala to `si`, Thai to
+  `th`, Lao to `lo`, Myanmar to `my`, Armenian to `hy`, Hebrew to `he`, Greek
+  to `el`, Georgian to `ka`, Ethiopic to `am`, Cherokee to `chr`, Tibetan to
+  `bo`, Mongolian to `mn`);
+- the scripts a passage might be in but cannot be told by its characters alone
+  — Latin, Cyrillic, Arabic — are never wrapped, so a Czech quote in an English
+  document is simply left alone;
+- tags only compare by their primary subtag, so a document declaring
+  `zh-Hans` is not rewrapped by its own `zh` passages.
+
+The pass runs over the finished body (the notes slots too, in the templated
+arrangement) and needs the whole document, so it is refused with `--stream`.
 
 ### Sectioning, TOC and multi-file output
 
@@ -496,6 +528,8 @@ HTML5 mode the engine emits no inline `style=`, so a strict
 | `class="glossary-list"` | the `<dl>` of terms | `--glossary` |
 | `class="gloss-def"` | one term's `<dd>` definition | `--glossary` |
 | `class="gloss-ref"` | a term reference in the body | `--glossary` |
+| `<html lang="…">` | the declared language of the document | `--lang` (HTML5 mode) |
+| `<span lang="…">` | a passage in a script other than the document's language | `--lang_runs` |
 
 A minimal sheet to start from:
 

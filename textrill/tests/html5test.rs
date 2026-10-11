@@ -98,7 +98,10 @@ fn html5_respects_tag_case() {
         lower_case_tags: false,
         ..Options::default()
     });
-    assert!(out.contains("<!DOCTYPE html>\n<HTML>"), "{out:?}");
+    assert!(
+        out.contains("<!DOCTYPE html>\n<HTML LANG=\"en\">"),
+        "{out:?}"
+    );
     assert!(out.contains("<META CHARSET=\"utf-8\">"), "{out:?}");
 }
 
@@ -172,4 +175,73 @@ fn html5_still_honours_extract() {
     assert!(!out.contains("DOCTYPE"), "{out:?}");
     assert!(!out.contains("<html"), "{out:?}");
     assert!(out.contains("<p>hi"), "{out:?}");
+}
+
+#[test]
+fn html5_declares_the_default_language_on_the_root_element() {
+    // The declared language rides on <html> where a screen reader and a
+    // validator can find it; "en" is the default dominant language.
+    let out = render(Options::default());
+    assert!(
+        out.starts_with("<!DOCTYPE html>\n<html lang=\"en\">"),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn html5_declares_custom_language_tags() {
+    let out = render(Options {
+        html5: true,
+        lang: "zh-Hans".to_string(),
+        ..Options::default()
+    });
+    assert!(
+        out.starts_with("<!DOCTYPE html>\n<html lang=\"zh-Hans\">"),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn upper_case_tags_upper_case_the_lang_attribute() {
+    // LANG follows the tag case the document is serialised in, like any
+    // other attribute.
+    let out = render(Options {
+        html5: true,
+        xhtml: false,
+        lower_case_tags: false,
+        lang: "de".to_string(),
+        ..Options::default()
+    });
+    assert!(
+        out.starts_with("<!DOCTYPE html>\n<HTML LANG=\"de\">"),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn the_parity_modes_keep_the_bare_html_element() {
+    // --xhtml and --no-html5 reproduce the reference's byte-for-byte
+    // skeleton (the corpus pins them), so `lang` is themselves' only in
+    // HTML5 mode; an empty --lang suppresses it even there.
+    let mut xhtml = Options::default();
+    cli::set_value(&mut xhtml, "xhtml", "1").expect("xhtml");
+    let out = render(xhtml);
+    assert!(
+        out.contains("<html xmlns=\"http://www.w3.org/1999/xhtml\">"),
+        "{out:?}"
+    );
+    assert!(!out.contains("lang="), "{out:?}");
+
+    let mut legacy = Options::default();
+    cli::set_value(&mut legacy, "html5", "0").expect("no-html5");
+    let out = render(legacy);
+    assert!(!out.contains("lang="), "{out:?}");
+
+    let out = render(Options {
+        html5: true,
+        lang: String::new(),
+        ..Options::default()
+    });
+    assert!(!out.contains("lang="), "{out:?}");
+    assert!(out.contains("<html>\n"), "{out:?}");
 }

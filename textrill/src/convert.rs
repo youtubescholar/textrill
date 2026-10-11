@@ -2717,9 +2717,19 @@ impl Converter {
                     // HTML5 serialisation: the short doctype and an <html>
                     // element with no namespace. The charset meta is forced on
                     // with the doctype, because an HTML5 document with no declared
-                    // encoding is the thing the mode exists to fix.
+                    // encoding is the thing the mode exists to fix. The declared
+                    // language rides on the root element, where it is useful to
+                    // a screen reader and a validator. The parity modes keep the
+                    // reference's bare <html> and ignore --lang.
                     out.push_str("<!DOCTYPE html>\n");
-                    out.push_str(&self.get_tag("html", TAG_START, ""));
+                    let lang_attr = if self.opts.lang.is_empty() {
+                        String::new()
+                    } else if self.opts.lower_case_tags {
+                        format!(" lang=\"{}\"", chars::escape_attr(&self.opts.lang))
+                    } else {
+                        format!(" LANG=\"{}\"", chars::escape_attr(&self.opts.lang))
+                    };
+                    out.push_str(&self.get_tag("html", TAG_START, &lang_attr));
                     out.push('\n');
                 } else {
                     out.push_str("<!DOCTYPE HTML PUBLIC \"");
@@ -2975,6 +2985,13 @@ impl Converter {
         // output too.
         body.push_str(&citations);
         body.push_str(&glossary);
+        // `--lang_runs` marks passages in another script. The declare-and-document
+        // policy lives in `langdetect`; the pass is refused with `--stream`,
+        // which cannot afford the document-wide scan. The templated path applies
+        // the same wrap to the body slot.
+        if self.opts.lang_runs {
+            body = crate::langdetect::wrap_runs(&body, &self.opts.lang);
+        }
         let mut out = String::with_capacity(start.len() + toc.len() + body.len() + tail.len());
         out.push_str(&start);
         out.push_str(&toc);
@@ -3025,6 +3042,12 @@ impl Converter {
         }
         if !glossary.is_empty() && !has_slot("glossary") {
             body.push_str(glossary);
+        }
+        // `--lang_runs` marks passages in another script in the body slot (the
+        // templated sibling of the untemplated wrap above). The notes render
+        // into their own slots and are left alone in either case.
+        if self.opts.lang_runs {
+            body = crate::langdetect::wrap_runs(&body, &self.opts.lang);
         }
         // `header` is the titled landmark or nothing at all: an empty `<h1>`
         // (or an empty wrapper around it) is exactly the silent-empty frame a

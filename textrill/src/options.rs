@@ -315,6 +315,17 @@ pub struct Options {
     pub style_url: String,
     pub tab_width: usize,
     pub table_type: TableTypeFlags,
+    /// Declared language of the document, as a BCP 47 tag (`en`, `zh-Hans`,
+    /// `ja`, …). Emitted as `lang="…"` on the root `<html>` element in HTML5
+    /// mode. Default **`en`**, the language the tools and their audience
+    /// assume; the parity modes (`--xhtml`, `--no-html5`) keep the reference's
+    /// bare `<html>` and ignore it. Empty disables the attribute.
+    pub lang: String,
+    /// Wrap runs whose script is not the document's declared language in
+    /// `<span lang="…">` elements, choosing the tag from the script (kana →
+    /// `ja`, hangul → `ko`, Han → `zh`, Devanagari → `hi`, …). Refused with
+    /// `--stream`. Default **off**.
+    pub lang_runs: bool,
     pub title: String,
     pub titlefirst: bool,
     pub underline_delimiter: String,
@@ -396,6 +407,8 @@ impl Default for Options {
             table_type: TableTypeFlags::default(),
             title: String::new(),
             titlefirst: false,
+            lang: "en".to_string(),
+            lang_runs: false,
             underline_delimiter: "_".to_string(),
             underline_length_tolerance: 1,
             underline_offset_tolerance: 1,
@@ -459,6 +472,7 @@ impl Options {
                 .map_err(|e| format!("{name}: invalid regular expression {pattern:?}: {e}"))?;
         }
         self.validate_style_url()?;
+        self.validate_language_options()?;
         self.validate_template_options()?;
         self.validate_notes_options()?;
         Ok(())
@@ -494,6 +508,26 @@ impl Options {
             self.style_url,
             policy.describe()
         ))
+    }
+
+    /// Check the language options. A BCP 47 tag must not smuggle markup into the
+    /// `lang` attribute, and the run-wrapping pass needs the whole document.
+    fn validate_language_options(&self) -> Result<(), String> {
+        if !self.lang.is_empty()
+            && !self
+                .lang
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            return Err(format!(
+                "--lang {:?} is not a BCP 47 tag: letters, digits and - only",
+                self.lang
+            ));
+        }
+        if self.lang_runs && self.stream {
+            return Err("--lang_runs is not valid with --stream".to_string());
+        }
+        Ok(())
     }
 
     /// Refuse the note modes with `--chunk` and `--stream`.

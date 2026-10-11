@@ -61,6 +61,8 @@ pub const SPECS: &[Spec] = specs![
     Flag "Indent a paragraph when a tag breaks it." ["indent_par_break", "ipb"],
     StrArray "Input file; repeat for several files." ["infile"],
     StrArray "Input string; repeat for several strings." ["instring"],
+    Str "Declared language of the document, a BCP 47 tag such as en, zh-Hans or ja; empty disables it." ["lang"],
+    Flag "Wrap runs of a script other than the document language in <span lang> tags." ["lang_runs", "wrap_langs"],
     Str "Delimiter that turns text into italic text." ["italic_delimiter"],
     Str "How to decode input: auto, utf-8 or cp1252." ["encoding", "enc"],
     Flag "Emit <meta charset=\"utf-8\"> in the document head." ["meta_charset"],
@@ -198,6 +200,8 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
         "indent_par_break" => opts.indent_par_break.to_string(),
         "infile" => opts.infile.join("\n"),
         "instring" => opts.instring.join("\n"),
+        "lang" => opts.lang.clone(),
+        "lang_runs" => opts.lang_runs.to_string(),
         "italic_delimiter" => opts.italic_delimiter.clone(),
         "encoding" => opts.encoding.name().to_string(),
         "meta_charset" => opts.meta_charset.to_string(),
@@ -584,6 +588,7 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         }
         "indent_par_break" => opts.indent_par_break = value,
         "link_only" => opts.link_only = value,
+        "lang_runs" => opts.lang_runs = value,
         "lower_case_tags" => opts.lower_case_tags = value,
         "mailmode" => opts.mailmode = value,
         "meta_charset" => opts.meta_charset = value,
@@ -629,6 +634,7 @@ pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
         "doctype" => opts.doctype = v.to_string(),
         "document_template" => opts.document_template = v.to_string(),
         "italic_delimiter" => opts.italic_delimiter = v.to_string(),
+        "lang" => opts.lang = v.to_string(),
         // Unrecognized encoding is a user error.
         "encoding" => opts.encoding = Encoding::parse(v).map_err(|e| e.to_string())?,
         "outfile" => opts.outfile = v.to_string(),
