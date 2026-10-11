@@ -545,7 +545,18 @@ impl Options {
             .iter()
             .map(|(n, _)| n.as_str())
             .collect::<Vec<_>>();
-        crate::template::validate(&body, &declared)
+        crate::template::validate(&body, &declared)?;
+        // `--toc` asks for a generated table of contents. Without a `toc` slot
+        // the template has nowhere to put it, and silently emitting a body with
+        // no TOC is the one failure mode worth refusing: the user asked for it
+        // and would see neither the TOC nor an error.
+        if self.toc && !body.contains("{{textrill:toc}}") {
+            return Err(format!(
+                "{flag} does not place the table of contents: --toc needs a \
+                 {{{{textrill:toc}}}} slot in the template"
+            ));
+        }
+        Ok(())
     }
 
     /// Resolve which template is active, if any, and its text.

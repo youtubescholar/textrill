@@ -645,3 +645,233 @@ fn the_library_refusals_follow_the_model() {
         out.stderr
     );
 }
+
+// ---- structural invariants for the shipped templates ----
+//
+// The shipped whole-document templates are examples an operator copies, so a
+// defect in one is a defect in every page built from it. These pin the two
+// classes that shipped wrong once:
+//
+//   1. a duplicated `<meta charset>` -- the template hardcoded one while the
+//      engine's `{{textrill:head}}` already emits one in the default HTML5
+//      mode, so `article`/`book`/`manpage`/`slide` each produced two;
+//   2. an empty `<nav>` (and a `<nav>` nested inside the toc's own `<nav>`)
+//      because the template wrapped `{{textrill:toc}}`, which is itself a
+//      complete `<nav class="toc">`.
+//
+// The checks run the real binary, so they see exactly what a user gets.
+
+/// The document templates; `bare` is a body wrapper with no head of its own.
+const DOCUMENT_TEMPLATES: [&str; 4] = ["article", "book", "manpage", "slide"];
+
+/// The document templates that carry a `{{textrill:toc}}` slot.
+const TOC_TEMPLATES: [&str; 3] = ["article", "book", "slide"];
+
+/// The inner text of every `<nav ...>...</nav>` in `html`.
+fn nav_bodies(html: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = html;
+    while let Some(start) = rest.find("<nav") {
+        let after = &rest[start..];
+        let Some(open) = after.find('>') else { break };
+        let inner_start = start + open + 1;
+        let Some(close) = rest[inner_start..].find("</nav>") else {
+            break;
+        };
+        out.push(rest[inner_start..inner_start + close].to_string());
+        rest = &rest[inner_start + close + "</nav>".len()..];
+    }
+    out
+}
+
+/// Every occurrence of an empty `<h1>`, `<main>`, `<header>` or `<section>`
+/// (only whitespace between the tags), as `(tag, ...)` for a clear failure.
+fn empty_frames(html: &str) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if html.contains("<h1></h1>") || html.contains("<h1>\n</h1>") {
+        out.push("<h1>");
+    }
+    for (open, close) in [
+        ("<main", "</main>"),
+        ("<header", "</header>"),
+        ("<section", "</section>"),
+    ] {
+        let mut rest = html;
+        while let Some(start) = rest.find(open) {
+            let after = &rest[start..];
+            let Some(gt) = after.find('>') else { break };
+            let inner_start = start + gt + 1;
+            let Some(end) = rest[inner_start..].find(close) else {
+                break;
+            };
+            if rest[inner_start..inner_start + end].trim().is_empty() {
+                out.push(open);
+            }
+            rest = &rest[inner_start + end + close.len()..];
+        }
+    }
+    out
+}
+
+#[test]
+fn every_shipped_template_emits_exactly_one_charset_meta() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    for name in DOCUMENT_TEMPLATES {
+        for extra in [None, Some("--meta_charset")] {
+            let mut args = vec!["--template_library", name];
+            if let Some(flag) = extra {
+                args.push(flag);
+            }
+            args.push(&input);
+            let out = run(&args);
+            assert_eq!(out.code, 0, "{name} {extra:?}: {}", out.stderr);
+            let metas = out.stdout.matches("<meta charset=\"utf-8\">").count();
+            assert_eq!(
+                metas, 1,
+                "{name} {extra:?}: expected exactly one charset meta, got {metas}:\n{}",
+                out.stdout
+            );
+        }
+    }
+}
+
+#[test]
+fn no_shipped_template_leaves_an_empty_or_nested_nav() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    for name in DOCUMENT_TEMPLATES {
+        // Without --toc there must be no nav at all (the old template left an
+        // empty one).
+        let plain = run(&["--template_library", name, "--title", "Doc", &input]);
+        assert_eq!(plain.code, 0, "{name}: {}", plain.stderr);
+        assert_eq!(
+            plain.stdout.matches("<nav").count(),
+            0,
+            "{name}: no --toc, yet a nav was emitted:\n{}",
+            plain.stdout
+        );
+    }
+
+    // With --toc, a template that carries the slot emits exactly the toc's own
+    // single nav, non-empty and not nested.
+    for name in TOC_TEMPLATES {
+        let toc = run(&[
+            "--template_library",
+            name,
+            "--title",
+            "Doc",
+            "--toc",
+            &input,
+        ]);
+        assert_eq!(toc.code, 0, "{name}: {}", toc.stderr);
+        assert_eq!(
+            toc.stdout.matches("<nav").count(),
+            1,
+            "{name}: --toc must emit exactly one nav (no nesting):\n{}",
+            toc.stdout
+        );
+        let bodies = nav_bodies(&toc.stdout);
+        assert_eq!(bodies.len(), 1, "{name}: {}", toc.stdout);
+        assert!(
+            !bodies[0].trim().is_empty(),
+            "{name}: the toc nav is empty:\n{}",
+            toc.stdout
+        );
+        assert!(
+            !bodies[0].contains("<nav"),
+            "{name}: the toc nav is nested inside another nav:\n{}",
+            toc.stdout
+        );
+    }
+}
+
+/// `--toc` with a template that has no `toc` slot is refused, not silently
+/// dropped: the user asked for a table of contents and must not get a body
+/// with none and no diagnostic. The shipped `bare` wrapper is content-only, so
+/// it is refused too; the templates that carry the slot still work.
+#[test]
+fn a_template_without_a_toc_slot_refuses_toc() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    let template = write_file(&dir, "wrap.html", "{{textrill:content}}");
+
+    let out = run(&["--body_template", &template, "--toc", &input]);
+    assert_eq!(out.code, 1, "stdout: {}", out.stdout);
+    assert!(out.stdout.is_empty(), "no half-built page: {}", out.stdout);
+    assert!(out.stderr.contains("toc"), "{}", out.stderr);
+    assert!(out.stderr.contains("--toc"), "{}", out.stderr);
+
+    let out = run(&["--template_library", "bare", "--toc", &input]);
+    assert_eq!(out.code, 1, "bare has no toc slot: {}", out.stderr);
+
+    for name in TOC_TEMPLATES {
+        let out = run(&["--template_library", name, "--toc", &input]);
+        assert_eq!(out.code, 0, "{name} carries the slot: {}", out.stderr);
+    }
+}
+
+/// The frames a shipped document template owns must never be left empty when
+/// the conversion supplies what the template documents (a title and, when
+/// asked for, a toc). A titled conversion must not carry a blank `<h1>` or
+/// empty `<nav>`/`<main>`/`<header>`.
+#[test]
+fn a_titled_shipped_template_has_no_empty_structural_frame() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    for name in DOCUMENT_TEMPLATES {
+        let mut args = vec!["--template_library", name, "--title", "A Real Title"];
+        // Only the templates that carry the slot may be asked for a toc; the
+        // others are refused (see the refusal test below), not run.
+        if TOC_TEMPLATES.contains(&name) {
+            args.push("--toc");
+        }
+        args.push(&input);
+        let out = run(&args);
+        assert_eq!(out.code, 0, "{name}: {}", out.stderr);
+        let empties = empty_frames(&out.stdout);
+        assert!(
+            empties.is_empty(),
+            "{name}: a titled conversion left empty {empties:?}:\n{}",
+            out.stdout
+        );
+        assert!(
+            out.stdout.contains("<h1>A Real Title</h1>"),
+            "{name}: the title is not in an <h1>:\n{}",
+            out.stdout
+        );
+    }
+}
+
+/// Without `--title` a shipped document template must not leave an empty
+/// `<h1>` behind, nor an empty `<header>`/`<section>` that only existed to
+/// hold one: the whole title block is dropped instead (the `header` slot is
+/// empty and the templates no longer wrap it in a frame of their own).
+#[test]
+fn an_untitled_shipped_template_has_no_empty_structural_frame() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+    for name in DOCUMENT_TEMPLATES {
+        let out = run(&["--template_library", name, &input]);
+        assert_eq!(out.code, 0, "{name}: {}", out.stderr);
+        // The title landmark is gone entirely (not an empty `<header>`); the
+        // document's own headings, of course, still render.
+        assert!(
+            !out.stdout.contains("<header"),
+            "{name}: an untitled conversion emitted a title header:\n{}",
+            out.stdout
+        );
+        let empties = empty_frames(&out.stdout);
+        assert!(
+            empties.is_empty(),
+            "{name}: an untitled conversion left empty {empties:?}:\n{}",
+            out.stdout
+        );
+        // The body itself is always present and non-empty.
+        assert!(
+            out.stdout.contains("id=\"") && out.stdout.contains("body"),
+            "{name}: lost the body wrapper:\n{}",
+            out.stdout
+        );
+    }
+}

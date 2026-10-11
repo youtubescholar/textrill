@@ -322,9 +322,12 @@ Slots are written `{{textrill:name}}`:
 | --- | --- |
 | `{{textrill:content}}` | The converted body (required) |
 | `{{textrill:toc}}` | The generated TOC nav, empty unless `--toc` is on |
-| `{{textrill:title}}` | The escaped document title |
+| `{{textrill:title}}` | The escaped document title, or empty without `--title` |
+| `{{textrill:header}}` | A `<header>` landmark wrapping the title in an `<h1>`, empty without `--title` |
 | `{{textrill:head}}` | The engine's `<head>` contents (title, metas, stylesheet) |
 | `{{textrill:pager}}` | Prev/next links (reserved for `--chunk`) |
+| `{{textrill:citations}}` | The end notes block, empty when there are none |
+| `{{textrill:glossary}}` | The glossary block, empty when there is none |
 
 A known slot is replaced; an **unknown** `{{textrill:...}}` slot is an error;
 and every other `{{...}}` is passed through untouched, so a template can also

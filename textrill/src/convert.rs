@@ -3015,10 +3015,23 @@ impl Converter {
         if !glossary.is_empty() && !has_slot("glossary") {
             body.push_str(glossary);
         }
+        // `header` is the titled landmark or nothing at all: an empty `<h1>`
+        // (or an empty wrapper around it) is exactly the silent-empty frame a
+        // shipped template must never leave, so the whole block vanishes when
+        // there is no title rather than rendering an empty one.
+        let header = if self.title_text.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<header class=\"document-header\">\n<h1>{}</h1>\n</header>\n",
+                self.title_text
+            )
+        };
         let mut slots = vec![
             ("content", body.as_str()),
             ("toc", toc),
             ("title", self.title_text.as_str()),
+            ("header", header.as_str()),
             ("head", self.head_inner.as_str()),
             ("pager", ""),
             ("citations", citations),

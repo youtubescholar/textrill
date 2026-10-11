@@ -21,6 +21,7 @@ pub const SLOTS: &[&str] = &[
     "content",
     "toc",
     "title",
+    "header",
     "head",
     "pager",
     "citations",
