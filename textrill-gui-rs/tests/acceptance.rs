@@ -741,6 +741,10 @@ fn focus_mode_hides_the_chrome_and_offers_a_way_back() {
         harness.query_by_label("New").is_none(),
         "the toolbar is still on screen in focus mode"
     );
+    assert!(
+        harness.query_by_label("File").is_none(),
+        "the menu bar is still on screen in focus mode"
+    );
     harness.get_by_label("Exit focus").click();
     harness.run();
 
@@ -748,6 +752,10 @@ fn focus_mode_hides_the_chrome_and_offers_a_way_back() {
     assert!(
         harness.query_by_label("New").is_some(),
         "the toolbar did not come back"
+    );
+    assert!(
+        harness.query_by_label("File").is_some(),
+        "the menu bar did not come back"
     );
 }
 

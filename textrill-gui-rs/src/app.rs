@@ -1054,11 +1054,10 @@ impl TextrillApp {
             self.accept_dropped_files(ui.ctx());
         }
 
-        self.menu_bar(ui);
         if self.focus_mode {
-            // In focus mode the chrome is gone; the first thing on screen is a
-            // single visible way back, so immersion is one click deep, never
-            // unreachable (and `Ctrl+Shift+F` works too).
+            // In focus mode the chrome is gone, menu bar included; the first
+            // thing on screen is a single visible way back, so immersion is
+            // one click deep, never unreachable (and `Ctrl+Shift+F` works too).
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .button("Exit focus")
@@ -1071,6 +1070,7 @@ impl TextrillApp {
                 ui.label(&self.status);
             });
         } else {
+            self.menu_bar(ui);
             self.toolbar(ui);
         }
 

@@ -61,7 +61,15 @@ pub const TEXT_SIZES: &[(f32, &str)] = &[
 ];
 
 /// A text-size multiplier, stepped from [`TEXT_SIZES`].
+///
+/// A non-finite value (a hand-edited `text-size=nan`) falls back to the
+/// default rather than being clamped to `NaN`, which would propagate into the
+/// type scale and panic egui's layout; this is the same guard
+/// [`crate::window_state::clamp_zoom`] uses.
 pub fn clamp_text_size(size: f32) -> f32 {
+    if !size.is_finite() {
+        return DEFAULT_TEXT_SIZE;
+    }
     size.clamp(TEXT_SIZES[0].0, TEXT_SIZES[TEXT_SIZES.len() - 1].0)
 }
 
@@ -447,6 +455,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A non-finite stored size is the default, never `NaN`: a `text-size=nan`
+    /// line in the config must not reach the type scale and panic the layout.
+    #[test]
+    fn nonsense_text_size_falls_back_to_the_default() {
+        assert_eq!(clamp_text_size(f32::NAN), DEFAULT_TEXT_SIZE);
+        assert_eq!(clamp_text_size(f32::INFINITY), DEFAULT_TEXT_SIZE);
+        assert_eq!(clamp_text_size(f32::NEG_INFINITY), DEFAULT_TEXT_SIZE);
+        assert_eq!(clamp_text_size(5.0), TEXT_SIZES[TEXT_SIZES.len() - 1].0);
+        assert_eq!(clamp_text_size(0.1), TEXT_SIZES[0].0);
+        assert!(build_style(Theme::Light, f32::NAN, false)
+            .spacing
+            .interact_size
+            .y
+            .is_finite());
     }
 
     /// The multiplier scales every entry of the type scale together.
