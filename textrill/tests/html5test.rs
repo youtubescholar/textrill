@@ -112,6 +112,54 @@ fn html5_is_settable_through_the_cli() {
     assert!(!opts.html5);
 }
 
+fn render_table(opts: Options) -> String {
+    let mut opts = opts;
+    opts.make_tables = true;
+    opts.extract = true;
+    let mut conv = Converter::new(opts);
+    conv.opts.instring =
+        vec!["  Fruit   Vegetable\n Banana   Carrot\n  Apple   Celery\n".to_string()];
+    conv.convert()
+}
+
+#[test]
+fn html5_table_alignment_is_a_class_not_the_obsolete_align_attribute() {
+    // `align` on `<td>`/`<th>` is obsolete and non-conforming in HTML5, so the
+    // default mode emits the documented `align-right` hook instead. The corpus
+    // pins `--xhtml` before each case's own flags, so this default-mode path is
+    // otherwise untested -- the blind spot that hid the `align=` in the first
+    // place.
+    let out = render_table(Options::default());
+    assert!(out.contains("<td class=\"align-right\">"), "{out}");
+    assert!(
+        !out.contains("align="),
+        "no obsolete align attribute: {out}"
+    );
+    assert!(
+        !out.contains("style="),
+        "no inline CSS in HTML5 mode: {out}"
+    );
+}
+
+#[test]
+fn xhtml_table_alignment_keeps_the_reference_inline_style() {
+    let mut opts = Options::default();
+    cli::set_value(&mut opts, "xhtml", "1").expect("xhtml");
+    let out = render_table(opts);
+    assert!(out.contains("<td style=\"text-align: right;\">"), "{out}");
+    assert!(!out.contains("class=\"align-right\""), "{out}");
+}
+
+#[test]
+fn the_legacy_html4_mode_keeps_the_align_attribute() {
+    // `--no-html5` is the reference's HTML 4.01 mode, where the attribute is
+    // deprecated but still emitted for parity; only HTML5 avoids it.
+    let mut opts = Options::default();
+    cli::set_value(&mut opts, "html5", "0").expect("no-html5");
+    let out = render_table(opts);
+    assert!(out.contains("<TD ALIGN=\"RIGHT\">"), "{out}");
+}
+
 #[test]
 fn html5_still_honours_extract() {
     // --extract is the "body only" switch; the prolog is skipped regardless of

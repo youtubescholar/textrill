@@ -1427,9 +1427,20 @@ impl Converter {
                     cell = chars::escape(&cell);
                 }
                 let inside = if self.opts.xhtml {
+                    // XHTML parity: the reference emits inline CSS for a
+                    // right/centre-aligned cell, and the corpus pins the mode.
                     match align_idx[col] {
                         2 => " style=\"text-align: right;\"".to_string(),
                         3 => " style=\"text-align: center;\"".to_string(),
+                        _ => String::new(),
+                    }
+                } else if self.opts.html5 {
+                    // `align` on `td`/`th` is obsolete and non-conforming in
+                    // HTML5, so the default mode emits the documented styling
+                    // hook instead (README, "Styling hooks").
+                    match align_idx[col] {
+                        2 => " class=\"align-right\"".to_string(),
+                        3 => " class=\"align-center\"".to_string(),
                         _ => String::new(),
                     }
                 } else if self.opts.lower_case_tags {

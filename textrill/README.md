@@ -467,8 +467,51 @@ With `--body_template`, `{{textrill:citations}}` and `{{textrill:glossary}}` pla
 the two lists wherever the template wants them. A template that names neither
 slot still gets them appended, so an existing template never loses a list.
 
-No JavaScript is involved, and no CSS either: the note body is emitted once, as a
-real list, rather than once per reference.
+The lists are static and need no JavaScript and no stylesheet of their own: the
+note body is emitted once, as a real list, rather than once per reference.
+
+### Styling hooks
+
+textrill ships no stylesheet and emits no `<style>` block, so the way to style
+its output is to write CSS against a fixed set of class and `id` hooks. Those
+hooks are a stable contract: point `--style_url` at a sheet that uses them, or
+write one beside the markup a `--body_template` already controls. In the default
+HTML5 mode the engine emits no inline `style=`, so a strict
+`style-src 'self'` policy works without `'unsafe-inline'`.
+
+| Hook | Element | Emitted by |
+| --- | --- | --- |
+| `id="toc"`, `class="toc"`, `class="toc-list"` | the table-of-contents `<nav>` and its `<ol>` | `--toc` |
+| `class="toc-hN"` (`toc-h1` … `toc-h6`) | each TOC entry; the level lets CSS indent | `--toc` |
+| `class="section"`, `id="chunk-N"` | each section wrapper | `--section`, `--toc`, `--chunk` |
+| `class="document-header"` | the `<header>` wrapping the title `<h1>` | `{{textrill:header}}` |
+| `class="pager"` | the prev/next `<nav>` on a chunked page | `--chunk` |
+| `class="align-right"`, `class="align-center"` | a right/centre-aligned table cell | `--make_tables` (HTML5) |
+| `class="notes"`, `id="notes"`, `class="notes-heading"` | the citation section | `--citations` |
+| `class="notes-list"` | the `<ol>` of notes | `--citations` |
+| `class="note"`, `id="note-KEY"` | one note entry | `--citations` |
+| `class="note-back"` | the number linking back to its reference | `--citations` |
+| `class="note-ref"`, `id="note-ref-KEY"` | the `[n]` reference in the body | `--citations` |
+| `class="glossary"`, `id="glossary"`, `class="glossary-heading"` | the glossary section | `--glossary` |
+| `class="glossary-list"` | the `<dl>` of terms | `--glossary` |
+| `class="gloss-def"` | one term's `<dd>` definition | `--glossary` |
+| `class="gloss-ref"` | a term reference in the body | `--glossary` |
+
+A minimal sheet to start from:
+
+```css
+.toc-list  { list-style: none; }
+.toc-h2    { margin-left: 1em; }
+.toc-h3    { margin-left: 2em; }
+.align-right  { text-align: right; }
+.align-center { text-align: center; }
+.note-back { margin-right: .4em; }
+.gloss-def { margin-left: 1em; }
+```
+
+The `align-right`/`align-center` hooks exist because `align=` on `<td>` is
+obsolete in HTML5. The reference-compatible `--xhtml` and `--no-html5` modes
+still emit `style=`/`align=` there, to stay byte-identical to the upstream tool.
 
 ### Encodings
 
