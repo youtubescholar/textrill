@@ -1,27 +1,20 @@
-# Flatpak manifest for textrill — DRAFT, not buildable as committed.
+# Flatpak manifest for textrill.
 #
 # The app-id follows the GitHub owner, resolved 2026-10-08 to `youtubescholar`
 # (the same account as `repository` in `textrill/Cargo.toml` and
 # `textrill-gui-rs/Cargo.toml`): `io.github.youtubescholar.Textrill`. The
 # filename matches the id, as the format requires.
 #
-# One thing is unresolved and is recorded in packaging/README.md:
-#
-#   `cargo-sources-*.json`, referenced by the modules below. They are
-#   generated, not committed, and generating them needs
-#   `flatpak-cargo-generator` (pip), which is not installed on this host.
-#   `make cargo-sources` does it.
-#
-# Offline/vendored dependencies are preferred for reproducibility, and
-# `cargo vendor` would avoid the generator entirely at the cost of a large
-# vendored tree. That trade is not made here; pick one before the first build.
+# `cargo-sources-*.json`, referenced by the modules below, are generated, not
+# committed; `make cargo-sources` writes them with `flatpak-cargo-generator`
+# (pip). See packaging/README.md. Generate them once before building.
 #
 # The CLI stays independently distributable — this manifest installs it as well as
 # the GUI so the single artifact carries both, per the refined delivery goal.
 
 app-id: io.github.youtubescholar.Textrill
 runtime: org.freedesktop.Platform
-runtime-version: '24.08'
+runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 command: textrill-gui
 
@@ -54,6 +47,7 @@ modules:
     build-options:
       env:
         CARGO_HOME: /run/build/textrill/cargo
+        CARGO_NET_OFFLINE: 'true'
     build-commands:
       # There is no workspace Cargo.toml at the repo root, so each crate is
       # built by manifest path; the target directory lands beside its manifest.
@@ -71,14 +65,16 @@ modules:
           - stubs
           - packaging
           - .git
-      - type: file
-        path: cargo-sources-textrill.json
+      # A bare filename here (not `type: file`) makes flatpak-builder expand
+      # the generated JSON into this module's source list.
+      - cargo-sources-textrill.json
 
   - name: textrill-gui
     buildsystem: simple
     build-options:
       env:
         CARGO_HOME: /run/build/textrill-gui/cargo
+        CARGO_NET_OFFLINE: 'true'
     build-commands:
       - cargo build --release --locked --offline --manifest-path textrill-gui-rs/Cargo.toml
       # The fonts are compiled into the binary via include_bytes!; there is
@@ -98,5 +94,4 @@ modules:
           - stubs
           - packaging
           - .git
-      - type: file
-        path: cargo-sources-textrill-gui.json
+      - cargo-sources-textrill-gui.json
