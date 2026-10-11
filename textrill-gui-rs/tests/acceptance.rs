@@ -166,9 +166,8 @@ fn the_filter_hides_rows() {
 /// everything again. Ported from `test_filter_never_hides_everything_at_once`.
 #[test]
 fn the_filter_hides_everything_and_restores_it() {
-    let mut panel = OptionsPanel {
-        filter: "zzzz-no-such-option".to_string(),
-    };
+    let mut panel = OptionsPanel::default();
+    panel.filter = "zzzz-no-such-option".to_string();
     for spec in textrill::cli::SPECS {
         assert!(!panel.matches(spec.names[0]), "{}", spec.names[0]);
     }
@@ -614,7 +613,19 @@ fn the_theme_picker_switches_and_remembers_the_theme() {
     harness.run();
 
     assert_eq!(harness.state().theme, Theme::Light, "stem from the default");
-    let combo = harness.get_by_role(egui::accesskit::Role::ComboBox);
+    let combos = harness.get_all_by_role(egui::accesskit::Role::ComboBox);
+    let mut theme_combo = None;
+    for c in combos {
+        let v = c.value().map(|x| x.to_string());
+        if v.as_deref() == Some("Light")
+            || v.as_deref() == Some("System")
+            || v.as_deref() == Some("Dark")
+        {
+            theme_combo = Some(c);
+            break;
+        }
+    }
+    let combo = theme_combo.expect("theme combo");
     combo.click();
     harness.run();
     harness.get_by_label(Theme::Dark.name()).click();

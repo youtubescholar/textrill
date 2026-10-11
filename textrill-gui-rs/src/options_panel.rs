@@ -18,7 +18,7 @@
 //! did), so it is a struct rather than a free function.
 
 use egui::Ui;
-use textrill::cli::{self, Kind};
+use textrill::cli::{self, Kind, Spec};
 use textrill::options::{numeric_range, Options};
 
 /// The options form and its filter.
@@ -26,6 +26,74 @@ use textrill::options::{numeric_range, Options};
 pub struct OptionsPanel {
     /// The filter box contents.
     pub filter: String,
+    /// Currently selected category when not filtering.
+    selected_category: usize,
+}
+
+const CATEGORIES: &[&str] = &[
+    "All",
+    "Input & Output",
+    "Document & HTML",
+    "Text Formatting",
+    "Headings & TOC",
+    "Links & URLs",
+    "References",
+    "Lists",
+    "Mail & Headers",
+    "Paragraphs",
+    "Preformatting",
+    "Tables",
+    "Layout & Spacing",
+];
+
+fn spec_category(spec: &Spec) -> &'static str {
+    let key = spec.names[0];
+    match key {
+        "infile" | "instring" | "outfile" | "encoding" | "utf8" | "eight_bit_clean" | "stream"
+        | "report" => "Input & Output",
+        "doctype" | "html5" | "xhtml" | "meta_charset" | "extract" | "chunk" | "section"
+        | "style_url" | "document_template" | "body_template" | "template_library"
+        | "prepend_file" | "append_file" | "append_head" | "body_deco" | "var" => "Document & HTML",
+        "demoronize"
+        | "bold_delimiter"
+        | "italic_delimiter"
+        | "underline_delimiter"
+        | "underline_length_tolerance"
+        | "underline_offset_tolerance"
+        | "unhyphenation"
+        | "caps_tag"
+        | "min_caps_length"
+        | "lang"
+        | "lang_runs"
+        | "escape_HTML_chars"
+        | "lower_case_tags" => "Text Formatting",
+        "custom_heading_regexp"
+        | "explicit_headings"
+        | "number_headings"
+        | "toc"
+        | "make_anchors"
+        | "title"
+        | "titlefirst" => "Headings & TOC",
+        "make_links"
+        | "link_only"
+        | "allowed_url_schemes"
+        | "default_link_dict"
+        | "links_dictionaries"
+        | "no_referrer" => "Links & URLs",
+        "citations" | "glossary" => "References",
+        "bullets" | "bullets_ordered" | "preserve_indent" => "Lists",
+        "mailmode" | "use_mosaic_header" => "Mail & Headers",
+        "par_indent" | "indent_par_break" | "indent_width" | "short_line_length" => "Paragraphs",
+        "preformat_trigger_lines"
+        | "endpreformat_trigger_lines"
+        | "preformat_start_marker"
+        | "preformat_end_marker"
+        | "preformat_whitespace_min"
+        | "use_preformat_marker" => "Preformatting",
+        "make_tables" | "table_type" => "Tables",
+        "tab_width" | "hrule_min" => "Layout & Spacing",
+        _ => "Other",
+    }
 }
 
 impl OptionsPanel {
@@ -52,8 +120,29 @@ impl OptionsPanel {
         });
 
         let needle = self.filter.trim().to_lowercase();
+        let filtering = !needle.is_empty();
+
+        if !filtering {
+            ui.horizontal(|ui| {
+                ui.label("Category:");
+                egui::ComboBox::from_id_salt("options_category")
+                    .width(200.0)
+                    .selected_text(CATEGORIES[self.selected_category])
+                    .show_ui(ui, |ui| {
+                        for (idx, cat) in CATEGORIES.iter().enumerate() {
+                            ui.selectable_value(&mut self.selected_category, idx, *cat);
+                        }
+                    });
+            });
+        }
+
+        let selected_cat = CATEGORIES[self.selected_category];
         for spec in cli::SPECS {
-            if !spec_matches(spec, &needle) {
+            if filtering {
+                if !spec_matches(spec, &needle) {
+                    continue;
+                }
+            } else if selected_cat != "All" && spec_category(spec) != selected_cat {
                 continue;
             }
             let key = spec.names[0];
@@ -68,55 +157,45 @@ impl OptionsPanel {
         changed
     }
 
-    /// Whether `name` passes the current filter.
-    ///
-    /// This is the seam the filter tests use; the Python panel exposed the same
-    /// method. It does not depend on what is on screen, so it is meaningful
-    /// even when the options pane is hidden.
-    pub fn matches(&self, name: &str) -> bool {
-        let needle = self.filter.trim().to_lowercase();
-        cli::SPECS
-            .iter()
-            .find(|spec| spec.names[0] == name)
-            .map(|spec| spec_matches(spec, &needle))
-            .unwrap_or(false)
-    }
-
-    /// Clear the filter.
+    /// Clear the filter, as the Python implementation did.
     pub fn clear_filter(&mut self) {
         self.filter.clear();
+    }
+
+    /// Test whether an option specification matches the given needle.
+    pub fn matches(&self, name: &str) -> bool {
+        let needle = self.filter.trim().to_lowercase();
+        if needle.is_empty() {
+            return true;
+        }
+        for spec in cli::SPECS {
+            if spec.names.contains(&name) {
+                return spec_matches(spec, &needle);
+            }
+        }
+        false
     }
 }
 
 /// Whether an option matches the (already lowercased) needle.
-///
-/// The haystack is the option's names, its underscored name read as words, and
-/// its help text, so "unhyphenation" and "hyphen" both find the hyphen option
-/// and a user can search by what the option does rather than what it is called.
 fn spec_matches(spec: &cli::Spec, needle: &str) -> bool {
-    if needle.is_empty() {
-        return true;
+    for name in spec.names {
+        if name.to_lowercase().contains(needle) {
+            return true;
+        }
+        // Also match underscores as spaces to be forgiving.
+        if name.replace('_', " ").to_lowercase().contains(needle) {
+            return true;
+        }
     }
     if spec.help.to_lowercase().contains(needle) {
         return true;
     }
-    spec.names.iter().any(|name| {
-        let name = name.to_lowercase();
-        name.contains(needle) || name.replace('_', " ").contains(needle)
-    })
+    false
 }
 
 fn flag(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) -> bool {
-    let mut on = cli::get_value(opts, key)
-        .map(|v| v == "true")
-        .unwrap_or(false);
-    if key == "utf8" {
-        // `utf8` is accepted for compatibility and does nothing; `get_value`
-        // reports it as "1" and `set_value` ignores writes. Render it disabled
-        // rather than as a checkbox that silently springs back.
-        ui.add_enabled(false, egui::Checkbox::new(&mut on, help));
-        return false;
-    }
+    let mut on = cli::get_value(opts, key).unwrap_or_default() == "true";
     if ui.checkbox(&mut on, help).changed() {
         let _ = cli::set_value(opts, key, if on { "true" } else { "false" });
         true
