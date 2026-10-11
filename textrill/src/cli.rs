@@ -155,14 +155,14 @@ pub fn set_value(opts: &mut Options, name: &str, value: &str) -> Result<(), Stri
                 Some(rest) => (parse_bool(rest)?, true),
                 None => (parse_bool(value)?, false),
             };
-            set_bool(opts, spec, if negated { !v } else { v });
+            set_bool(opts, spec, if negated { !v } else { v })?;
         }
         Kind::Str => set_str(opts, spec, value)?,
         Kind::Int => {
             let n: i64 = value
                 .parse()
                 .map_err(|_| format!("Option {name} requires a number, got `{value}`"))?;
-            set_int(opts, spec, n);
+            set_int(opts, spec, n)?;
         }
         Kind::StrArray => push_array(opts, spec, value)?,
         Kind::TableType => set_table_type(opts, value)?,
@@ -246,7 +246,7 @@ pub fn get_value(opts: &Options, name: &str) -> Result<String, String> {
         "underline_length_tolerance" => opts.underline_length_tolerance.to_string(),
         "underline_offset_tolerance" => opts.underline_offset_tolerance.to_string(),
         "unhyphenation" => opts.unhyphenation.to_string(),
-        "utf8" => "1".to_string(),
+        "utf8" => opts.utf8.to_string(),
         "use_mosaic_header" => opts.use_mosaic_header.to_string(),
         "use_preformat_marker" => opts.use_preformat_marker.to_string(),
         "xhtml" => opts.xhtml.to_string(),
@@ -332,7 +332,7 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
                     Some(v) => parse_bool(&v).map_err(at)?,
                     None => true,
                 };
-                set_bool(opts, spec, if negated { !value } else { value });
+                set_bool(opts, spec, if negated { !value } else { value }).map_err(at)?;
             }
             Kind::Str => {
                 let v = match inline.take() {
@@ -349,7 +349,7 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
                 let n: i64 = v
                     .parse()
                     .map_err(|_| at(format!("Option {name} requires a number, got `{v}`")))?;
-                set_int(opts, spec, n);
+                set_int(opts, spec, n).map_err(at)?;
             }
             Kind::StrArray => {
                 let v = match inline.take() {
@@ -565,7 +565,16 @@ pub fn parse_bool(v: &str) -> Result<bool, String> {
     }
 }
 
-pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
+/// The message a value setter returns when the option table declares an option
+/// of that setter's kind but the setter has no arm for it. The two lists are a
+/// single source of truth split by hand, so a miss is a programming error; it is
+/// reported as an error rather than a panic so a front end shows it instead of
+/// aborting, and `defaults_round_trip_through_get_value` fails first.
+fn unhandled(opt: &str, kind: &str) -> String {
+    format!("Option `{opt}` is declared a {kind} option but its setter has no arm for it")
+}
+
+pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> Result<(), String> {
     match spec.names[0] {
         "demoronize" => opts.demoronize = value,
         "eight_bit_clean" => opts.eight_bit_clean = value,
@@ -601,7 +610,7 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
         "stream" => opts.stream = value,
         "titlefirst" => opts.titlefirst = value,
         "unhyphenation" => opts.unhyphenation = value,
-        "utf8" => {}
+        "utf8" => opts.utf8 = value,
         "use_mosaic_header" => opts.use_mosaic_header = value,
         "use_preformat_marker" => opts.use_preformat_marker = value,
         // xhtml/html5 are mutually exclusive with tag-case coupling (contractual invariant)
@@ -610,11 +619,9 @@ pub fn set_bool(opts: &mut Options, spec: &Spec, value: bool) -> bool {
             opts.html5 = false;
             opts.lower_case_tags = value;
         }
-        other => {
-            let _ = other;
-        }
+        other => return Err(unhandled(other, "boolean flag")),
     }
-    value
+    Ok(())
 }
 
 pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
@@ -646,14 +653,12 @@ pub fn set_str(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
         "template_library" => opts.template_library = v.to_string(),
         "title" => opts.title = v.to_string(),
         "underline_delimiter" => opts.underline_delimiter = v.to_string(),
-        other => {
-            let _ = other;
-        }
+        other => return Err(unhandled(other, "string")),
     }
     Ok(())
 }
 
-pub fn set_int(opts: &mut Options, spec: &Spec, v: i64) {
+pub fn set_int(opts: &mut Options, spec: &Spec, v: i64) -> Result<(), String> {
     match spec.names[0] {
         "preformat_trigger_lines" | "endpreformat_trigger_lines" => {
             let n = v.clamp(-128, 127) as i8;
@@ -675,12 +680,11 @@ pub fn set_int(opts: &mut Options, spec: &Spec, v: i64) {
                 "tab_width" => opts.tab_width = n,
                 "underline_length_tolerance" => opts.underline_length_tolerance = n,
                 "underline_offset_tolerance" => opts.underline_offset_tolerance = n,
-                other => {
-                    let _ = other;
-                }
+                other => return Err(unhandled(other, "integer")),
             }
         }
     }
+    Ok(())
 }
 
 pub fn push_array(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String> {
@@ -710,9 +714,7 @@ pub fn push_array(opts: &mut Options, spec: &Spec, v: &str) -> Result<(), String
             }
             opts.vars.push((name.to_string(), value.to_string()));
         }
-        other => {
-            let _ = other;
-        }
+        other => return Err(unhandled(other, "string array")),
     }
     Ok(())
 }

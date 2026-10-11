@@ -273,6 +273,11 @@ fn string_array(ui: &mut Ui, opts: &mut Options, key: &str, help: &str) -> bool 
 }
 
 /// Empty the `StrArray` `key` names, so [`string_array`] can re-add its lines.
+///
+/// Every [`Kind::StrArray`] spec needs an arm: a miss would leave the old list
+/// in place and the re-add would double it. The unit test
+/// `every_string_array_option_is_cleared` fails if one is added without its
+/// arm.
 fn clear_array(opts: &mut Options, key: &str) {
     match key {
         "custom_heading_regexp" => opts.custom_heading_regexp.clear(),
@@ -294,4 +299,40 @@ fn table_type(ui: &mut Ui, opts: &mut Options, help: &str) -> bool {
         changed |= ui.checkbox(&mut opts.table_type.delim, "DELIM").changed();
     });
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A value that `set_value` accepts for every array option.
+    fn probe(key: &str) -> &'static str {
+        // `var` is the one `name=value` array; the rest take any text.
+        if key == "var" {
+            "probe=1"
+        } else {
+            "probe"
+        }
+    }
+
+    #[test]
+    fn every_string_array_option_is_cleared() {
+        for spec in cli::SPECS {
+            if spec.kind != Kind::StrArray {
+                continue;
+            }
+            let key = spec.names[0];
+            let mut opts = Options::default();
+            cli::set_value(&mut opts, key, probe(key)).expect("set");
+            assert!(
+                !cli::get_value(&opts, key).unwrap().is_empty(),
+                "{key}: probe did not populate the list"
+            );
+            clear_array(&mut opts, key);
+            assert!(
+                cli::get_value(&opts, key).unwrap().is_empty(),
+                "{key}: clear_array has no arm for this StrArray option"
+            );
+        }
+    }
 }

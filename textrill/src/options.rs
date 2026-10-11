@@ -334,6 +334,11 @@ pub struct Options {
     pub unhyphenation: bool,
     pub use_mosaic_header: bool,
     pub use_preformat_marker: bool,
+    /// Compatibility flag accepted for the reference's `--utf8`. The engine
+    /// already decodes input as UTF-8 when it can ([`Options::encoding`]) and
+    /// never branches on this, so it cannot change output; it is stored so a
+    /// front end can display and round-trip it without a special case.
+    pub utf8: bool,
     pub xhtml: bool,
 
     // Input / output sources
@@ -415,6 +420,7 @@ impl Default for Options {
             unhyphenation: true,
             use_mosaic_header: false,
             use_preformat_marker: false,
+            utf8: true,
             xhtml: false,
             infile: Vec::new(),
             instring: Vec::new(),

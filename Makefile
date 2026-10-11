@@ -3,7 +3,7 @@
 #   make verify        fmt-check, clippy, Rust tests (engine and GUI),
 #                      acceptance against the recorded outputs, real-document
 #                      recorded outputs
-#   make fix           what is safe to apply automatically: cargo fmt
+#   make fmt           what is safe to apply automatically: cargo fmt
 #   make test          just the Rust tests
 #   make accept        the behavioural gate: output against the recorded goldens
 #   make accept-write  recapture the corpus goldens (routine; review the diff)
