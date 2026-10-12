@@ -292,8 +292,6 @@ fn the_whole_option_set_round_trips_through_the_file() {
         ("demoronize", "false"),
         ("hrule_min", "7"),
         ("title", "a, b"),
-        ("infile", "one.txt"),
-        ("infile", "two.txt"),
         ("table_type", "ALIGN=0"),
         ("meta_charset", "true"),
     ] {
@@ -333,9 +331,11 @@ options="{\"hrule_min\": 5, \"title\": \"caf\u00e9\", \"demoronize\": false, \"i
         "café"
     );
     assert!(!app.opts.demoronize);
-    assert_eq!(
-        app.opts.infile,
-        vec!["a.txt".to_string(), "b.txt".to_string()]
+    // `infile` is a command-line pipeline option the GUI cannot act on, so it is
+    // deliberately not restored; every other value above is.
+    assert!(
+        app.opts.infile.is_empty(),
+        "pipeline options are left at their defaults"
     );
     assert!(!app.opts.table_type.align);
 }

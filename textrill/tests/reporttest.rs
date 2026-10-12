@@ -300,7 +300,7 @@ fn homer_reports_the_numbers_make_examples_prints() {
     assert_eq!(
         c,
         Counts {
-            bytes: 38487,
+            bytes: 38749,
             headings: 0,
             paragraphs: 64,
             strong: 39,
@@ -321,7 +321,7 @@ fn the_example_corpus_reports_its_counts() {
         (
             "blake.txt",
             Counts {
-                bytes: 16913,
+                bytes: 18783,
                 headings: 0,
                 paragraphs: 466,
                 strong: 26,
@@ -331,7 +331,7 @@ fn the_example_corpus_reports_its_counts() {
         (
             "calli.txt",
             Counts {
-                bytes: 123439,
+                bytes: 134701,
                 headings: 0,
                 paragraphs: 2814,
                 strong: 164,
@@ -341,7 +341,7 @@ fn the_example_corpus_reports_its_counts() {
         (
             "erya.txt",
             Counts {
-                bytes: 51314,
+                bytes: 51479,
                 headings: 0,
                 paragraphs: 41,
                 strong: 0,
@@ -351,7 +351,7 @@ fn the_example_corpus_reports_its_counts() {
         (
             "gelbenhuegel.txt",
             Counts {
-                bytes: 44494,
+                bytes: 46354,
                 headings: 16,
                 paragraphs: 191,
                 strong: 1,
@@ -361,7 +361,7 @@ fn the_example_corpus_reports_its_counts() {
         (
             "mohe_zhiguan_vol001.txt",
             Counts {
-                bytes: 48443,
+                bytes: 48448,
                 headings: 0,
                 paragraphs: 1,
                 strong: 0,
@@ -371,7 +371,7 @@ fn the_example_corpus_reports_its_counts() {
         (
             "septuagint_swete_genesis.txt",
             Counts {
-                bytes: 378864,
+                bytes: 379065,
                 headings: 0,
                 paragraphs: 50,
                 strong: 0,
@@ -381,7 +381,7 @@ fn the_example_corpus_reports_its_counts() {
         (
             "talmud.txt",
             Counts {
-                bytes: 13611,
+                bytes: 13924,
                 headings: 0,
                 paragraphs: 78,
                 strong: 0,

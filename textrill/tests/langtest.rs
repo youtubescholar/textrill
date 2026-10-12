@@ -31,7 +31,7 @@ fn lang_runs_wraps_a_foreign_passage_in_the_body() {
         ..Options::default()
     });
     assert!(
-        out.contains("<p>Hello <span lang=\"zh\">世界</span> World\n"),
+        out.contains("<p>Hello <span lang=\"zh\">世界</span> World</p>"),
         "{out}"
     );
 }
@@ -75,7 +75,7 @@ fn extract_does_not_lose_the_wrap() {
         ..Options::default()
     });
     assert!(
-        out.contains("<p>Hello <span lang=\"zh\">世界</span> World\n"),
+        out.contains("<p>Hello <span lang=\"zh\">世界</span> World</p>"),
         "{out}"
     );
     assert!(!out.contains("DOCTYPE"), "{out}");

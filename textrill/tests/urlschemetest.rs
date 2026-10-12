@@ -212,18 +212,10 @@ fn a_relative_style_url_is_fine() {
 #[test]
 fn the_option_is_parsed_as_a_comma_separated_list() {
     let mut opts = Options::default();
-    for spec in textrill::cli::SPECS {
-        if spec.names[0] == "allowed_url_schemes" {
-            textrill::cli::set_str(&mut opts, spec, "https, http ,").unwrap();
-        }
-    }
+    textrill::cli::set_value(&mut opts, "allowed_url_schemes", "https, http ,").unwrap();
     // Setting it again replaces rather than accumulates: a front end writes the
     // whole value back, and accumulating would double the list every time.
-    for spec in textrill::cli::SPECS {
-        if spec.names[0] == "allowed_url_schemes" {
-            textrill::cli::set_str(&mut opts, spec, "ftp").unwrap();
-        }
-    }
+    textrill::cli::set_value(&mut opts, "allowed_url_schemes", "ftp").unwrap();
     let policy = opts.url_policy();
     assert_eq!(
         policy,

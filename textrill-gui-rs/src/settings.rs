@@ -140,6 +140,22 @@ impl Settings {
         self.get("builtin-browser").map(parse_bool)
     }
 
+    /// The directory the last open or save used, if one was remembered.
+    pub fn last_dir(&self) -> Option<PathBuf> {
+        self.get("last-dir")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    }
+
+    /// Persist the directory used by the last open or save, so the next file
+    /// dialog opens where the user last worked rather than in a transient
+    /// directory (the old behaviour dropped saves into whatever folder the
+    /// input came from, `/tmp/opencode` included).
+    pub fn set_last_dir(&mut self, dir: &Path) -> Result<(), String> {
+        self.set("last-dir", &dir.to_string_lossy())
+    }
+
     /// Persist the built-in-browser choice.
     pub fn set_builtin_browser(&mut self, builtin: bool) -> Result<(), String> {
         self.set("builtin-browser", if builtin { "true" } else { "false" })

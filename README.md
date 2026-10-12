@@ -9,7 +9,9 @@ templates you control.
 `textrill` began as a Rust port of
 [`HTML::TextToHTML`](https://metacpan.org/pod/HTML::TextToHTML) 3.0 and its
 `txt2html` script, by Seth Golub. It has moved on from byte-parity with that
-reference; the Perl original is kept as an on-demand cross-check (`make diff`).
+reference as its default; the legacy `--xhtml`/`--no-html5` modes and the
+frozen corpus still reproduce the reference byte for byte, and the Perl
+original is kept as an on-demand cross-check (`make diff`).
 
 **This is a fork.** It is not affiliated with or endorsed by the upstream
 `txt2html` project.

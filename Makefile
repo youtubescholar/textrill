@@ -32,7 +32,7 @@ STUBS       ?= $(ROOT)/ref/stubs
 export PERL5LIB := $(STUBS):$(REFDIR)/lib
 export MINE     := $(RELEASE_BIN)
 
-.PHONY: all verify build fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale musl corpus-musl accept-musl examples examples-write clean
+.PHONY: all verify build gui run-gui fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale musl corpus-musl accept-musl examples examples-write clean
 
 all: verify
 
@@ -46,6 +46,15 @@ verify: fmt-check clippy test test-gui-rs proptest alloctest accept examples
 
 build:
 	cd $(RS) && $(CARGO) build --release
+
+# The GUI is a separate crate with its own ~300-crate eframe tree. `make build`
+# only builds the CLI (what `verify` needs), so these build and run the GUI on
+# demand. `run-gui` execs the freshly built binary, so it is never stale.
+gui:
+	cd $(GUI_RS) && $(CARGO) build --release
+
+run-gui: gui
+	$(GUI_RS)/target/release/textrill-gui
 
 # --- static musl build -------------------------------------------------------
 

@@ -50,9 +50,11 @@ const COPY_HTML_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
 );
 const QUIT_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
-/// Toggle the immersive "focus" view that hides every control but the text.
+/// Toggle the immersive "focus" view that hides the menus and the toolbar,
+/// leaving the text and a slim Convert/Save HTML action bar.
 /// `Ctrl/cmd+Shift+F` is the convention browsers give fullscreen; the *same*
-/// shortcut is how you come back, because the control that does it is hidden.
+/// shortcut is a second, keyboard-only way back alongside the visible
+/// "Exit focus" button.
 const FOCUS_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers {
         command: true,
@@ -115,7 +117,7 @@ pub struct TextrillApp {
     pub opts: Options,
     /// The options form and its filter.
     pub panel: OptionsPanel,
-    /// Whether the options pane is shown (`View → Show options`).
+    /// Whether the options dialog is shown (`View → Show options`).
     pub show_options: bool,
     /// Whether the About window is open.
     pub about_open: bool,
@@ -158,7 +160,8 @@ pub struct TextrillApp {
     pub text_size: f32,
     /// Whether animation is switched off (WCAG `prefers-reduced-motion`).
     pub reduce_motion: bool,
-    /// Immersive view: menus and controls hidden, only the text on screen.
+    /// Immersive view: menus and toolbar hidden, leaving the text, a slim
+    /// Convert/Save HTML action bar, and the way back.
     pub focus_mode: bool,
     /// Whether the chosen theme/text size/motion has been pushed into the egui
     /// context yet. `draw` does it on the first frame, so the look is applied
@@ -174,8 +177,16 @@ pub struct TextrillApp {
     /// install on a portal-less desktop work. The user can flip it either way
     /// from the View menu, and the choice is remembered.
     use_builtin_browser: bool,
+    /// Whether [`dialogs::system_dialog_available`] reported a usable desktop
+    /// dialog when the app started. Cached so the status line can explain a
+    /// chooser that never appeared without probing the filesystem per frame.
+    native_dialog_available: bool,
     /// The built-in browser, when one is open.
     file_browser: Option<FileBrowser>,
+    /// The directory the last open or save used, so the next dialog starts
+    /// there (or in the user's Documents) instead of wherever the input was
+    /// launched from. `None` until one is recorded or loaded from settings.
+    last_dir: Option<PathBuf>,
 }
 
 impl Default for TextrillApp {
@@ -190,11 +201,12 @@ impl TextrillApp {
     /// Tests pass a [`Settings`] in a temporary directory so a developer's real
     /// configuration cannot change what the tests observe.
     pub fn with_settings(settings: Settings) -> Self {
+        let native_dialog_available = dialogs::system_dialog_available();
         let mut app = Self {
             doc: Document::new(),
             opts: Options::default(),
             panel: OptionsPanel::default(),
-            show_options: true,
+            show_options: false,
             about_open: false,
             pending: None,
             closing: false,
@@ -217,8 +229,10 @@ impl TextrillApp {
             focus_mode: false,
             applied_style: false,
             chooser: Box::new(NativeChooser),
-            use_builtin_browser: !dialogs::system_dialog_available(),
+            use_builtin_browser: !native_dialog_available,
+            native_dialog_available,
             file_browser: None,
+            last_dir: None,
         };
         app.restore_settings();
         app
@@ -230,6 +244,8 @@ impl TextrillApp {
     pub fn set_chooser(&mut self, chooser: Box<dyn Chooser>) {
         self.chooser = chooser;
         self.use_builtin_browser = false;
+        // A stub always answers, so no "no dialog" note applies to it.
+        self.native_dialog_available = true;
     }
 
     /// Whether file commands use the built-in browser rather than the desktop
@@ -238,9 +254,21 @@ impl TextrillApp {
         self.use_builtin_browser
     }
 
+    /// Override the cached result of the startup dialog probe. Tests use this to
+    /// exercise the "no dialog" status note on a host that does have one.
+    pub fn set_native_dialog_available(&mut self, available: bool) {
+        self.native_dialog_available = available;
+    }
+
     /// Whether the built-in browser is currently on screen.
     pub fn is_browsing(&self) -> bool {
         self.file_browser.is_some()
+    }
+
+    /// The directory the built-in browser is showing, if one is open. For
+    /// tests that pin where a file dialog starts.
+    pub fn browser_directory(&self) -> Option<&std::path::Path> {
+        self.file_browser.as_ref().map(FileBrowser::directory)
     }
 
     /// Choose which chrome file commands use: `true` for the built-in browser,
@@ -292,6 +320,7 @@ impl TextrillApp {
         if let Some(builtin) = self.settings.builtin_browser() {
             self.use_builtin_browser = builtin;
         }
+        self.last_dir = self.settings.last_dir();
     }
 
     /// Persist the display choices the user made (theme, text size, motion).
@@ -557,26 +586,99 @@ impl TextrillApp {
         }
     }
 
+    /// The directory a file dialog should open in. A freshly opened document
+    /// wins, so saving stays beside its source; otherwise the last directory
+    /// used is remembered, and failing that the user's Documents. This is what
+    /// stops an untitled conversion (the sample, a paste) from dropping its
+    /// output in whatever transient folder the app happened to start in.
+    fn file_dialog_dir(&self) -> PathBuf {
+        if let Some(dir) = self
+            .doc
+            .path
+            .as_deref()
+            .and_then(|path| path.parent())
+            .filter(|dir| dir.is_dir())
+        {
+            return dir.to_path_buf();
+        }
+        if let Some(dir) = self.last_dir.as_ref().filter(|dir| dir.is_dir()) {
+            return dir.clone();
+        }
+        documents_dir()
+    }
+
+    /// The directory `Save As` should open in.
+    ///
+    /// The already-written HTML's directory wins (a second `Save As` returns to
+    /// where the HTML last went), then the source file's, then the same
+    /// recent/Documents place an open starts in. [`Self::file_dialog_dir`] alone
+    /// would always use the source's directory and forget an output location
+    /// the user chose.
+    fn save_html_dir(&self) -> PathBuf {
+        self.doc
+            .output_path
+            .as_deref()
+            .or(self.doc.path.as_deref())
+            .and_then(std::path::Path::parent)
+            .filter(|dir| dir.is_dir())
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| self.file_dialog_dir())
+    }
+
+    /// Remember `path`'s directory for the next file dialog, and persist it.
+    fn remember_dir(&mut self, path: &std::path::Path) {
+        let Some(dir) = path.parent().filter(|dir| dir.is_dir()) else {
+            return;
+        };
+        self.last_dir = Some(dir.to_path_buf());
+        if let Err(error) = self.settings.set_last_dir(dir) {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Explain a `None` from the native chooser when no dialog was expected to
+    /// appear at all.
+    ///
+    /// A `None` is normally the user cancelling, and stays silent. But when the
+    /// built-in browser is off on a desktop [`dialogs::system_dialog_available`]
+    /// reported as having no file dialog, a `None` almost certainly means the
+    /// dialog never appeared — a missing portal daemon is indistinguishable from
+    /// a cancel to `rfd` — so say how to get a chooser back. This is a
+    /// best-effort heuristic, not a live probe.
+    fn note_if_no_dialog(&mut self) {
+        if !self.use_builtin_browser && !self.native_dialog_available {
+            self.status =
+                "No file dialog is available here; turn on View → Use built-in file browser."
+                    .to_string();
+        }
+    }
+
     fn do_open(&mut self) {
-        let from = self.doc.path.clone();
+        let dir = self.file_dialog_dir();
         if self.use_builtin_browser {
-            self.file_browser = Some(FileBrowser::for_open(from.as_deref()));
-        } else if let Some(path) = self.chooser.open_text(from.as_deref()) {
+            self.file_browser = Some(FileBrowser::for_open_in(dir));
+        } else if let Some(path) = self.chooser.open_text(Some(&dir)) {
             self.load_or_report(path);
+        } else {
+            self.note_if_no_dialog();
         }
     }
 
     /// Load `path`, reporting any failure on the status line.
     fn load_or_report(&mut self, path: PathBuf) {
-        if let Err(error) = self.load_file(&path) {
-            self.status = error;
+        match self.load_file(&path) {
+            Ok(()) => self.remember_dir(&path),
+            Err(error) => self.status = error,
         }
     }
 
     /// Write the HTML to `path`, reporting the result on the status line.
     fn save_html_or_report(&mut self, path: PathBuf) {
         match self.save_html_to(&path) {
-            Ok(()) => self.status = format!("saved {}", path.display()),
+            Ok(()) => {
+                self.status = format!("saved {}", path.display());
+                self.remember_dir(&path);
+            }
             Err(error) => self.status = error,
         }
     }
@@ -584,7 +686,10 @@ impl TextrillApp {
     /// Write the text to `path`, reporting the result on the status line.
     fn save_text_or_report(&mut self, path: PathBuf) {
         match self.save_text_to(&path) {
-            Ok(()) => self.status = format!("saved text to {}", path.display()),
+            Ok(()) => {
+                self.status = format!("saved text to {}", path.display());
+                self.remember_dir(&path);
+            }
             Err(error) => self.status = error,
         }
     }
@@ -600,11 +705,21 @@ impl TextrillApp {
 
     /// `File → Save As…`: always ask where the HTML should go.
     pub fn save_document_as_command(&mut self) {
-        let suggested = self.suggested_output_name();
+        let dir = self.save_html_dir();
+        let name = self
+            .suggested_output_name()
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "output.html".to_string());
         if self.use_builtin_browser {
-            self.file_browser = Some(FileBrowser::for_save(FileIntent::SaveHtml, &suggested));
-        } else if let Some(path) = self.chooser.save_html(&suggested) {
-            self.save_html_or_report(path);
+            self.file_browser = Some(FileBrowser::for_save_in(FileIntent::SaveHtml, dir, name));
+        } else {
+            let suggested = dir.join(name);
+            if let Some(path) = self.chooser.save_html(&suggested) {
+                self.save_html_or_report(path);
+            } else {
+                self.note_if_no_dialog();
+            }
         }
     }
 
@@ -613,12 +728,23 @@ impl TextrillApp {
         match self.doc.path.clone() {
             Some(path) => self.save_text_or_report(path),
             None => {
-                let suggested = self.doc.suggested_text_name();
+                let dir = self.file_dialog_dir();
+                let name = self
+                    .doc
+                    .suggested_text_name()
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "untitled.txt".to_string());
                 if self.use_builtin_browser {
                     self.file_browser =
-                        Some(FileBrowser::for_save(FileIntent::SaveText, &suggested));
-                } else if let Some(path) = self.chooser.save_text(&suggested) {
-                    self.save_text_or_report(path);
+                        Some(FileBrowser::for_save_in(FileIntent::SaveText, dir, name));
+                } else {
+                    let suggested = dir.join(name);
+                    if let Some(path) = self.chooser.save_text(&suggested) {
+                        self.save_text_or_report(path);
+                    } else {
+                        self.note_if_no_dialog();
+                    }
                 }
             }
         }
@@ -861,7 +987,7 @@ impl TextrillApp {
                 }
                 ui.separator();
                 ui.checkbox(&mut self.focus_mode, "Focus mode")
-                    .on_hover_text("Hide every control but the text (Ctrl+Shift+F)");
+                    .on_hover_text("Hide the menus and toolbar, keep the text and a slim action bar (Ctrl+Shift+F)");
                 if ui
                     .checkbox(&mut self.reduce_motion, "Reduce motion")
                     .changed()
@@ -869,13 +995,107 @@ impl TextrillApp {
                     self.apply_ui_style(ui.ctx());
                     self.store_display_settings();
                 }
+                // Whole-UI zoom, for the same reason a browser has it: a 4K
+                // laptop and a 96 DPI desktop should not dictate the same
+                // physical text size. The keyboard shortcuts (Ctrl/⌘ + / - / 0)
+                // work too; these buttons make the feature discoverable. They
+                // live in the menu rather than the toolbar, which keeps the
+                // toolbar short. `zoom_factor` multiplies the OS's own scale
+                // factor, so a HiDPI screen is already handled.
                 ui.separator();
-                egui::gui_zoom::zoom_menu_buttons(ui);
+                ui.label(egui::RichText::new("Display").small());
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Zoom out")
+                        .on_hover_text("Zoom out (Ctrl+-)")
+                        .clicked()
+                    {
+                        egui::gui_zoom::zoom_out(ui.ctx());
+                    }
+                    ui.label(format!("{:.0}%", ui.ctx().zoom_factor() * 100.0));
+                    if ui
+                        .button("Zoom in")
+                        .on_hover_text("Zoom in (Ctrl+=)")
+                        .clicked()
+                    {
+                        egui::gui_zoom::zoom_in(ui.ctx());
+                    }
+                    if ui
+                        .button("Reset zoom")
+                        .on_hover_text("Reset to 100% (Ctrl+0)")
+                        .clicked()
+                    {
+                        ui.ctx().set_zoom_factor(1.0);
+                    }
+                });
+
+                // Plain-text size, in the spirit of a browser's font-size
+                // control: it scales the type and therefore the resting size of
+                // controls with it, but leaves the whole-window zoom above
+                // alone.
                 ui.separator();
-                // The single way back from a size or zoom the user does not
-                // want. It is in the menu bar on purpose: the menu bar is the
-                // first, shortest row, so it stays reachable even when the
-                // toolbar has folded onto several lines at a high zoom.
+                ui.label(egui::RichText::new("Text").small());
+                let sizes = theme::TEXT_SIZES;
+                let step = sizes
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, (a, _)), (_, (b, _))| {
+                        (a - self.text_size)
+                            .abs()
+                            .partial_cmp(&(b - self.text_size).abs())
+                            .unwrap()
+                    })
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(step > 0, egui::Button::new("A−"))
+                        .on_hover_text("Smaller text")
+                        .clicked()
+                    {
+                        self.text_size = sizes[step - 1].0;
+                        self.apply_ui_style(ui.ctx());
+                        self.store_display_settings();
+                    }
+                    ui.label(format!("{:.0}%", self.text_size * 100.0));
+                    if ui
+                        .add_enabled(step + 1 < sizes.len(), egui::Button::new("A+"))
+                        .on_hover_text("Larger text")
+                        .clicked()
+                    {
+                        self.text_size = sizes[step + 1].0;
+                        self.apply_ui_style(ui.ctx());
+                        self.store_display_settings();
+                    }
+                    if ui
+                        .button("Reset text size")
+                        .on_hover_text("Back to the default size (100%)")
+                        .clicked()
+                    {
+                        self.text_size = theme::DEFAULT_TEXT_SIZE;
+                        self.apply_ui_style(ui.ctx());
+                        self.store_display_settings();
+                    }
+                });
+
+                // The theme picker. Both of egui's internal themes were
+                // replaced with this theme's full style, so switching is one
+                // row. Rows rather than a combo: an interactive popup cannot
+                // live inside a menu, which closes on the click.
+                ui.separator();
+                ui.label(egui::RichText::new("Theme").small());
+                for theme in Theme::ALL {
+                    if ui
+                        .selectable_label(self.theme == theme, theme.name())
+                        .clicked()
+                    {
+                        self.theme = theme;
+                        self.apply_ui_style(ui.ctx());
+                        self.store_display_settings();
+                    }
+                }
+
+                ui.separator();
                 if ui
                     .button("Reset window size and zoom")
                     .on_hover_text("Ctrl+Alt+0")
@@ -922,111 +1142,17 @@ impl TextrillApp {
                 }
             }
             ui.separator();
-            ui.checkbox(&mut self.show_options, "Show options");
+            if ui
+                .button("Options")
+                .on_hover_text("Open the options panel")
+                .clicked()
+            {
+                self.show_options = true;
+            }
             ui.separator();
-
-            // Whole-UI zoom, for the same reason a browser has it: a 4K laptop
-            // and a 96 DPI desktop should not dictate the same physical text
-            // size. The keyboard shortcuts (Ctrl/⌘ + / - / 0) work too; these
-            // buttons make the feature discoverable. `zoom_factor` multiplies
-            // the OS's own scale factor, so a HiDPI screen is already handled.
-            ui.label(egui::RichText::new("Display").small());
-            if ui
-                .button("Zoom out")
-                .on_hover_text("Zoom out (Ctrl+-)")
-                .clicked()
-            {
-                egui::gui_zoom::zoom_out(ui.ctx());
-            }
-            ui.label(format!("{:.0}%", ui.ctx().zoom_factor() * 100.0));
-            if ui
-                .button("Zoom in")
-                .on_hover_text("Zoom in (Ctrl+=)")
-                .clicked()
-            {
-                egui::gui_zoom::zoom_in(ui.ctx());
-            }
-            if ui
-                .button("Reset zoom")
-                .on_hover_text("Reset to 100% (Ctrl+0)")
-                .clicked()
-            {
-                ui.ctx().set_zoom_factor(1.0);
-            }
-
-            // Plain-text size, in the spirit of a browser's font-size control:
-            // it scales the type and therefore the resting size of controls
-            // with it, but leaves the whole-window zoom above alone.
-            ui.separator();
-            ui.label(egui::RichText::new("Text").small());
-            let sizes = theme::TEXT_SIZES;
-            let step = sizes
-                .iter()
-                .enumerate()
-                .min_by(|(_, (a, _)), (_, (b, _))| {
-                    (a - self.text_size)
-                        .abs()
-                        .partial_cmp(&(b - self.text_size).abs())
-                        .unwrap()
-                })
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-            let smaller = ui
-                .add_enabled(step > 0, egui::Button::new("A−"))
-                .on_hover_text("Smaller text");
-            if smaller.clicked() {
-                self.text_size = sizes[step - 1].0;
-                self.apply_ui_style(ui.ctx());
-                self.store_display_settings();
-            }
-            ui.label(format!("{:.0}%", self.text_size * 100.0));
-            let larger = ui
-                .add_enabled(step + 1 < sizes.len(), egui::Button::new("A+"))
-                .on_hover_text("Larger text")
-                .clicked();
-            if larger {
-                self.text_size = sizes[step + 1].0;
-                self.apply_ui_style(ui.ctx());
-                self.store_display_settings();
-            }
-            if ui
-                .button("Reset text size")
-                .on_hover_text("Back to the default size (100%)")
-                .clicked()
-            {
-                self.text_size = theme::DEFAULT_TEXT_SIZE;
-                self.apply_ui_style(ui.ctx());
-                self.store_display_settings();
-            }
-
-            // The theme picker. Both of egui's internal themes were replaced
-            // with this theme's full style, so switching is one combo change.
-            ui.separator();
-            let mut selected = self.theme;
-            egui::ComboBox::from_id_salt("theme-combo")
-                .selected_text(self.theme.name())
-                .show_ui(ui, |ui| {
-                    for theme in Theme::ALL {
-                        ui.selectable_value(&mut selected, theme, theme.name());
-                    }
-                });
-            if selected != self.theme {
-                self.theme = selected;
-                self.apply_ui_style(ui.ctx());
-                self.store_display_settings();
-            }
-
-            if ui
-                .checkbox(&mut self.reduce_motion, "Reduce motion")
-                .changed()
-            {
-                self.apply_ui_style(ui.ctx());
-                self.store_display_settings();
-            }
-
             if ui
                 .button("Focus")
-                .on_hover_text("Immersive view: hide every control but the text (Ctrl+Shift+F)")
+                .on_hover_text("Immersive view: hide the menus and toolbar, keep the text and a slim action bar (Ctrl+Shift+F)")
                 .clicked()
             {
                 self.focus_mode = true;
@@ -1037,6 +1163,30 @@ impl TextrillApp {
         ui.horizontal_wrapped(|ui| {
             ui.label(&self.status);
         });
+    }
+
+    /// The options dialog, qBittorrent-style: a category list beside a
+    /// scrolling page. Opened from the toolbar's `Options` button or the View
+    /// menu, and closed with its own title-bar `x`.
+    fn options_window(&mut self, ctx: &egui::Context) {
+        if !self.show_options {
+            return;
+        }
+        let mut open = self.show_options;
+        egui::Window::new("Textrill options")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size([780.0, 560.0])
+            .min_width(560.0)
+            .min_height(360.0)
+            .show(ctx, |ui| {
+                ui.set_min_width(540.0);
+                if self.panel.draw(ui, &mut self.opts) {
+                    self.schedule_convert(Instant::now());
+                }
+            });
+        self.show_options = open;
     }
 
     fn about_window(&mut self, ctx: &egui::Context) {
@@ -1160,9 +1310,11 @@ impl TextrillApp {
         }
 
         if self.focus_mode {
-            // In focus mode the chrome is gone, menu bar included; the first
-            // thing on screen is a single visible way back, so immersion is
-            // one click deep, never unreachable (and `Ctrl+Shift+F` works too).
+            // Focus mode drops the menu bar and the toolbar, but not the work:
+            // Convert and Save HTML stay within reach, so a manual conversion
+            // or a save never forces a trip back to the chrome. Immersion is
+            // still one click deep — the first control is the one visible way
+            // back (and `Ctrl+Shift+F` works too).
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .button("Exit focus")
@@ -1170,6 +1322,21 @@ impl TextrillApp {
                     .clicked()
                 {
                     self.focus_mode = false;
+                }
+                ui.separator();
+                if ui
+                    .button("Convert")
+                    .on_hover_text("Convert now (Ctrl+Enter)")
+                    .clicked()
+                {
+                    self.convert_now();
+                }
+                if ui
+                    .button("Save HTML")
+                    .on_hover_text("Write the HTML output (Ctrl+S)")
+                    .clicked()
+                {
+                    self.save_document_command();
                 }
                 ui.separator();
                 ui.label(&self.status);
@@ -1192,33 +1359,40 @@ impl TextrillApp {
             }
         });
 
+        // Both panes are bounded and scroll on their own. A multiline
+        // `TextEdit` grows to fit every line (its `desired_rows` is only a
+        // minimum), so without a scroll area the HTML preview is simply clipped
+        // off the bottom of the window once the two panes together exceed it.
         ui.label("Input");
-        if ui
-            .add(egui::TextEdit::multiline(&mut self.doc.text).desired_rows(6))
-            .changed()
-        {
-            self.on_edit(Instant::now());
-        }
+        egui::ScrollArea::vertical()
+            .id_salt("input-pane")
+            .max_height((ui.available_height() * 0.4).max(80.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if ui
+                    .add(egui::TextEdit::multiline(&mut self.doc.text).desired_rows(6))
+                    .changed()
+                {
+                    self.on_edit(Instant::now());
+                }
+            });
 
         if self.show_options {
-            ui.separator();
-            ui.label(egui::RichText::new("Options").strong());
-            let changed = egui::ScrollArea::vertical()
-                .max_height(320.0)
-                .show(ui, |ui| self.panel.draw(ui, &mut self.opts))
-                .inner;
-            if changed {
-                self.schedule_convert(Instant::now());
-            }
+            self.options_window(ui.ctx());
         }
 
         ui.separator();
         ui.label("HTML");
-        ui.add(
-            egui::TextEdit::multiline(&mut self.output)
-                .code_editor()
-                .desired_rows(8),
-        );
+        egui::ScrollArea::vertical()
+            .id_salt("html-pane")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.output)
+                        .code_editor()
+                        .desired_rows(8),
+                );
+            });
 
         self.about_window(ui.ctx());
         if self.file_browser.is_some() {
@@ -1248,4 +1422,19 @@ impl eframe::App for TextrillApp {
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         visuals.panel_fill.to_normalized_gamma_f32()
     }
+}
+
+/// Where a first file dialog should start when nothing has been remembered yet:
+/// the user's Documents directory, their home, or the working directory.
+fn documents_dir() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if let Some(home) = home.as_ref() {
+        let documents = home.join("Documents");
+        if documents.is_dir() {
+            return documents;
+        }
+    }
+    home.filter(|home| home.is_dir())
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
 }

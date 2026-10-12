@@ -17,6 +17,12 @@ fn render(opts: Options) -> String {
     conv.convert()
 }
 
+fn render_text(text: &str, opts: Options) -> String {
+    let mut conv = Converter::new(opts);
+    conv.opts.instring = vec![text.to_string()];
+    conv.convert()
+}
+
 #[test]
 fn html5_is_on_by_default() {
     let conv = Converter::new(Options::default());
@@ -161,6 +167,54 @@ fn the_legacy_html4_mode_keeps_the_align_attribute() {
     cli::set_value(&mut opts, "html5", "0").expect("no-html5");
     let out = render_table(opts);
     assert!(out.contains("<TD ALIGN=\"RIGHT\">"), "{out}");
+}
+
+#[test]
+fn the_html5_default_closes_the_optional_end_tags() {
+    // HTML allows `</p>` and `</li>` to be omitted; the default emits them
+    // anyway, so the output is well-formed (and DOM-equivalent to the terse
+    // reference bytes). This is the one deliberate serialisation departure in
+    // the default mode; `--no-close_optional_tags` gets the terse shape back.
+    let out = render_text("Hi there.\n\n- one\n- two\n", Options::default());
+    assert!(out.contains("<p>Hi there.\n</p>"), "{out:?}");
+    assert!(out.contains("</li>"), "{out:?}");
+    assert!(!out.contains("<li>one\n  <li>two"), "{out:?}");
+}
+
+#[test]
+fn no_close_optional_tags_restores_the_terse_shape() {
+    let mut opts = Options::default();
+    cli::set_value(&mut opts, "close_optional_tags", "0").expect("off");
+    let out = render_text("Hi there.\n\n- one\n- two\n", opts);
+    assert!(!out.contains("</p>"), "{out:?}");
+    assert!(!out.contains("</li>"), "{out:?}");
+    assert!(out.contains("<li>one\n  <li>two"), "{out:?}");
+}
+
+#[test]
+fn the_reference_html4_mode_stays_terse() {
+    // --no-html5 is the reference's HTML 4.01: optional end tags are omitted
+    // for byte parity regardless of --close_optional_tags.
+    let mut opts = Options::default();
+    cli::set_value(&mut opts, "html5", "0").expect("no-html5");
+    opts.close_optional_tags = true;
+    let out = render_text("Hi there.\n\n- one\n- two\n", opts);
+    assert!(!out.contains("</p>"), "{out:?}");
+    assert!(!out.contains("</li>"), "{out:?}");
+}
+
+#[test]
+fn close_optional_tags_round_trips_through_the_cli() {
+    let mut opts = Options::default();
+    assert_eq!(
+        cli::get_value(&opts, "close_optional_tags").unwrap(),
+        "true",
+        "on by default"
+    );
+    cli::set_value(&mut opts, "close_optional_tags", "0").expect("off");
+    assert!(!opts.close_optional_tags);
+    cli::set_value(&mut opts, "close_optional_tags", "1").expect("on");
+    assert!(opts.close_optional_tags);
 }
 
 #[test]

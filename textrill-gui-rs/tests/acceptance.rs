@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use textrill::options::Options;
 use textrill_gui::options_panel::OptionsPanel;
@@ -54,6 +54,16 @@ impl Chooser for PathChooser {
 /// `Options.demoronize` is on by default, so a click must turn it off.
 const DEMORONIZE: &str = "Convert Microsoft character codes into sensible HTML.";
 
+/// The panel's label for an option, looked up by a long name so a test does not
+/// hard-code the help text.
+fn help_for(name: &str) -> &'static str {
+    textrill::cli::SPECS
+        .iter()
+        .find(|spec| spec.names.contains(&name))
+        .map(|spec| spec.help)
+        .unwrap_or_else(|| panic!("no engine option named {name}"))
+}
+
 /// The help string is the panel's label for every kind, so a duplicated help
 /// string would make a by-label query ambiguous. Enforce that first.
 #[test]
@@ -69,7 +79,7 @@ fn option_help_strings_are_unique() {
     // Adding an engine option means adding a panel widget. The count is here
     // to make an addition a deliberate act rather than something that happens
     // when the engine grows an option.
-    assert_eq!(seen.len(), 71, "the engine's option count changed");
+    assert_eq!(seen.len(), 72, "the engine's option count changed");
 }
 
 /// Every option in `cli::SPECS` is reachable as a labelled widget.
@@ -108,6 +118,253 @@ fn clicking_a_checkbox_writes_through_to_options() {
     assert!(
         !harness.state().1.demoronize,
         "the click did not reach `Options.demoronize`"
+    );
+}
+
+/// The Document type choice is one control over the engine's mutually
+/// exclusive `html5`/`xhtml` flags, including the HTML 4 state neither flag
+/// names on its own.
+#[test]
+fn the_document_type_choice_sets_the_html_flags() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    harness.run();
+
+    let (html5, xhtml) = {
+        let opts = &harness.state().1;
+        (opts.html5, opts.xhtml)
+    };
+    assert!(html5 && !xhtml, "the default should be HTML5");
+
+    harness.get_by_label("XHTML").click();
+    harness.run();
+    let opts = &harness.state().1;
+    assert!(opts.xhtml && !opts.html5, "XHTML did not set the flags");
+
+    harness.get_by_label("HTML4").click();
+    harness.run();
+    let opts = &harness.state().1;
+    assert!(!opts.html5 && !opts.xhtml, "HTML4 did not clear both flags");
+
+    harness.get_by_label("HTML5").click();
+    harness.run();
+    let opts = &harness.state().1;
+    assert!(opts.html5 && !opts.xhtml, "HTML5 did not set the flags");
+}
+
+/// The template source is one radio over the engine's three mutually exclusive
+/// template options: picking a source reveals its own field and clears the
+/// others, and a source with an empty field stays selected across frames.
+#[test]
+fn the_template_source_choice_clears_the_others() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    harness.run();
+
+    // A source with an empty field has no option to live in, so the panel must
+    // remember it; otherwise the field would vanish on the next frame.
+    let before = harness
+        .get_all_by_role(egui::accesskit::Role::TextInput)
+        .count();
+    harness.get_by_label("Body wrapper").click();
+    harness.run();
+    harness.run();
+    let after = harness
+        .get_all_by_role(egui::accesskit::Role::TextInput)
+        .count();
+    assert_eq!(after, before + 1, "the body-template field did not persist");
+
+    // Picking another source clears the first rather than leaving both set.
+    harness.state_mut().1.template = "body.html".to_string();
+    harness.run();
+    harness.get_by_label("Shipped").click();
+    harness.run();
+
+    let opts = &harness.state().1;
+    assert_eq!(opts.template, "", "the body template survived the switch");
+    assert_eq!(opts.document_template, "");
+}
+
+/// The link handling is one radio over the two link flags, including the
+/// "links only" mode that both flags on describe.
+#[test]
+fn the_link_mode_choice_sets_the_link_flags() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    {
+        let opts = &harness.state().1;
+        assert!(
+            opts.make_links && !opts.link_only,
+            "the default should link"
+        );
+    }
+
+    harness.get_by_label("No links").click();
+    harness.run();
+    {
+        let opts = &harness.state().1;
+        assert!(!opts.make_links && !opts.link_only, "No links set a flag");
+    }
+
+    harness.get_by_label("Links only").click();
+    harness.run();
+    {
+        let opts = &harness.state().1;
+        assert!(
+            opts.make_links && opts.link_only,
+            "Links only did not set both"
+        );
+    }
+
+    harness.get_by_label("Make links").click();
+    harness.run();
+    {
+        let opts = &harness.state().1;
+        assert!(
+            opts.make_links && !opts.link_only,
+            "Make links left link_only on"
+        );
+    }
+}
+
+/// The input encoding is one radio over the engine's encoding values.
+#[test]
+fn the_encoding_choice_sets_the_encoding() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    harness.run();
+
+    assert_eq!(harness.state().1.encoding.name(), "auto", "the default");
+
+    harness.get_by_label("UTF-16 LE").click();
+    harness.run();
+    assert_eq!(harness.state().1.encoding.name(), "utf-16le");
+
+    harness.get_by_label("Windows-1251").click();
+    harness.run();
+    assert_eq!(harness.state().1.encoding.name(), "cp1251");
+}
+
+/// The title radio is one control over the engine's `--title`/`--titlefirst`
+/// precedence: "First line" turns `titlefirst` on and clears any explicit
+/// title, "Explicit title" turns it off and reveals the field, and "No title"
+/// clears both.
+#[test]
+fn the_title_source_choice_sets_title_and_titlefirst() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    harness.run();
+
+    harness.get_by_label("First line").click();
+    harness.run();
+    let opts = &harness.state().1;
+    assert!(
+        opts.titlefirst && opts.title.is_empty(),
+        "First line did not turn on titlefirst"
+    );
+
+    harness.get_by_label("Explicit title").click();
+    harness.run();
+    assert!(
+        !harness.state().1.titlefirst,
+        "Explicit title did not turn off titlefirst"
+    );
+
+    harness.get_by_label("No title").click();
+    harness.run();
+    let opts = &harness.state().1;
+    assert!(
+        !opts.titlefirst && opts.title.is_empty(),
+        "No title did not clear both"
+    );
+}
+
+/// A dependent option is drawn disabled, not hidden: it is still in the
+/// accessibility tree (so the panel names it), but it cannot be clicked until
+/// its parent gives it an effect.
+#[test]
+fn a_dependent_option_is_disabled_until_its_parent_is_on() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    harness.run();
+
+    assert!(
+        harness.get_by_label("ALIGN").accesskit_node().is_disabled(),
+        "the table column options should be disabled while tables are off"
+    );
+
+    harness.state_mut().1.make_tables = true;
+    harness.run();
+    assert!(
+        !harness.get_by_label("ALIGN").accesskit_node().is_disabled(),
+        "the table column options should enable once tables are on"
+    );
+}
+
+/// The command-line pipeline options do nothing to the document the GUI
+/// converts (the worker calls `convert_text`), so they are drawn disabled — and
+/// still named, so the panel keeps exposing every engine option.
+#[test]
+fn the_command_line_pipeline_options_are_disabled() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    harness.run();
+
+    // The flags are queryable by their own label. The `--infile`/`--instring`/
+    // `--outfile` fields draw their help as a plain caption, so the unit test
+    // `command_line_pipeline_options_are_disabled` covers those.
+    for name in ["stream", "chunk", "report"] {
+        assert!(
+            harness
+                .get_by_label(help_for(name))
+                .accesskit_node()
+                .is_disabled(),
+            "{name} should be disabled in the GUI"
+        );
+    }
+    // A GUI-relevant option stays live.
+    assert!(
+        !harness
+            .get_by_label(help_for("extract"))
+            .accesskit_node()
+            .is_disabled(),
+        "body-only output is meaningful in the GUI and must stay live"
     );
 }
 
@@ -278,7 +535,7 @@ fn the_ui_zooms_with_the_keyboard() {
     assert_eq!(harness.ctx.zoom_factor(), 1.0, "Ctrl+0 did not reset");
 }
 
-/// Zoom is also a visible control, not only a shortcut.
+/// Zoom is also a visible control in the View menu, not only a shortcut.
 #[test]
 fn the_display_controls_are_exposed() {
     let mut harness = Harness::new_ui_state(
@@ -287,6 +544,8 @@ fn the_display_controls_are_exposed() {
     );
     harness.run();
 
+    harness.get_by_label("View").click();
+    harness.run();
     harness.get_by_label("Zoom out");
     harness.get_by_label("Zoom in");
     harness.get_by_label("Reset zoom");
@@ -312,16 +571,16 @@ fn the_toolbar_reflows_at_a_narrow_width() {
     harness.set_size(egui::vec2(360.0, 640.0));
     harness.run();
 
-    for label in [
-        "New",
-        "Save",
-        "Example",
-        "Convert",
-        "Show options",
-        "Zoom out",
-        "Zoom in",
-        "Reset zoom",
-    ] {
+    for label in ["New", "Save", "Example", "Convert", "Options", "Focus"] {
+        harness.get_by_label(label);
+    }
+
+    // The display controls now live in the View menu; they must stay reachable
+    // at the same narrow width, and the menu bar is the first row, so opening
+    // it never folds it off the edge.
+    harness.get_by_label("View").click();
+    harness.run();
+    for label in ["Zoom out", "Zoom in", "Reset zoom"] {
         harness.get_by_label(label);
     }
 }
@@ -633,7 +892,7 @@ fn temp_settings_path(tag: &str) -> std::path::PathBuf {
     ))
 }
 
-/// The theme picker reaches the app's theme and its style, and the choice is
+/// The theme rows reach the app's theme and its style, and the choice is
 /// remembered in the settings file the window reads on the next launch.
 #[test]
 fn the_theme_picker_switches_and_remembers_the_theme() {
@@ -643,20 +902,9 @@ fn the_theme_picker_switches_and_remembers_the_theme() {
     harness.run();
 
     assert_eq!(harness.state().theme, Theme::Light, "stem from the default");
-    let combos = harness.get_all_by_role(egui::accesskit::Role::ComboBox);
-    let mut theme_combo = None;
-    for c in combos {
-        let v = c.value().map(|x| x.to_string());
-        if v.as_deref() == Some("Light")
-            || v.as_deref() == Some("System")
-            || v.as_deref() == Some("Dark")
-        {
-            theme_combo = Some(c);
-            break;
-        }
-    }
-    let combo = theme_combo.expect("theme combo");
-    combo.click();
+
+    // The theme rows are in the View menu (the toolbar stays short).
+    harness.get_by_label("View").click();
     harness.run();
     harness.get_by_label(Theme::Dark.name()).click();
     harness.run();
@@ -710,8 +958,15 @@ fn the_text_size_buttons_scale_the_type_and_are_remembered() {
     let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
     harness.run();
 
+    // The text-size buttons are in the View menu.
+    harness.get_by_label("View").click();
+    harness.run();
+
     assert_eq!(harness.state().text_size, 1.0);
     harness.get_by_label("A+").click();
+    harness.run();
+    // A click on a menu row closes the menu, so reopen it for the second step.
+    harness.get_by_label("View").click();
     harness.run();
     harness.get_by_label("A+").click();
     harness.run();
@@ -741,6 +996,10 @@ fn reduce_motion_zeroes_the_animation_time_and_is_remembered() {
     let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
     harness.run();
 
+    // Reduce motion is in the View menu.
+    harness.get_by_label("View").click();
+    harness.run();
+
     harness.get_by_label("Reduce motion").click();
     harness.run();
 
@@ -755,8 +1014,61 @@ fn reduce_motion_zeroes_the_animation_time_and_is_remembered() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// Focus mode hides the whole chrome — the one visible control left tells you
-/// how to leave, and `Ctrl+Shift+F` is an equally explicit path back.
+/// The View menu's built-in-browser checkbox is a real, remembered choice:
+/// ticking it routes file commands to the in-app browser, and the choice is
+/// written to settings.
+#[test]
+fn the_view_menu_toggles_the_builtin_file_browser() {
+    let path = temp_settings_path("builtin-browser");
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    let initial = harness.state().uses_builtin_browser();
+
+    harness.get_by_label("View").click();
+    harness.run();
+    harness.get_by_label("Use built-in file browser").click();
+    harness.run();
+
+    assert_eq!(
+        harness.state().uses_builtin_browser(),
+        !initial,
+        "the checkbox did not flip the choice"
+    );
+    assert_eq!(
+        Settings::with_path(&path).builtin_browser(),
+        Some(!initial),
+        "the choice was not persisted"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A chooser that returns nothing on a desktop with no dialog is explained, so
+/// a portal-less install does not look like a broken button. A normal cancel on
+/// a working desktop stays silent (see
+/// `saving_with_nowhere_to_write_drops_the_command`).
+#[test]
+fn a_missing_file_dialog_is_explained() {
+    let path = temp_settings_path("no-dialog");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.set_chooser(Box::new(CancellingChooser));
+    app.set_native_dialog_available(false);
+
+    app.open_document();
+
+    assert!(
+        app.status.contains("built-in file browser"),
+        "the status did not point at the built-in browser: {}",
+        app.status
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Focus mode hides the menu bar and toolbar, but keeps the work reachable:
+/// the two action buttons stay, so a manual conversion or a save never needs a
+/// trip back to the chrome. The visible "Exit focus" (or `Ctrl+Shift+F`) is
+/// the way back.
 #[test]
 fn focus_mode_hides_the_chrome_and_offers_a_way_back() {
     let app = TextrillApp::default();
@@ -775,6 +1087,15 @@ fn focus_mode_hides_the_chrome_and_offers_a_way_back() {
         harness.query_by_label("File").is_none(),
         "the menu bar is still on screen in focus mode"
     );
+    // The action bar survives: the work does not leave with the chrome.
+    assert!(
+        harness.query_by_label("Convert").is_some(),
+        "Convert left the focus view"
+    );
+    assert!(
+        harness.query_by_label("Save HTML").is_some(),
+        "Save HTML left the focus view"
+    );
     harness.get_by_label("Exit focus").click();
     harness.run();
 
@@ -787,6 +1108,37 @@ fn focus_mode_hides_the_chrome_and_offers_a_way_back() {
         harness.query_by_label("File").is_some(),
         "the menu bar did not come back"
     );
+}
+
+/// The focus action bar is not decoration: with auto off, Convert still asks
+/// the worker for a conversion, and Save HTML still opens the save flow.
+#[test]
+fn focus_mode_action_bar_converts_and_saves() {
+    let conf = temp_settings_path("focus-action");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&conf));
+    app.set_builtin_browser(true);
+    app.focus_mode = true;
+    app.auto = false;
+
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    let before = harness.state().latest;
+    harness.get_by_label("Convert").click();
+    harness.run();
+    assert!(
+        harness.state().latest > before,
+        "Convert in focus mode did not request a conversion"
+    );
+
+    harness.get_by_label("Save HTML").click();
+    harness.run();
+    assert!(
+        harness.state().is_browsing(),
+        "Save HTML in focus mode did not open the save flow"
+    );
+
+    let _ = std::fs::remove_file(&conf);
 }
 
 /// The Title field feeds `--title`, and the preview leads with the header
@@ -892,6 +1244,53 @@ fn save_as_opens_the_builtin_browser_when_chosen() {
 
     assert!(app.is_browsing(), "Save As did not open the browser");
     let _ = std::fs::remove_file(&path);
+}
+
+/// A remembered directory is where an untitled conversion's Save As starts, so
+/// the sample cannot drop its output in whatever folder the app was launched
+/// from (the old behaviour wrote beside the input, `/tmp/opencode` and all).
+#[test]
+fn save_as_starts_in_the_remembered_directory() {
+    let dir = scratch_dir("remembered-dir");
+    let conf = temp_settings_path("remembered-dir");
+    let mut settings = Settings::with_path(&conf);
+    settings.set_last_dir(&dir).expect("remember the directory");
+
+    let mut app = TextrillApp::with_settings(settings);
+    app.set_builtin_browser(true);
+
+    app.save_document_as_command();
+
+    assert!(app.is_browsing(), "the browser did not open");
+    assert_eq!(app.browser_directory(), Some(dir.as_path()));
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_file(&conf);
+}
+
+/// `Save As` returns to where the HTML last went, not the source text's folder:
+/// after writing the output somewhere else, a second `Save As` proposes that
+/// place again.
+#[test]
+fn save_as_starts_beside_the_last_output() {
+    let src_dir = scratch_dir("save-as-source");
+    let out_dir = scratch_dir("save-as-output");
+    let src = src_dir.join("doc.txt");
+    std::fs::write(&src, "hello").expect("write source");
+
+    let conf = temp_settings_path("save-as-output");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&conf));
+    app.set_builtin_browser(true);
+    app.doc.path = Some(src);
+    app.doc.output_path = Some(out_dir.join("doc.html"));
+
+    app.save_document_as_command();
+
+    assert_eq!(app.browser_directory(), Some(out_dir.as_path()));
+
+    let _ = std::fs::remove_dir_all(&src_dir);
+    let _ = std::fs::remove_dir_all(&out_dir);
+    let _ = std::fs::remove_file(&conf);
 }
 
 /// The browser completes a save end to end: it opens on the proposed file, and

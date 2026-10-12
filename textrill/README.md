@@ -9,9 +9,9 @@ link labels, and so on. No markup language is required or assumed.
 
 It began as a Rust port of
 [`HTML::TextToHTML`](https://metacpan.org/pod/HTML::TextToHTML) 3.0 and its
-`txt2html` script, originally written by Seth Golub. Byte-parity with that
-reference across the upstream test corpus is preserved and frozen; see
-[Relationship to upstream](#relationship-to-upstream).
+`txt2html` script, originally written by Seth Golub. The legacy modes and the
+frozen corpus still reproduce that reference byte for byte, though the default
+has moved on; see [Relationship to upstream](#relationship-to-upstream).
 
 This is a fork. It is not endorsed by, and carries no affiliation with, the
 upstream `txt2html` project or its authors. See [Licence](#licence).
@@ -26,7 +26,7 @@ What is **done**:
   frozen output for every one of the 63 corpus cases, 32 golden comparisons
   against upstream's own `good_*.html` files, and 8 frozen real-document
   examples. The Perl differential remains available as `make diff`.
-- 378 Rust tests and a 74-test native GUI suite.
+- 426 Rust tests and a 113-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the reference-free acceptance against that binary, so it runs on Alpine
   and other glibc-less distros with the same output it produces everywhere.
@@ -148,13 +148,13 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **71 options** with **129 accepted spellings** including short
+There are **72 options** with **130 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names are the upstream ones, unchanged, so a document converts the
-same way under either tool; the doctype default is the one deliberate
-departure (HTML5, see "HTML5 output" above) and `--xhtml` restores the
-upstream pair. A few are worth calling out:
+same way under either tool; the one default that differs is the doctype
+(HTML5 rather than the reference's XHTML, see "HTML5 output" above), and
+`--xhtml` restores the upstream default. A few are worth calling out:
 
 | Option | Default | Effect |
 | --- | --- | --- |
@@ -228,6 +228,17 @@ cases when `make diff` is run, pin those modes explicitly, so the default
 change never touches the parity record. Tag case is governed by
 `--lower_case_tags` as usual, and each mode flag sets it as part of entering
 its mode — an explicit `--lower_case_tags` after the flag wins.
+
+HTML lets the end tag of a paragraph and of a list item be omitted (`<p>text`,
+`<li>text`). The reference's HTML 4.01 mode omits them; its XHTML mode (the
+reference's own default) cannot, because XHTML is XML and must be well-formed.
+The omission is legal in HTML5 too, but it leaves the output looking
+unbalanced, so the HTML5 default emits the tags (`</p>`, `</li>`, and the
+`</dt>`/`</dd>` of a definition list) and the body is well-formed. This is a
+serialisation choice only — the two forms have the same DOM.
+`--no-close_optional_tags` restores the terse HTML 4.01 shape. The parity
+modes are untouched: `--no-html5` stays terse for the frozen corpus, and
+`--xhtml` closes the tags, as the reference's XHTML output always did.
 
 ### Declared language
 
@@ -683,6 +694,14 @@ Known differences:
   every frozen corpus case pins one of the modes explicitly, so no acceptance
   output is ever compared against a default the run did not declare. See "The
   doctype is pinned on both sides" in the corpus README.
+- **The HTML5 default closes optional end tags.** HTML lets the end tag of a
+  paragraph and of a list item be omitted; the reference's HTML 4.01 mode omits
+  them, while its XHTML mode (the reference default) closes them because XHTML
+  is XML. textrill's HTML5 default emits `</p>`, `</li>`, `</dt>` and `</dd>`
+  so the body is well-formed, matching the reference's XHTML shape rather than
+  its terse HTML 4.01 one. `--no-close_optional_tags` restores the terse shape,
+  and the parity modes are unchanged — `--no-html5` stays terse and `--xhtml`
+  closes, as the reference's XHTML output always did. Same DOM either way.
 
 - **Input encoding detection** does not exist upstream. See `--encoding` above.
 - User-supplied regular expressions are validated before use. An invalid

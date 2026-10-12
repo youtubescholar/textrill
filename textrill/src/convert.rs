@@ -698,11 +698,19 @@ impl Converter {
 
     // ------------------------------------------------------- tags
 
+    /// Whether to emit the end tags HTML allows to be omitted: `</p>`, `</li>`,
+    /// `</dt>` and `</dd>`. XHTML always closes them; the HTML5 default closes
+    /// them for well-formedness ([`Options::close_optional_tags`]); the
+    /// reference's HTML 4.01 mode (`--no-html5`) omits them for byte parity.
+    fn closes_optional_tags(&self) -> bool {
+        self.opts.xhtml || (self.opts.html5 && self.opts.close_optional_tags)
+    }
+
     fn get_tag(&mut self, in_tag: &str, tag_type: u8, inside_tag: &str) -> String {
         let open_tag = self.tags.last().cloned().unwrap_or_default();
         let mut tag_prefix = String::new();
 
-        if self.opts.xhtml {
+        if self.closes_optional_tags() {
             // A `p` is closed by a nested `p` or by a block element that cannot
             // live inside one; an `li` by a nested `li` or the end of its list.
             // The reference states these as separate branches with identical
@@ -1558,7 +1566,7 @@ impl Converter {
         // and add the N rows line
         let ptag = self.get_tag("p", TAG_START, "");
         tab_lines.push(format!("{ptag}{n_rows}\n"));
-        if self.opts.xhtml {
+        if self.closes_optional_tags() {
             let ptag2 = self.get_tag("p", TAG_END, "");
             let last = tab_lines.last_mut().unwrap();
             if let Some(pos) = last.find('\n') {
@@ -2573,8 +2581,11 @@ impl Converter {
                 // now put the para back together
                 para = done_lines.join("");
 
-                // XHTML: close an open paragraph
-                if self.opts.xhtml && self.tags.last().map(|t| t == "p").unwrap_or(false) {
+                // Close an open paragraph (XHTML, or HTML5 with the default
+                // close_optional_tags).
+                if self.closes_optional_tags()
+                    && self.tags.last().map(|t| t == "p").unwrap_or(false)
+                {
                     para.push_str(&self.close_tag("p"));
                 }
 
@@ -2605,7 +2616,7 @@ impl Converter {
             let nl = self.listnum;
             self.endlist(nl, &mut para, &mut para_action);
         }
-        if close_tags && self.opts.xhtml {
+        if close_tags && self.closes_optional_tags() {
             while !self.tags.is_empty() {
                 para.push_str(&self.close_tag(""));
             }
@@ -3188,7 +3199,7 @@ impl Converter {
             let tag = self.close_tag("pre");
             body.push_str(&tag);
         }
-        if self.opts.xhtml && !self.opts.extract && !self.tags.is_empty() {
+        if self.closes_optional_tags() && !self.opts.extract && !self.tags.is_empty() {
             let mut open_tag = self.tags.last().cloned().unwrap_or_default();
             while !self.tags.is_empty() && open_tag != "body" && open_tag != "html" {
                 body.push_str(&self.close_tag(""));

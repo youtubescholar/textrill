@@ -95,32 +95,18 @@ pub struct FileBrowser {
 }
 
 impl FileBrowser {
-    /// A browser for reading a text file, starting where `from` lives.
-    pub fn for_open(from: Option<&Path>) -> Self {
-        let directory = from
-            .and_then(Path::parent)
-            .filter(|dir| dir.is_dir())
-            .map(Path::to_path_buf)
-            .unwrap_or_else(home_dir);
-        let file_name = from
-            .and_then(Path::file_name)
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        Self::new(FileIntent::OpenText, directory, file_name)
+    /// A browser for reading a text file, opened straight in `directory`.
+    ///
+    /// Used when the caller already knows where the dialog should start (the
+    /// remembered directory, or the user's Documents), rather than inferring it
+    /// from a file that may live in a transient location.
+    pub fn for_open_in(directory: PathBuf) -> Self {
+        Self::new(FileIntent::OpenText, directory, String::new())
     }
 
-    /// A browser for writing, proposing `suggested`'s directory and name.
-    pub fn for_save(intent: FileIntent, suggested: &Path) -> Self {
+    /// A browser for writing, opened in `directory` with `file_name` proposed.
+    pub fn for_save_in(intent: FileIntent, directory: PathBuf, file_name: String) -> Self {
         debug_assert!(intent.is_save());
-        let directory = suggested
-            .parent()
-            .filter(|dir| dir.is_dir())
-            .map(Path::to_path_buf)
-            .unwrap_or_else(home_dir);
-        let file_name = suggested
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
         Self::new(intent, directory, file_name)
     }
 
@@ -258,7 +244,7 @@ impl FileBrowser {
                 });
 
             if let Some(error) = &self.error {
-                ui.colored_label(egui::Color32::RED, error);
+                ui.colored_label(ui.visuals().error_fg_color, error);
             }
 
             ui.separator();
@@ -356,11 +342,11 @@ mod tests {
         std::fs::write(dir.join("b.md"), "b").unwrap();
         std::fs::create_dir(dir.join("sub")).unwrap();
 
-        let browser = FileBrowser::for_open(Some(&dir.join("a.txt")));
+        let browser = FileBrowser::for_open_in(dir.clone());
 
         assert_eq!(browser.intent(), FileIntent::OpenText);
         assert_eq!(browser.directory(), dir.as_path());
-        assert_eq!(browser.file_name, "a.txt");
+        assert!(browser.file_name.is_empty());
         // Directories first, then the text files; the markdown file is filtered.
         assert_eq!(names(&browser), vec!["sub", "a.txt", "notes.text"]);
     }
@@ -371,7 +357,7 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "a").unwrap();
         std::fs::write(dir.join("b.md"), "b").unwrap();
 
-        let mut browser = FileBrowser::for_open(Some(&dir.join("a.txt")));
+        let mut browser = FileBrowser::for_open_in(dir.clone());
         assert_eq!(names(&browser), vec!["a.txt"]);
 
         browser.show_all = true;
@@ -385,7 +371,8 @@ mod tests {
         std::fs::write(dir.join("page.html"), "h").unwrap();
         std::fs::write(dir.join("note.txt"), "t").unwrap();
 
-        let browser = FileBrowser::for_save(FileIntent::SaveHtml, &dir.join("out.html"));
+        let browser =
+            FileBrowser::for_save_in(FileIntent::SaveHtml, dir.clone(), "out.html".to_string());
 
         assert_eq!(browser.intent(), FileIntent::SaveHtml);
         assert!(browser.intent().is_save());
@@ -400,7 +387,7 @@ mod tests {
         std::fs::create_dir(&sub).unwrap();
         std::fs::write(sub.join("deep.txt"), "d").unwrap();
 
-        let mut browser = FileBrowser::for_open(None);
+        let mut browser = FileBrowser::for_open_in(dir.clone());
         browser.enter(sub.clone());
 
         assert_eq!(browser.directory(), sub.as_path());
@@ -410,14 +397,16 @@ mod tests {
     #[test]
     fn confirm_joins_the_typed_name_onto_the_directory() {
         let dir = scratch("confirm");
-        let browser = FileBrowser::for_save(FileIntent::SaveText, &dir.join("out.txt"));
+        let browser =
+            FileBrowser::for_save_in(FileIntent::SaveText, dir.clone(), "out.txt".to_string());
         assert_eq!(browser.confirm().unwrap(), dir.join("out.txt"));
     }
 
     #[test]
     fn confirm_refuses_an_empty_name() {
         let dir = scratch("empty");
-        let mut browser = FileBrowser::for_save(FileIntent::SaveText, &dir.join("out.txt"));
+        let mut browser =
+            FileBrowser::for_save_in(FileIntent::SaveText, dir.clone(), "out.txt".to_string());
         browser.file_name.clear();
         assert!(browser.confirm().is_err());
     }
@@ -425,7 +414,7 @@ mod tests {
     #[test]
     fn a_missing_directory_is_reported_not_panicked() {
         let dir = scratch("missing");
-        let mut browser = FileBrowser::for_open(None);
+        let mut browser = FileBrowser::for_open_in(dir.clone());
         browser.enter(dir.join("does-not-exist"));
         assert!(browser.error.is_some());
         assert!(browser.entries.is_empty());

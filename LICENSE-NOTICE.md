@@ -45,10 +45,10 @@ can grant on upstream's behalf beyond what upstream already allows.
 
 The original txt2html was written by Seth Golub, converted to a Perl
 module by Kathryn Andersen, and packaged by Joao Eriberto Mota Filho.
-The canonical source for the behaviour this port reproduces is the
-txt2html distribution; see README.md and the `textrill/tests/corpus/`
-harness, which compares this port's output byte for byte against the
-reference.
+The behaviour this port reproduces originates in the txt2html
+distribution; see README.md. The `textrill/tests/corpus/` harness records
+that behaviour as frozen goldens, and the Perl differential (`make diff`)
+keeps the reference available as a cross-check rather than a specification.
 
 ## Modifications
 

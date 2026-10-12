@@ -105,8 +105,8 @@ fn zenity_available() -> bool {
 /// Tests swap in a stub so the command logic can run without a desktop
 /// portal; the real implementation is [`NativeChooser`].
 pub trait Chooser {
-    /// `File → Open…`. `from` is the current document, if any, so the chooser
-    /// opens where the user last worked.
+    /// `File → Open…`. `from` is the file or directory to open in, if known,
+    /// so the chooser starts where the user last worked.
     fn open_text(&self, from: Option<&Path>) -> Option<PathBuf>;
 
     /// `File → Save text…`. `suggested` is the full path to propose.
@@ -125,7 +125,12 @@ impl Chooser for NativeChooser {
             .set_title("Open text file")
             .add_filter("Text files", TEXT_EXTENSIONS)
             .add_filter("All files", ALL_EXTENSIONS);
-        if let Some(directory) = from.and_then(Path::parent) {
+        if let Some(start) = from {
+            let directory = if start.is_dir() {
+                start
+            } else {
+                start.parent().unwrap_or(start)
+            };
             dialog = dialog.set_directory(directory);
         }
         dialog.pick_file()

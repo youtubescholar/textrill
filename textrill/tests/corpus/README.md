@@ -25,7 +25,7 @@ tests/corpus/accept.sh --write     # (re)capture every SELF golden
 tests/corpus/accept.sh --write definitions
 ```
 
-A full run prints `SELF: 61/61` and `AUTHOR: 33/33`. The goldens are a record
+A full run prints `SELF: 63/63` and `AUTHOR: 32/32`. The goldens are a record
 of approved behaviour, not a wall: **changing output means running
 `--write` (or `make accept-write`), and reviewing the git diff of what you
 recaptured. The diff is the review.** Commit the goldens with the change that

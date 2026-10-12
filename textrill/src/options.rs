@@ -277,6 +277,13 @@ pub struct Options {
     /// `--no-html5`/`--no-xhtml` select the reference's HTML 4.01, `--xhtml`
     /// selects XHTML. Tag case follows [`Options::lower_case_tags`].
     pub html5: bool,
+    /// Emit the end tags HTML allows to be omitted: `</p>`, `</li>`, `</dt>`
+    /// and `</dd>`. Default **on**, so the HTML5 default is well-formed; the
+    /// reference's HTML 4.01 mode omits them, so `--no-close_optional_tags`
+    /// restores the terse shape and the parity modes (`--xhtml` closes anyway,
+    /// `--no-html5` stays terse for the corpus). XHTML always closes regardless
+    /// of this flag.
+    pub close_optional_tags: bool,
     pub indent_width: usize,
     pub indent_par_break: bool,
     pub italic_delimiter: String,
@@ -382,6 +389,7 @@ impl Default for Options {
             hrule_min: 4,
             glossary: false,
             html5: true,
+            close_optional_tags: true,
             indent_width: 2,
             indent_par_break: false,
             italic_delimiter: "*".to_string(),

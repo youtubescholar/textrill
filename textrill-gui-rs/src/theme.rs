@@ -17,8 +17,9 @@
 //! already verified against the WCAG contrast rules, transferred onto the
 //! surfaces a desktop window needs. The [`contrast_ratio`] tests in this
 //! module pin them: every colour that carries text is at least 7:1 (WCAG AAA
-//! for body text) against the surface it is drawn on, so a theme change can
-//! never silently land on a low-contrast pair.
+//! for body text) against the surface it is drawn on, including the
+//! per-widget-state inks a pressed or open control draws on its own fill, so a
+//! theme change can never silently land on a low-contrast pair.
 //!
 //! Besides the palette the style carries three knobs the window exposes:
 //!
@@ -158,7 +159,9 @@ impl Theme {
 /// `surface` is the window background, `surface_alt` the background behind
 /// controls and editors. `text` is the ink on either. `muted` is secondary
 /// text still above AAA. `accent`/`accent_text` are the pressed/focused pair,
-/// `hover` the hovered control background, `hyperlink` link ink.
+/// `hover` the hovered control background, `hyperlink` link ink. `danger` is
+/// error text, kept as its own member because egui's stock red is below 7:1 on
+/// every one of these surfaces.
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
     pub dark_mode: bool,
@@ -171,6 +174,7 @@ pub struct Palette {
     pub accent_text: Color32,
     pub hover: Color32,
     pub hyperlink: Color32,
+    pub danger: Color32,
 }
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color32 {
@@ -190,6 +194,7 @@ static LIGHT: Palette = Palette {
     accent_text: rgb(0xFF, 0xFF, 0xFF),
     hover: rgb(0xEC, 0xE8, 0xD2),
     hyperlink: rgb(0x00, 0x4B, 0x87),
+    danger: rgb(0x8B, 0x00, 0x00),
 };
 
 /// The template's `1E1E1E / E0E0E0` panel with `2C2C2C` controls, the blue
@@ -205,6 +210,7 @@ static DARK: Palette = Palette {
     accent_text: rgb(0xFF, 0xFF, 0xFF),
     hover: rgb(0x38, 0x38, 0x38),
     hyperlink: rgb(0xA0, 0xD2, 0xFF),
+    danger: rgb(0xFF, 0x9E, 0x9E),
 };
 
 /// The reader's `F4ECD8 / 5B4636` sepia with the same blue link the template
@@ -224,6 +230,7 @@ static SEPIA: Palette = Palette {
     accent_text: rgb(0xFF, 0xFF, 0xFF),
     hover: rgb(0xF2, 0xEA, 0xCF),
     hyperlink: rgb(0x00, 0x44, 0x99),
+    danger: rgb(0x8B, 0x00, 0x00),
 };
 
 /// The template's high-contrast theme: `000000`, white ink, gold focus.
@@ -238,6 +245,7 @@ static HIGH_CONTRAST: Palette = Palette {
     accent_text: rgb(0x00, 0x00, 0x00),
     hover: rgb(0x1C, 0x1C, 0x1C),
     hyperlink: rgb(0x00, 0xFF, 0xFF),
+    danger: rgb(0xFF, 0x9E, 0x9E),
 };
 
 /// The WCAG relative luminance of a colour, from the sRGB channel values.
@@ -299,6 +307,12 @@ pub fn build_style(theme: Theme, text_size: f32, reduce_motion: bool) -> egui::S
     // ordinary themes, 44 px (AAA) is what High contrast asks for on top.
     style.spacing.interact_size.y = theme.target_size() * text_size;
 
+    // The scrollbar's default track and handle are both `surface_alt` here, so
+    // a solid handle drawn in the background colour would be invisible. Draw
+    // the handle in the foreground ink instead: a scroll position nobody can
+    // see is a WCAG 1.4.11 failure, not a matter of taste.
+    style.spacing.scroll.foreground_color = true;
+
     // The only motion egui has is the 0.2s panel/popup fade. Reduced motion
     // switches it off rather than shortening it.
     style.animation_time = if reduce_motion { 0.0 } else { 0.2 };
@@ -309,20 +323,34 @@ pub fn build_style(theme: Theme, text_size: f32, reduce_motion: bool) -> egui::S
         egui::Visuals::light()
     };
     visuals.dark_mode = palette.dark_mode;
-    visuals.override_text_color = Some(palette.text);
+    // Deliberately no `override_text_color`: it paints the panel's ink onto
+    // *every* surface, including the accent fill a focused or open control
+    // paints behind its own text. That was why Light showed dark-on-dark-blue,
+    // Sepia brown-on-brown and High contrast white-on-gold. Each widget state
+    // carries its own ink instead, so a control that fills with the accent also
+    // gets the accent's own contrast colour.
     visuals.weak_text_color = Some(palette.muted);
     visuals.hyperlink_color = palette.hyperlink;
+    // Error text has to be legible on the panel; egui's stock red is not AAA on
+    // any of these surfaces, so each theme names its own.
+    visuals.error_fg_color = palette.danger;
 
     // The high-contrast theme shows its borders so a control's bounds are
     // never a guess and its pressed/selected state is unmistakable.
     visuals.widgets.noninteractive = widget(palette.text, palette.surface_alt, palette.border);
     visuals.widgets.inactive = widget(palette.text, palette.surface_alt, palette.border);
     visuals.widgets.hovered = widget(palette.text, palette.hover, palette.accent);
-    // A focused widget is styled `active`: its thick outline is the focus
-    // ring. Making it the accent gives every theme a visible, theme-aware
-    // focus indicator (blue on the light themes, gold on High contrast).
-    visuals.widgets.active = widget(palette.accent_text, palette.accent, palette.accent);
-    visuals.widgets.open = widget(palette.accent_text, palette.accent, palette.accent);
+    // A focused or pressed control fills like a hover and adds a heavier accent
+    // ring, the focus indicator. The ink stays `text` rather than `accent_text`
+    // so a radio or check box, which draws its label on the panel instead of on
+    // this fill, stays legible too.
+    visuals.widgets.active = widget(palette.text, palette.hover, palette.accent);
+    visuals.widgets.active.bg_stroke.width = 2.0;
+    // `open` is not just the open menu button: egui paints an active window's
+    // title bar with `open.weak_bg_fill` while drawing the title in
+    // `text_color()`. Keeping the ink `text` on the `hover` fill keeps a window
+    // title readable; the accent block it used to be put `text` on `accent`.
+    visuals.widgets.open = widget(palette.text, palette.hover, palette.accent);
 
     visuals.selection = egui::style::Selection {
         bg_fill: palette.accent,
@@ -406,6 +434,73 @@ mod tests {
                 p.hyperlink,
                 p.surface,
                 &format!("{} hyperlink/surface", theme.name()),
+            );
+            assert_pair(
+                p.danger,
+                p.surface,
+                &format!("{} danger/surface", theme.name()),
+            );
+            assert_pair(
+                p.danger,
+                p.surface_alt,
+                &format!("{} danger/surface_alt", theme.name()),
+            );
+        }
+    }
+
+    /// Every widget state keeps its own ink legible on the fill it is drawn
+    /// on, and on the panel for the controls (radio, check box) that draw their
+    /// label on the panel rather than on that fill. This is what the removed
+    /// `override_text_color` used to break.
+    #[test]
+    fn every_widget_state_keeps_its_ink_legible() {
+        for theme in Theme::ALL {
+            let style = build_style(theme, 1.0, false);
+            let visuals = &style.visuals;
+            assert!(
+                visuals.override_text_color.is_none(),
+                "{}: a global ink override would defeat the per-state colours",
+                theme.name()
+            );
+            let labelled = [
+                ("noninteractive", &visuals.widgets.noninteractive),
+                ("inactive", &visuals.widgets.inactive),
+                ("hovered", &visuals.widgets.hovered),
+                ("active", &visuals.widgets.active),
+                ("open", &visuals.widgets.open),
+            ];
+            for (state, w) in labelled {
+                assert_pair(
+                    w.fg_stroke.color,
+                    w.bg_fill,
+                    &format!("{} {state} ink/fill", theme.name()),
+                );
+            }
+            // Radio buttons and check boxes use the state's ink for a label
+            // drawn on the panel, so those pairs must clear AAA as well.
+            for (state, w) in [
+                ("noninteractive", &visuals.widgets.noninteractive),
+                ("inactive", &visuals.widgets.inactive),
+                ("hovered", &visuals.widgets.hovered),
+                ("active", &visuals.widgets.active),
+            ] {
+                assert_pair(
+                    w.fg_stroke.color,
+                    visuals.panel_fill,
+                    &format!("{} {state} ink/panel", theme.name()),
+                );
+            }
+            assert_pair(
+                visuals.selection.stroke.color,
+                visuals.selection.bg_fill,
+                &format!("{} selection ink/fill", theme.name()),
+            );
+            // egui fills an active window's title bar with `open.weak_bg_fill`
+            // but draws the title in `text_color()`, so those two are a pair.
+            assert_pair(
+                visuals.text_color(),
+                visuals.widgets.open.weak_bg_fill,
+                &format!("{} window title ink/bar", theme.name()),
             );
         }
     }

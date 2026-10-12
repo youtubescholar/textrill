@@ -10,9 +10,9 @@ use textrill::options::Options;
 fn the_option_and_spelling_counts_match_the_readme() {
     // The README quotes these two numbers; keeping them asserted stops the
     // prose from drifting away from `cli::SPECS`.
-    assert_eq!(cli::SPECS.len(), 71, "option count changed");
+    assert_eq!(cli::SPECS.len(), 72, "option count changed");
     let spellings: usize = cli::SPECS.iter().map(|s| s.names.len()).sum();
-    assert_eq!(spellings, 129, "accepted-spelling count changed");
+    assert_eq!(spellings, 130, "accepted-spelling count changed");
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn default_delimiters() {
 /// must mean `bullets`, not "ambiguous between bullets and bullets_ordered".
 #[test]
 fn exact_option_name_beats_prefix() {
-    let name_of = |abbrev: &str| cli::lookup(abbrev).map(|spec| spec.names[0]);
+    let name_of = |abbrev: &str| cli::lookup(abbrev).map(|opt| opt.canonical());
     assert_eq!(name_of("bullets"), Some("bullets"));
     assert_eq!(name_of("bullets_ordered"), Some("bullets_ordered"));
     assert_eq!(name_of("bullet"), None, "still ambiguous");
@@ -78,26 +78,27 @@ fn the_template_options_are_a_named_pair() {
     let body = cli::lookup("body_template").expect("body_template exists");
     let whole = cli::lookup("document_template").expect("document_template exists");
     let legacy = cli::lookup("template").expect("legacy alias exists");
-    assert_eq!(body.names[0], "body_template");
+    assert_eq!(body.canonical(), "body_template");
     assert_eq!(
-        legacy.names[0], "body_template",
+        legacy.canonical(),
+        "body_template",
         "legacy alias resolves to the renamed option"
     );
-    assert_ne!(body.names[0], whole.names[0]);
+    assert_ne!(body.canonical(), whole.canonical());
     assert!(
-        body.help.contains("body"),
+        body.help().contains("body"),
         "help names the pole: {}",
-        body.help
+        body.help()
     );
     assert!(
-        body.help.contains("deprecated"),
+        body.help().contains("deprecated"),
         "help says the old name is deprecated: {}",
-        body.help
+        body.help()
     );
     assert!(
-        whole.help.contains("whole-document"),
+        whole.help().contains("whole-document"),
         "help names the other pole: {}",
-        whole.help
+        whole.help()
     );
 }
 
@@ -106,7 +107,7 @@ fn every_alias_is_reachable() {
     for spec in cli::SPECS {
         for name in spec.names {
             let found = cli::lookup(name).unwrap_or_else(|| panic!("{name} not found"));
-            assert_eq!(found.names[0], spec.names[0], "{name} points elsewhere");
+            assert_eq!(found.canonical(), spec.names[0], "{name} points elsewhere");
         }
     }
 }

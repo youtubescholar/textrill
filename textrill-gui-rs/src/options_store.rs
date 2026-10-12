@@ -16,6 +16,7 @@ use textrill::cli::{self, Kind};
 use textrill::options::Options;
 
 use crate::json::{self, Json};
+use crate::options_panel::gui_ignored;
 use crate::settings::parse_bool;
 
 /// The option set as a JSON object, in `cli::SPECS` order.
@@ -32,7 +33,14 @@ pub fn encode(opts: &Options) -> String {
                     .unwrap_or(0),
             ),
             Kind::Str => Json::Str(cli::get_value(opts, name).unwrap_or_default()),
-            Kind::StrArray => Json::Array(array_of(opts, name)),
+            Kind::StrArray => Json::Array(
+                cli::get_value(opts, name)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+            ),
             Kind::TableType => Json::Object(vec![
                 ("ALIGN".to_string(), opts.table_type.align),
                 ("PGSQL".to_string(), opts.table_type.pgsql),
@@ -53,23 +61,6 @@ pub fn encode(opts: &Options) -> String {
     json::write_object(&entries)
 }
 
-fn array_of(opts: &Options, name: &str) -> Vec<String> {
-    match name {
-        "custom_heading_regexp" => opts.custom_heading_regexp.clone(),
-        "infile" => opts.infile.clone(),
-        "instring" => opts.instring.clone(),
-        "links_dictionaries" => opts.links_dictionaries.clone(),
-        // `get_value` spells a variable `name=value`; the same spelling decodes
-        // back through `push_array`, so the pair form and the flat form agree.
-        "var" => opts
-            .vars
-            .iter()
-            .map(|(name, value)| format!("{name}={value}"))
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
 /// Apply a stored blob to `opts`. Unknown names and unreadable values are
 /// skipped, which is what Python's `set_values` did with a bad blob.
 pub fn decode(text: &str, opts: &mut Options) {
@@ -82,6 +73,12 @@ pub fn decode(text: &str, opts: &mut Options) {
 }
 
 fn apply(opts: &mut Options, name: &str, value: &Json) {
+    // Options the GUI cannot act on ([`gui_ignored`]) are left at their
+    // defaults, however they were stored: restoring a value that can never be
+    // used would only put a stale edge back in the panel and the next save.
+    if cli::lookup(name).is_some_and(gui_ignored) {
+        return;
+    }
     // The blob is a full-state snapshot, not a command line. `cli::set_value`
     // treats the two doctype flags as transitions -- `xhtml: false` read as
     // `--no-xhtml` means "go to HTML4" and clears `html5` -- which is right
@@ -91,12 +88,12 @@ fn apply(opts: &mut Options, name: &str, value: &Json) {
     // two directly, as the Python panel's `set_values` did; the rest of the
     // blob is plain values either way.
     if let Json::Bool(on) = value {
-        match name {
-            "html5" => {
+        match cli::lookup(name) {
+            Some(cli::Opt::Html5) => {
                 opts.html5 = *on;
                 return;
             }
-            "xhtml" => {
+            Some(cli::Opt::Xhtml) => {
                 opts.xhtml = *on;
                 return;
             }
@@ -151,6 +148,33 @@ mod tests {
                 ("name".to_string(), "World".to_string()),
                 ("color".to_string(), "blue".to_string()),
             ]
+        );
+    }
+
+    /// The command-line pipeline options do nothing in the GUI, so a value for
+    /// one is never restored and never re-stored: it would be a stale edge,
+    /// shown disabled and saved again, with no way to ever act on it.
+    #[test]
+    fn pipeline_options_do_not_round_trip() {
+        let stored = r#"{"stream": true, "chunk": true, "report": true,
+            "outfile": "/tmp/out.html", "infile": ["in.txt"], "instring": ["s"]}"#;
+        let default = Options::default();
+        let mut opts = Options::default();
+        decode(stored, &mut opts);
+
+        assert_eq!(opts.stream, default.stream, "stream must not restore");
+        assert_eq!(opts.chunk, default.chunk, "chunk must not restore");
+        assert_eq!(opts.report, default.report, "report must not restore");
+        assert_eq!(opts.outfile, default.outfile, "outfile must not restore");
+        assert!(opts.infile.is_empty(), "infile must not restore");
+        assert!(opts.instring.is_empty(), "instring must not restore");
+
+        let blob = encode(&opts);
+        assert!(!blob.contains("out.html"), "outfile leaked: {blob}");
+        assert!(!blob.contains("in.txt"), "infile leaked: {blob}");
+        assert!(
+            blob.contains("\"stream\": false"),
+            "stream not reset: {blob}"
         );
     }
 }
