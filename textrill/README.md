@@ -26,7 +26,7 @@ What is **done**:
   frozen output for every one of the 63 corpus cases, 32 golden comparisons
   against upstream's own `good_*.html` files, and 8 frozen real-document
   examples. The Perl differential remains available as `make diff`.
-- 426 Rust tests and a 113-test native GUI suite.
+- 426 Rust tests and a 148-test native GUI suite.
 - The CLI builds as a single static `x86_64-unknown-linux-musl` binary, and CI
   runs the reference-free acceptance against that binary, so it runs on Alpine
   and other glibc-less distros with the same output it produces everywhere.
@@ -40,7 +40,10 @@ What is **done**:
 
 What is **not** done yet:
 
-- No Flatpak, no distro packaging yet.
+- No Flatpak or distro packaging is published yet. `packaging/` holds a manifest
+  that builds end to end, but the `.desktop` file, AppStream metainfo and icon
+  that Flathub and desktop-integrated installs require are not in the tree; see
+  `packaging/README.md`.
 
 The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`. A
 link-pass fix puts textrill ahead of the reference on the link-dense
@@ -132,8 +135,10 @@ The **Title** field above the toolbar feeds `--title`; the untemplated preview
 then leads with the same `<header class="document-header">` landmark the engine
 emits (see "Document title" below).
 
-Packaging as a Flatpak is planned; there is no wheel or installed entry point
-yet.
+A Flatpak manifest and its notes live in `packaging/`. The manifest builds end
+to end, but the desktop-integration metadata (`.desktop`, AppStream metainfo,
+icon) and any distro package are still to come; there is no wheel or installed
+entry point yet.
 
 ## Usage
 

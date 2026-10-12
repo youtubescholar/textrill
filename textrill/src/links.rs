@@ -874,8 +874,12 @@ pub fn load_links(opts: &Options) -> LinkParser {
     parser
 }
 
-/// Parse a link-dictionary string (used by the GUI) into rules.
-#[allow(dead_code)]
+/// Parse a link-dictionary string into rules: the caller's `dict_text` only,
+/// with no file access and no system dictionary. The file-based entry point the
+/// engine uses is [`load_links`]; this is the in-memory counterpart.
+///
+/// The link tests build a parser this way, and it is the entry point for an
+/// embedder (or front end) that holds dictionary text rather than a path.
 pub fn load_links_from_text(opts: &Options, dict_text: &str) -> LinkParser {
     let mut parser = LinkParser::new(opts.lower_case_tags, opts.url_policy());
     let filtered = parser.filter_dict(dict_text);

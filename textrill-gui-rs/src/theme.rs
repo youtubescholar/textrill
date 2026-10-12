@@ -18,8 +18,10 @@
 //! surfaces a desktop window needs. The [`contrast_ratio`] tests in this
 //! module pin them: every colour that carries text is at least 7:1 (WCAG AAA
 //! for body text) against the surface it is drawn on, including the
-//! per-widget-state inks a pressed or open control draws on its own fill, so a
-//! theme change can never silently land on a low-contrast pair.
+//! per-widget-state inks a pressed or open control draws on its own fill, and
+//! every *non-text* part — a resting outline, a focus ring, the text caret — is
+//! at least 3:1 (WCAG 1.4.11), so a theme change can never silently land on a
+//! low-contrast pair.
 //!
 //! Besides the palette the style carries three knobs the window exposes:
 //!
@@ -154,14 +156,19 @@ impl Theme {
 }
 
 /// A fixed colour scheme. Members are chosen against lighter/darker "chrome"
-/// surfaces so the fourteen contrast tests at the bottom stay honest.
+/// surfaces so the contrast tests at the bottom stay honest.
 ///
 /// `surface` is the window background, `surface_alt` the background behind
 /// controls and editors. `text` is the ink on either. `muted` is secondary
-/// text still above AAA. `accent`/`accent_text` are the pressed/focused pair,
-/// `hover` the hovered control background, `hyperlink` link ink. `danger` is
-/// error text, kept as its own member because egui's stock red is below 7:1 on
-/// every one of these surfaces.
+/// text still above AAA. `accent`/`accent_text` are the selected-text pair
+/// (selection highlight plus the ink drawn on it), `hover` the hovered control
+/// background, `hyperlink` link ink. `border` is the outline of a control at
+/// rest and `focus` the outline of a hovered, pressed, focused or open one;
+/// both are *non-text* colours, so they answer to 3:1 (WCAG 1.4.11) rather
+/// than the 7:1 body-text floor, and [`tests::non_text_parts_clear_the_3_to_1_floor`]
+/// pins them.
+/// `danger` is error text, kept as its own member because egui's stock red is
+/// below 7:1 on every one of these surfaces.
 #[derive(Debug, Clone, Copy)]
 pub struct Palette {
     pub dark_mode: bool,
@@ -170,6 +177,7 @@ pub struct Palette {
     pub text: Color32,
     pub muted: Color32,
     pub border: Color32,
+    pub focus: Color32,
     pub accent: Color32,
     pub accent_text: Color32,
     pub hover: Color32,
@@ -189,7 +197,8 @@ static LIGHT: Palette = Palette {
     surface_alt: rgb(0xFF, 0xFF, 0xFF),
     text: rgb(0x1A, 0x1A, 0x1A),
     muted: rgb(0x4D, 0x4D, 0x43),
-    border: rgb(0xC9, 0xC9, 0xB6),
+    border: rgb(0x87, 0x87, 0x7A),
+    focus: rgb(0x00, 0x4B, 0x87),
     accent: rgb(0x00, 0x4B, 0x87),
     accent_text: rgb(0xFF, 0xFF, 0xFF),
     hover: rgb(0xEC, 0xE8, 0xD2),
@@ -205,7 +214,8 @@ static DARK: Palette = Palette {
     surface_alt: rgb(0x2C, 0x2C, 0x2C),
     text: rgb(0xE0, 0xE0, 0xE0),
     muted: rgb(0xAA, 0xAA, 0xAA),
-    border: rgb(0x3A, 0x3A, 0x3A),
+    border: rgb(0x78, 0x78, 0x78),
+    focus: rgb(0xA0, 0xD2, 0xFF),
     accent: rgb(0x00, 0x4B, 0x87),
     accent_text: rgb(0xFF, 0xFF, 0xFF),
     hover: rgb(0x38, 0x38, 0x38),
@@ -225,7 +235,8 @@ static SEPIA: Palette = Palette {
     surface_alt: rgb(0xFB, 0xF5, 0xE2),
     text: rgb(0x5B, 0x46, 0x36),
     muted: rgb(0x4E, 0x3B, 0x2C),
-    border: rgb(0xC9, 0xB2, 0x8F),
+    border: rgb(0x88, 0x80, 0x6F),
+    focus: rgb(0x7A, 0x3B, 0x0F),
     accent: rgb(0x7A, 0x3B, 0x0F),
     accent_text: rgb(0xFF, 0xFF, 0xFF),
     hover: rgb(0xF2, 0xEA, 0xCF),
@@ -241,6 +252,7 @@ static HIGH_CONTRAST: Palette = Palette {
     text: rgb(0xFF, 0xFF, 0xFF),
     muted: rgb(0xCC, 0xCC, 0xCC),
     border: rgb(0xE0, 0xE0, 0xE0),
+    focus: rgb(0xFF, 0xD7, 0x00),
     accent: rgb(0xFF, 0xD7, 0x00),
     accent_text: rgb(0x00, 0x00, 0x00),
     hover: rgb(0x1C, 0x1C, 0x1C),
@@ -335,23 +347,37 @@ pub fn build_style(theme: Theme, text_size: f32, reduce_motion: bool) -> egui::S
     // any of these surfaces, so each theme names its own.
     visuals.error_fg_color = palette.danger;
 
-    // The high-contrast theme shows its borders so a control's bounds are
-    // never a guess and its pressed/selected state is unmistakable.
+    // A control at rest is identified by its outline, since the control fill
+    // (`surface_alt`) barely differs from the panel: `border` therefore clears
+    // the 3:1 non-text floor (WCAG 1.4.11) against both.
     visuals.widgets.noninteractive = widget(palette.text, palette.surface_alt, palette.border);
     visuals.widgets.inactive = widget(palette.text, palette.surface_alt, palette.border);
-    visuals.widgets.hovered = widget(palette.text, palette.hover, palette.accent);
-    // A focused or pressed control fills like a hover and adds a heavier accent
-    // ring, the focus indicator. The ink stays `text` rather than `accent_text`
-    // so a radio or check box, which draws its label on the panel instead of on
-    // this fill, stays legible too.
-    visuals.widgets.active = widget(palette.text, palette.hover, palette.accent);
+    // Hover, press, focus and open all fill like a hover and draw a heavier
+    // `focus` ring. egui routes a keyboard-focused widget through the `active`
+    // state (`WidgetState::Active` for `is_pointer_button_down_on() ||
+    // has_focus() || clicked()`), so this ring is the focus indicator: it is
+    // `focus`, not `accent`, so it clears 3:1 on the fill beneath it in every
+    // theme (the dark theme's blue accent does not). The ink stays `text` rather
+    // than `accent_text` so a radio or check box, which draws its label on the
+    // panel instead of on this fill, stays legible too.
+    visuals.widgets.hovered = widget(palette.text, palette.hover, palette.focus);
+    visuals.widgets.active = widget(palette.text, palette.hover, palette.focus);
     visuals.widgets.active.bg_stroke.width = 2.0;
     // `open` is not just the open menu button: egui paints an active window's
     // title bar with `open.weak_bg_fill` while drawing the title in
     // `text_color()`. Keeping the ink `text` on the `hover` fill keeps a window
     // title readable; the accent block it used to be put `text` on `accent`.
-    visuals.widgets.open = widget(palette.text, palette.hover, palette.accent);
+    visuals.widgets.open = widget(palette.text, palette.hover, palette.focus);
 
+    // The caret is the focus indicator inside a text field (egui draws the
+    // focused frame in `selection.stroke`, which must stay the selected-text
+    // ink, so it cannot double as the ring). Its own default is a fixed pale
+    // blue that is near-invisible on a light field, so name it per theme.
+    visuals.text_cursor.stroke = egui::Stroke::new(2.0, palette.focus);
+
+    // `selection.stroke` is the ink egui draws *on* the accent highlight (a
+    // selected label, selected text), so it stays `accent_text`; `focus` above
+    // is the separate non-text ring.
     visuals.selection = egui::style::Selection {
         bg_fill: palette.accent,
         stroke: egui::Stroke::new(1.0, palette.accent_text),
@@ -501,6 +527,93 @@ mod tests {
                 visuals.text_color(),
                 visuals.widgets.open.weak_bg_fill,
                 &format!("{} window title ink/bar", theme.name()),
+            );
+        }
+    }
+
+    /// Non-text parts of a control answer to WCAG 1.4.11's 3:1 floor, not the
+    /// 7:1 body-text floor: a control at rest is identified by its `border`, a
+    /// hovered, pressed or focused one by the `focus` ring, and a focused text
+    /// field by its caret. Each must clear 3:1 against every surface it can sit
+    /// on — the panel, the control fill, and the hover fill.
+    #[test]
+    fn non_text_parts_clear_the_3_to_1_floor() {
+        fn assert_min(a: Color32, b: Color32, what: &str) {
+            let ratio = contrast_ratio(a, b);
+            assert!(
+                ratio >= 3.0,
+                "{what}: {ratio:.2}:1 is below the 3:1 non-text floor"
+            );
+        }
+        for theme in Theme::ALL {
+            let p = theme.palette();
+            assert_min(
+                p.border,
+                p.surface,
+                &format!("{} border/surface", theme.name()),
+            );
+            assert_min(
+                p.border,
+                p.surface_alt,
+                &format!("{} border/surface_alt", theme.name()),
+            );
+            assert_min(
+                p.focus,
+                p.surface,
+                &format!("{} focus/surface", theme.name()),
+            );
+            assert_min(
+                p.focus,
+                p.surface_alt,
+                &format!("{} focus/surface_alt", theme.name()),
+            );
+            assert_min(p.focus, p.hover, &format!("{} focus/hover", theme.name()));
+        }
+    }
+
+    /// The style wires the non-text colours where they are actually drawn:
+    /// hover/press/focus/open outlines and the caret take `focus`; resting
+    /// outlines take `border`.
+    #[test]
+    fn the_focus_ring_and_caret_use_the_focus_colour() {
+        for theme in Theme::ALL {
+            let style = build_style(theme, 1.0, false);
+            let palette = theme.palette();
+            let v = &style.visuals;
+            assert_eq!(
+                v.widgets.hovered.bg_stroke.color,
+                palette.focus,
+                "{} hovered ring",
+                theme.name()
+            );
+            assert_eq!(
+                v.widgets.active.bg_stroke.color,
+                palette.focus,
+                "{} focus ring",
+                theme.name()
+            );
+            assert!(
+                v.widgets.active.bg_stroke.width >= 2.0,
+                "{} focus ring is too thin to see",
+                theme.name()
+            );
+            assert_eq!(
+                v.widgets.open.bg_stroke.color,
+                palette.focus,
+                "{} open ring",
+                theme.name()
+            );
+            assert_eq!(
+                v.text_cursor.stroke.color,
+                palette.focus,
+                "{} caret",
+                theme.name()
+            );
+            assert_eq!(
+                v.widgets.inactive.bg_stroke.color,
+                palette.border,
+                "{} resting outline",
+                theme.name()
             );
         }
     }

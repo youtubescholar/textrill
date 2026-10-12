@@ -192,6 +192,21 @@ fn save_as_proposes_an_html_name_not_the_source_name() {
     );
 }
 
+/// The names the source-and-destination strip displays, including the "not
+/// saved" spellings for the blank cases.
+#[test]
+fn the_strip_names_fall_back_to_untitled_and_not_saved() {
+    let doc = Document::new();
+    assert_eq!(doc.source_name(), "untitled");
+    assert_eq!(doc.output_name(), "not saved");
+
+    let mut doc = Document::new();
+    doc.path = Some(PathBuf::from("/tmp/example.txt"));
+    doc.output_path = Some(PathBuf::from("/out/example.html"));
+    assert_eq!(doc.source_name(), "example.txt");
+    assert_eq!(doc.output_name(), "example.html");
+}
+
 #[test]
 fn reset_clears_everything() {
     let dir = TempDir::new();

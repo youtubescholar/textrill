@@ -67,7 +67,25 @@ The GUI opens and saves through two paths:
 
 Flatpak always allows the `org.freedesktop.portal.*` interfaces, so no portal
 `--talk-name` is needed and no OpenURI portal is requested — the app never
-opens a URI, only reads and writes files under `--filesystem=home`.
+opens a URI.
+
+The manifest grants **no `--filesystem=home`**. The `FileChooser` portal returns
+access to the single file the user picked (through the document portal), so
+neither the chooser nor the conversion needs broad home access. That keeps the
+sandbox narrow, which is also what Flathub prefers over static filesystem
+permissions.
+
+Because that means the built-in browser would have no home access to browse, the
+GUI **does not offer it inside the Flatpak**: it detects the sandbox
+(`/.flatpak-info`, as GLib does) and always uses the portal, whose dialog works
+there (`textrill-gui-rs/src/dialogs.rs`, `src/app.rs`). The portal is also more
+reliable than the host-filesystem probe that decides the default on a native
+install: inside the sandbox the host's `*.portal` declarations are not visible,
+so the probe cannot be trusted to see a dialog that is in fact available.
+
+The CLI ships in the same sandbox. As with any Flatpak CLI, it reads the paths
+it is given rather than browsing the home directory; users who want a wider
+view can grant it with `flatpak run --filesystem=...`.
 
 On a native install the portal may be unable to service `FileChooser`:
 compositor backends such as `xdg-desktop-portal-wlr` (Sway/wlroots) and
@@ -75,10 +93,12 @@ compositor backends such as `xdg-desktop-portal-wlr` (Sway/wlroots) and
 `rfd` fallback a request returns nothing — indistinguishable from a cancel, so
 Open/Save would silently do nothing. The app therefore probes for a backend
 that declares `FileChooser` (`dialogs::system_dialog_available`) and, when none
-is found, starts with the built-in browser instead. The View menu exposes a
-"Use built-in file browser" toggle to override either way, and the choice is
-remembered. The built-in browser needs no new dependencies — only `std` and
-`egui` — and the same `--filesystem=home` access as the chooser.
+is found, starts with the built-in browser instead. On a native install the View
+menu exposes a "Use built-in file browser" toggle to override either way, and the
+choice is remembered; inside the Flatpak the toggle is withheld, since there the
+browser has no home access to browse. The built-in browser needs no new
+dependencies — only `std` and `egui` — and uses the process's normal filesystem
+access (the whole home directory on a native install).
 
 The built-in browser is also the fallback when `rfd` finds no portal and no
 `zenity`; that is the case it exists to fix. `rfd` is kept (its only added

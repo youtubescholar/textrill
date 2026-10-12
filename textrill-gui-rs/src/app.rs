@@ -19,7 +19,9 @@ use crate::dialogs::{self, Chooser, NativeChooser};
 use crate::document::Document;
 use crate::file_browser::{BrowserOutcome, FileBrowser, FileIntent};
 use crate::options_panel::OptionsPanel;
+use crate::presets::{self, Preset};
 use crate::settings::Settings;
+use crate::summary;
 use crate::theme::{self, Theme};
 use crate::worker::ConversionWorker;
 
@@ -181,12 +183,23 @@ pub struct TextrillApp {
     /// dialog when the app started. Cached so the status line can explain a
     /// chooser that never appeared without probing the filesystem per frame.
     native_dialog_available: bool,
+    /// Whether this process runs inside a Flatpak sandbox
+    /// ([`dialogs::in_flatpak`]), decided once at startup. In a Flatpak the
+    /// portal is always present, so the app always uses it and never offers the
+    /// built-in browser, which the sandbox's lack of home access would leave
+    /// staring at an empty tree.
+    in_flatpak: bool,
     /// The built-in browser, when one is open.
     file_browser: Option<FileBrowser>,
     /// The directory the last open or save used, so the next dialog starts
     /// there (or in the user's Documents) instead of wherever the input was
     /// launched from. `None` until one is recorded or loaded from settings.
     last_dir: Option<PathBuf>,
+    /// The key of the chosen preset ([`crate::presets`]). A starting point, not
+    /// a mode: the options it set are the live ones, and the window shows a
+    /// "Modified" marker as soon as they are edited away from the preset's
+    /// bundle.
+    preset: &'static str,
 }
 
 impl Default for TextrillApp {
@@ -201,7 +214,11 @@ impl TextrillApp {
     /// Tests pass a [`Settings`] in a temporary directory so a developer's real
     /// configuration cannot change what the tests observe.
     pub fn with_settings(settings: Settings) -> Self {
-        let native_dialog_available = dialogs::system_dialog_available();
+        let in_flatpak = dialogs::in_flatpak();
+        // In a Flatpak the FileChooser portal is always reachable, so treat a
+        // dialog as available even when the filesystem probe cannot see the
+        // host's `.portal` files.
+        let native_dialog_available = dialogs::system_dialog_available() || in_flatpak;
         let mut app = Self {
             doc: Document::new(),
             opts: Options::default(),
@@ -231,6 +248,8 @@ impl TextrillApp {
             chooser: Box::new(NativeChooser),
             use_builtin_browser: !native_dialog_available,
             native_dialog_available,
+            in_flatpak,
+            preset: presets::default_preset().key,
             file_browser: None,
             last_dir: None,
         };
@@ -260,6 +279,23 @@ impl TextrillApp {
         self.native_dialog_available = available;
     }
 
+    /// Whether the built-in browser may be offered here. It is not in a
+    /// Flatpak: the manifest grants no home access to browse, and the portal is
+    /// always present instead, so the app uses the portal and this choice is
+    /// withheld rather than shown as a dead end.
+    pub fn builtin_browser_available(&self) -> bool {
+        !self.in_flatpak
+    }
+
+    /// Override the Flatpak detection. Tests use this to exercise the
+    /// portal-only path without an actual sandbox.
+    pub fn set_in_flatpak(&mut self, in_flatpak: bool) {
+        self.in_flatpak = in_flatpak;
+        if in_flatpak {
+            self.use_builtin_browser = false;
+        }
+    }
+
     /// Whether the built-in browser is currently on screen.
     pub fn is_browsing(&self) -> bool {
         self.file_browser.is_some()
@@ -278,6 +314,37 @@ impl TextrillApp {
         if let Err(error) = self.settings.set_builtin_browser(builtin) {
             self.status = format!("could not save settings: {error}");
         }
+    }
+
+    /// The chosen preset's key, for tests and the settings store.
+    pub fn preset_key(&self) -> &'static str {
+        self.preset
+    }
+
+    /// The chosen preset. An unknown stored key falls back to Plain, so a
+    /// hand-edited settings file can never leave the window presetting to
+    /// nothing.
+    pub fn current_preset(&self) -> &'static Preset {
+        presets::get(self.preset).unwrap_or_else(presets::default_preset)
+    }
+
+    /// Whether the live options differ from the chosen preset's bundle. This is
+    /// the "Modified" marker; a preset is a starting point, so editing any
+    /// option away from it is normal, not an error.
+    pub fn preset_is_modified(&self) -> bool {
+        !presets::same_options(&self.opts, &self.current_preset().options())
+    }
+
+    /// Adopt `preset`: write its option bundle and remember the choice. The
+    /// options it sets stay editable, so this is a starting point rather than a
+    /// lock.
+    pub fn apply_preset(&mut self, preset: &Preset) {
+        self.opts = preset.options();
+        self.preset = preset.key;
+        if let Err(error) = self.settings.set_preset(preset.key) {
+            self.status = format!("could not save settings: {error}");
+        }
+        self.schedule_convert(Instant::now());
     }
 
     /// The options a conversion actually uses.
@@ -318,9 +385,17 @@ impl TextrillApp {
             self.reduce_motion = reduce_motion;
         }
         if let Some(builtin) = self.settings.builtin_browser() {
-            self.use_builtin_browser = builtin;
+            // A remembered choice cannot re-enable the built-in browser inside
+            // a Flatpak, where it has no home access to browse.
+            self.use_builtin_browser = builtin && !self.in_flatpak;
         }
         self.last_dir = self.settings.last_dir();
+        if let Some(key) = self.settings.preset() {
+            // An unreadable key is Plain, never a dangling choice.
+            self.preset = presets::get(&key)
+                .unwrap_or_else(presets::default_preset)
+                .key;
+        }
     }
 
     /// Persist the display choices the user made (theme, text size, motion).
@@ -973,19 +1048,24 @@ impl TextrillApp {
             ui.menu_button("View", |ui| {
                 ui.checkbox(&mut self.show_options, "Show options");
                 ui.separator();
-                let mut builtin = self.use_builtin_browser;
-                if ui
-                    .checkbox(&mut builtin, "Use built-in file browser")
-                    .on_hover_text(
-                        "Pick files with the in-app browser instead of the \
-                         desktop's dialog. Useful where no file dialog exists \
-                         (for example Sway without xdg-desktop-portal-gtk).",
-                    )
-                    .changed()
-                {
-                    self.set_builtin_browser(builtin);
+                // The built-in browser is not offered in a Flatpak: with no
+                // home filesystem access it could show only an empty tree, and
+                // the FileChooser portal is always present there instead.
+                if self.builtin_browser_available() {
+                    let mut builtin = self.use_builtin_browser;
+                    if ui
+                        .checkbox(&mut builtin, "Use built-in file browser")
+                        .on_hover_text(
+                            "Pick files with the in-app browser instead of the \
+                             desktop's dialog. Useful where no file dialog exists \
+                             (for example Sway without xdg-desktop-portal-gtk).",
+                        )
+                        .changed()
+                    {
+                        self.set_builtin_browser(builtin);
+                    }
+                    ui.separator();
                 }
-                ui.separator();
                 ui.checkbox(&mut self.focus_mode, "Focus mode")
                     .on_hover_text("Hide the menus and toolbar, keep the text and a slim action bar (Ctrl+Shift+F)");
                 if ui
@@ -1162,6 +1242,68 @@ impl TextrillApp {
         // a control off the edge, and it stays readable when the buttons fold.
         ui.horizontal_wrapped(|ui| {
             ui.label(&self.status);
+        });
+    }
+
+    /// The preset strip: one button per starting point, plus a "Modified"
+    /// marker once the live options have been edited away from the chosen one.
+    /// A preset seeds the options; diverging from it is visible rather than
+    /// silently wrong.
+    fn preset_bar(&mut self, ui: &mut Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Preset");
+            for preset in presets::PRESETS {
+                let chosen = self.preset == preset.key;
+                if ui
+                    .selectable_label(chosen, preset.name)
+                    .on_hover_text(preset.description())
+                    .clicked()
+                {
+                    self.apply_preset(preset);
+                }
+            }
+            if self.preset_is_modified() {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("Modified").small().weak())
+                    .on_hover_text(
+                        "These options have been edited away from the chosen \
+                         preset. Pick the preset again to restore them.",
+                    );
+            }
+        });
+    }
+
+    /// The source-and-destination strip: the file being converted and where the
+    /// HTML will go, with the same `*` and `+` marks the window title uses, so
+    /// the stripes of the window and the title never disagree. The full paths
+    /// are one hover away.
+    fn file_strip(&mut self, ui: &mut Ui) {
+        let input = format!(
+            "{}{}",
+            self.doc.source_name(),
+            if self.doc.dirty { "*" } else { "" }
+        );
+        let output = format!(
+            "{}{}",
+            self.doc.output_name(),
+            if self.doc.output_stale { "+" } else { "" }
+        );
+        let line = format!("Input: {input}  \u{00b7}  Output: {output}");
+        let detail = match (&self.doc.path, &self.doc.output_path) {
+            (Some(src), Some(out)) => format!("{}\n\u{2192} {}", src.display(), out.display()),
+            (Some(src), None) => {
+                format!(
+                    "{}\n\u{2192} not saved yet (Ctrl+S writes it)",
+                    src.display()
+                )
+            }
+            (None, Some(out)) => format!("new text\n\u{2192} {}", out.display()),
+            (None, None) => "Nothing has been loaded or saved yet.".to_string(),
+        };
+        let detail = format!("{detail}\n\n* unsaved text \u{00b7} + unsaved HTML");
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(line).weak())
+                .on_hover_text(detail);
         });
     }
 
@@ -1344,6 +1486,21 @@ impl TextrillApp {
         } else {
             self.menu_bar(ui);
             self.toolbar(ui);
+            self.preset_bar(ui);
+            self.file_strip(ui);
+            // The landing view: a plain-language reading of what the current
+            // settings will do. Open by default so a first-time user sees the
+            // answers without opening the panel, and collapsible so it costs
+            // nothing once they know their way around.
+            egui::CollapsingHeader::new("Summary")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.label(summary::describe(
+                        &self.opts,
+                        self.current_preset(),
+                        self.preset_is_modified(),
+                    ));
+                });
         }
 
         ui.horizontal_wrapped(|ui| {

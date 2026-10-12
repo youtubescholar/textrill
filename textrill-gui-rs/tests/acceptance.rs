@@ -1044,6 +1044,63 @@ fn the_view_menu_toggles_the_builtin_file_browser() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// Inside a Flatpak the built-in browser is not offered: with no home access to
+/// browse it could only show an empty tree, and the FileChooser portal is always
+/// reachable instead. A remembered choice cannot turn it back on.
+#[test]
+fn a_flatpak_uses_the_portal_and_withholds_the_builtin_browser() {
+    let path = temp_settings_path("flatpak-portal");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.set_builtin_browser(true);
+    assert!(
+        app.uses_builtin_browser(),
+        "the built-in browser did not turn on outside a Flatpak"
+    );
+
+    app.set_in_flatpak(true);
+
+    assert!(
+        !app.builtin_browser_available(),
+        "a Flatpak still offered the built-in browser"
+    );
+    assert!(
+        !app.uses_builtin_browser(),
+        "a Flatpak still routed file commands through the filesystem browser"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The View menu drops the built-in-browser toggle inside a Flatpak, so the
+/// unavailable choice is never shown as a dead end. On a native install it is
+/// there.
+#[test]
+fn the_view_menu_hides_the_builtin_browser_in_a_flatpak() {
+    let app = TextrillApp::default();
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+    harness.get_by_label("View").click();
+    harness.run();
+    assert!(
+        harness
+            .query_by_label("Use built-in file browser")
+            .is_some(),
+        "the toggle is missing on a native install"
+    );
+
+    let mut app = TextrillApp::default();
+    app.set_in_flatpak(true);
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+    harness.get_by_label("View").click();
+    harness.run();
+    assert!(
+        harness
+            .query_by_label("Use built-in file browser")
+            .is_none(),
+        "the toggle is still offered in a Flatpak"
+    );
+}
+
 /// A chooser that returns nothing on a desktop with no dialog is explained, so
 /// a portal-less install does not look like a broken button. A normal cancel on
 /// a working desktop stays silent (see
@@ -1357,6 +1414,190 @@ fn cancelling_the_builtin_browser_writes_nothing() {
     assert!(
         !dir.join("doc.html").exists(),
         "a cancelled save wrote a file"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_file(&conf);
+}
+
+// ------------------------------------------------------------------ presets
+
+/// A preset is a starting point, not a mode: applying one writes its option
+/// bundle and remembers the choice in settings.
+#[test]
+fn applying_a_preset_sets_the_options_and_is_remembered() {
+    let path = temp_settings_path("preset-apply");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    assert_eq!(app.preset_key(), "plain");
+    assert!(!app.preset_is_modified(), "Plain should match the defaults");
+
+    app.apply_preset(textrill_gui::presets::get("book").expect("book preset"));
+
+    assert_eq!(app.preset_key(), "book");
+    assert!(!app.preset_is_modified(), "a fresh preset is not modified");
+    assert_eq!(app.conversion_options().template_library, "book");
+    assert!(
+        app.conversion_options().toc,
+        "Book carries a table of contents"
+    );
+    assert_eq!(
+        Settings::with_path(&path).preset().as_deref(),
+        Some("book"),
+        "the choice was not remembered"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Editing an option away from the chosen preset raises the "Modified" marker;
+/// applying the preset again clears it.
+#[test]
+fn editing_away_from_a_preset_marks_it_modified() {
+    let path = temp_settings_path("preset-modified");
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.apply_preset(textrill_gui::presets::get("article").expect("article preset"));
+    assert!(!app.preset_is_modified());
+
+    app.opts.toc = false;
+    assert!(
+        app.preset_is_modified(),
+        "editing `toc` should mark Modified"
+    );
+
+    app.apply_preset(textrill_gui::presets::get("article").expect("article preset"));
+    assert!(
+        !app.preset_is_modified(),
+        "re-applying the preset should clear Modified"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+/// An unreadable stored key falls back to Plain rather than presetting to
+/// nothing.
+#[test]
+fn an_unknown_stored_preset_falls_back_to_plain() {
+    let path = temp_settings_path("preset-unknown");
+    {
+        let mut settings = Settings::with_path(&path);
+        settings.set_preset("not-a-preset").expect("write");
+    }
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    assert_eq!(app.preset_key(), "plain");
+    assert!(!app.preset_is_modified());
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The preset strip is on screen with the rest of the chrome, and clicking a
+/// preset flows through the app and raises the Modified marker when the options
+/// are then edited.
+#[test]
+fn the_preset_bar_applies_presets_and_shows_modified() {
+    let path = temp_settings_path("preset-ui");
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    assert!(harness.query_by_label("Plain").is_some(), "no preset strip");
+
+    harness.get_by_label("Book").click();
+    harness.run();
+
+    assert_eq!(harness.state().preset_key(), "book");
+    assert!(!harness.state().preset_is_modified());
+    assert!(
+        harness.query_by_label("Modified").is_none(),
+        "a freshly applied preset should not read Modified"
+    );
+
+    harness.state_mut().opts.toc = false;
+    harness.run();
+    assert!(
+        harness.query_by_label("Modified").is_some(),
+        "editing away from the preset should show Modified"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+// ------------------------------------------------------------------ summary
+
+/// The landing view is on screen and reads the live settings; applying a preset
+/// updates it.
+#[test]
+fn the_summary_landing_view_reads_the_settings() {
+    let path = temp_settings_path("summary");
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    assert!(
+        harness.query_by_label("Summary").is_some(),
+        "no Summary heading"
+    );
+    assert!(
+        harness.query_by_label_contains("no template").is_some(),
+        "the default summary should say there is no template"
+    );
+
+    harness.get_by_label("Book").click();
+    harness.run();
+
+    assert!(
+        harness
+            .query_by_label_contains("shipped \"book\" template")
+            .is_some(),
+        "the summary did not follow the preset"
+    );
+    assert!(
+        harness
+            .query_by_label_contains("table of contents")
+            .is_some(),
+        "the summary should mention the table of contents"
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The source-and-destination strip names the file being converted and where
+/// the HTML goes, and drops the `+` once it is written.
+#[test]
+fn the_file_strip_shows_source_and_destination() {
+    let dir = scratch_dir("strip");
+    let src = dir.join("doc.txt");
+    std::fs::write(&src, "hello").expect("write source");
+    let out = dir.join("doc.html");
+
+    let conf = temp_settings_path("strip");
+    let app = TextrillApp::with_settings(Settings::with_path(&conf));
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    assert!(
+        harness
+            .query_by_label_contains("Output: not saved")
+            .is_some(),
+        "a fresh document should read Output: not saved"
+    );
+
+    harness.state_mut().load_file(&src).expect("load");
+    harness.run();
+    assert!(
+        harness.query_by_label_contains("Input: doc.txt").is_some(),
+        "the strip did not show the loaded source"
+    );
+
+    harness.state_mut().save_html_to(&out).expect("save");
+    harness.run();
+    assert!(
+        harness
+            .query_by_label_contains("Output: doc.html")
+            .is_some(),
+        "the strip did not show the saved output"
+    );
+    assert!(
+        harness
+            .query_by_label_contains("Output: doc.html+")
+            .is_none(),
+        "a just-saved HTML should not carry the stale mark"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

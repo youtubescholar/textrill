@@ -140,6 +140,15 @@ impl Settings {
         self.get("builtin-browser").map(parse_bool)
     }
 
+    /// The key of the chosen preset ([`crate::presets`]); `None` when unset.
+    /// The caller resolves an unknown key to the default preset.
+    pub fn preset(&self) -> Option<String> {
+        self.get("preset")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    }
+
     /// The directory the last open or save used, if one was remembered.
     pub fn last_dir(&self) -> Option<PathBuf> {
         self.get("last-dir")
@@ -159,6 +168,11 @@ impl Settings {
     /// Persist the built-in-browser choice.
     pub fn set_builtin_browser(&mut self, builtin: bool) -> Result<(), String> {
         self.set("builtin-browser", if builtin { "true" } else { "false" })
+    }
+
+    /// Persist the chosen preset's key.
+    pub fn set_preset(&mut self, key: &str) -> Result<(), String> {
+        self.set("preset", key)
     }
 
     /// Persist the display choices the user owns (theme, text size, motion) in

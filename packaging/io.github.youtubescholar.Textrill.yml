@@ -33,10 +33,14 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --device=dri
-  # Open/Save can reach anywhere under the user's home.
-  - --filesystem=home
-  # No portal talk-name is needed: Flatpak always allows the
-  # org.freedesktop.portal.* interfaces used by the file chooser.
+  # No --filesystem=home. Open and Save go through the FileChooser portal,
+  # which hands the app only the file the user picked, so broad home access is
+  # not needed. No portal talk-name is needed either: Flatpak always allows the
+  # org.freedesktop.portal.* interfaces. The in-app file browser is not offered
+  # inside the sandbox (it would have no home access to browse); the GUI detects
+  # the Flatpak and uses the portal, whose dialog still works. The CLI ships in
+  # the same sandbox and so reads only paths passed to it, as any Flatpak CLI
+  # does.
 
 modules:
   # Engine first: textrill-gui-rs depends on it by path, so the CLI has to exist

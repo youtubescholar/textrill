@@ -211,6 +211,27 @@ impl Document {
         );
         format!("{name}{mark} \u{2014} textrill")
     }
+
+    /// The source file's name for display, or `untitled` for a blank document.
+    pub fn source_name(&self) -> String {
+        self.path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| "untitled".to_string())
+    }
+
+    /// The HTML output's file name for display, or `not saved` when the
+    /// conversion has nowhere to be written yet.
+    pub fn output_name(&self) -> String {
+        self.output_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| "not saved".to_string())
+    }
 }
 
 /// Whether two paths name the same file.

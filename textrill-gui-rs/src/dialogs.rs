@@ -30,6 +30,27 @@ pub fn system_dialog_available() -> bool {
     portal_file_chooser_available() || zenity_available()
 }
 
+/// Whether this process is running inside a Flatpak sandbox.
+///
+/// Detected the way GLib does: the sandbox root carries a `/.flatpak-info`
+/// file. Inside a Flatpak the `FileChooser` portal is always reachable over the
+/// session bus — Flatpak always allows `org.freedesktop.portal.*` — but the
+/// host's `*.portal` backend declarations are *not* visible in the sandbox, so
+/// the filesystem probe in [`system_dialog_available`] can wrongly report "no
+/// dialog here" and fall back to the built-in browser. The Flatpak build
+/// therefore trusts the portal rather than the probe, and does not offer the
+/// built-in browser: the manifest grants no home filesystem access for it to
+/// browse (the portal hands out only the file the user picked).
+pub fn in_flatpak() -> bool {
+    flatpak_info_present(Path::new("/.flatpak-info"))
+}
+
+/// [`in_flatpak`] against an explicit path, so both branches can be tested
+/// without an actual sandbox.
+fn flatpak_info_present(path: &Path) -> bool {
+    path.is_file()
+}
+
 /// Whether some installed portal backend declares `FileChooser`.
 fn portal_file_chooser_available() -> bool {
     portal_file_chooser_available_in(&portal_data_dirs())
@@ -181,6 +202,26 @@ mod tests {
         let text = "[portal]\nInterfaces=org.freedesktop.impl.portal.Screenshot;\
                     org.freedesktop.impl.portal.ScreenCast;\n";
         assert!(!portal_declares_file_chooser(text, INTERFACE));
+    }
+
+    #[test]
+    fn the_flatpak_guard_is_a_file_presence_check() {
+        let path = std::env::temp_dir().join(format!(
+            "textrill-flatpak-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        assert!(!flatpak_info_present(&path));
+        std::fs::write(
+            &path,
+            "[Application]\nname=io.github.youtubescholar.Textrill\n",
+        )
+        .unwrap();
+        assert!(flatpak_info_present(&path));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
