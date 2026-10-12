@@ -12,6 +12,7 @@
 #   make corpus        the Perl differential corpus (needs `make ref`)
 #   make diff          the Perl differential corpus, as a non-gating cross-check
 #   make scale         the 1 MB paragraph probes, timed against Perl
+#   make appimage      a local (non-portable) AppImage of the GUI and CLI
 #
 # `make verify` needs no Perl: the differential is the non-gating `make diff`,
 # on demand. Individual targets build first and pass the binary path explicitly
@@ -32,7 +33,7 @@ STUBS       ?= $(ROOT)/ref/stubs
 export PERL5LIB := $(STUBS):$(REFDIR)/lib
 export MINE     := $(RELEASE_BIN)
 
-.PHONY: all verify build gui run-gui fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale musl corpus-musl accept-musl examples examples-write clean
+.PHONY: all verify build gui run-gui fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale musl corpus-musl accept-musl examples examples-write appimage clean
 
 all: verify
 
@@ -278,6 +279,17 @@ cargo-sources:
 	flatpak-cargo-generator -o packaging/cargo-sources-textrill.json textrill/Cargo.lock
 	flatpak-cargo-generator -o packaging/cargo-sources-textrill-gui.json textrill-gui-rs/Cargo.lock
 	@echo "wrote $(CARGO_SOURCES)"
+
+# --- AppImage (see packaging/appimage/build.sh) -------------------------------
+
+# A local, self-contained bundle of the GUI with the CLI engine beside it. Not a
+# substitute for the Flatpak: the AppImage inherits this host's glibc, so it
+# runs on distributions at least as new as the build host. The script builds the
+# release binaries, assembles the AppDir, and fetches appimagetool once; the
+# artifact lands under build/ (gitignored). Deliberately not part of `verify`:
+# it needs network on first run and produces an artifact, not a test result.
+appimage:
+	packaging/appimage/build.sh
 
 distclean: clean
 	rm -rf "$(ROOT)/ref"

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Entry point inside the AppImage. The GUI is the face of the app; the CLI
+# engine ships alongside it in usr/bin for anyone who wants the command line.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "${HERE}/usr/bin/textrill-gui" "$@"

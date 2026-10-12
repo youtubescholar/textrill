@@ -116,8 +116,37 @@ flatpak-builder --force-clean build packaging/io.github.youtubescholar.Textrill.
 shared state; both are git-ignored. The finished app is at
 `build/files/bin/textrill-gui` (and `.../textrill` for the CLI).
 
+## AppImage (local, not portable)
+
+```sh
+make appimage              # or: packaging/appimage/build.sh
+```
+
+This builds the release binaries, assembles an AppDir, and packages
+`build/appimage/textrill-gui-x86_64.AppImage` with both the GUI and the CLI.
+It is a convenience for running the app on this host, **not** a substitute for
+the Flatpak and **not** portable: the AppImage inherits the build host's glibc
+(Ubuntu 24.04, glibc 2.39), so it runs only on distributions at least as new as
+the build host. A portable one would have to be built inside an older-glibc
+container; that is deliberately out of scope while the app is not released.
+
+The assets under `packaging/appimage/` are the pieces a desktop-integrated
+install needs, and the `.desktop` file and icon there are the same ones the
+Flatpak manifest should install (`packaging/appimage/AppRun` is AppImage-only):
+
+- `io.github.youtubescholar.Textrill.desktop`
+- `io.github.youtubescholar.Textrill.svg` and the rendered `.png`
+- `AppRun`
+- `build.sh`
+
+The script fetches `appimagetool` once into `build/appimage/tools/` (network on
+first run only) and runs it with `--appimage-extract-and-run`, so no FUSE is
+required.
+
 ## Still missing for distribution
 
-There is no `.desktop` file, AppStream metainfo, or icon in the tree yet. The
-manifest builds a runnable app, but Flathub (and desktop-integrated installs
-generally) require those; add them before publishing.
+AppStream metainfo (`io.github.youtubescholar.Textrill.metainfo.xml`) is still
+missing, and neither the Flatpak manifest nor the AppImage installs the
+`.desktop` file and icon into the runtime. Flathub requires all three; the
+`.desktop` and icon now exist under `packaging/appimage/` and only need wiring
+into the manifest, but the metainfo has to be written before publishing.
