@@ -1,0 +1,28 @@
+functionality
+-------------
+
+[x] rename writeP
+[*] implement ol
+[*] implement ul
+[*] implement li
+[*] implement h1
+[*] implement h2
+[~] implement pre
+[ ] add utf-8 support (possibly more)
+[x] rename to naml (not another markup language) if it goes beyond txt and/or markdown syntax
+[~] get it working with latest re-works
+
+tests
+-----
+
+[*] test against test.txt
+[~] improve test.txt for catching edge-cases
+[*] handle large files
+[~] write proper tests
+
+optimisations
+-------------
+
+[*] avoid recursion (unless needed)
+[*] remove ASTLIMIT(?)
+[?] allow writebuf() to take more than 1 char at a time, make less calls

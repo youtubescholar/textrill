@@ -1,0 +1,26 @@
+
+ast
+===
+
+pseudo regex to help remember the syntax rules.
+
+\u = unicode character (note utf-x currently just using std c ascii support)
+\t = horizintal tab
+\n = newline
+{x} = see rule x, 'x' must be the name of a rule or it's just regex syntax
+
+node{
+	"\n\n"              = close open tag
+	"\u."               = ol,li,{list}
+	"[*-] "             = ul,li,{list}
+	"\t\u+"             = pre/
+	"\u\n={3,}\n"       = h1/
+	"\u\n-{3,}\n"       = h2/
+	"\u(\u|\n|\t)+\n\n" = p/
+}
+
+list{
+	"\n\n"     = '/li','/ol'
+	"\n\u."    = '/li','li'
+	"\n\u[^.]" = (hardbreaks) ? 'br/' : ' '
+}

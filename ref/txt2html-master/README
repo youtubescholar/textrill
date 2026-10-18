@@ -1,0 +1,49 @@
+
+txt2html
+========
+
+txt2html is a tool for converting text files to HTML.
+Written as a exercise in writing a simple syntax parser.
+
+The goal is to be simple and not to create set of syntax rules for another markup language - just to take conventions commonly found in .txt files and convert them to HTML. Which has just resulted in a subset of Markdown anyway.
+
+If you're looking for a good tool that does the same job, I'd recommend cmark (https://github.com/commonmark/cmark).
+
+usage
+-----
+
+	usage: txt2html [OPTIONS] FILE...
+
+	Convert content in txt files to html.
+
+	FILE...   A list of 1 filepaths that point to files to be converted to HTML
+
+	OPTIONS
+	-br           Treat newlines within paragraphs as line breaks.
+	-v            Print verbose logs during runtime
+	-h, --help    Print this message
+
+syntax
+------
+
+The following rules from Markdown are followed:
+
+- Paragraphs
+- Heading 1
+- Heading 2
+- Ordered lists
+- Unordered lists (using `*` and `-`)
+- Pre blocks (only indented blocks)
+
+notes
+-----
+
+- I made a point to avoid using recursion (which is typically how ast trees are built).
+Partly as a challenge and partly because I thought I could get away without it.
+- There could probably be a fair bit of cleanup but I've been checking the tool against Valgrind (both compiled with gcc and musl) to avoid memory leaks and other issues.
+
+authors
+-------
+
+- gearsix (gearsix@tuta.io)
+

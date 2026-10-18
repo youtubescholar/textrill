@@ -1,0 +1,16 @@
+# Rust / Cargo build output
+/target/
+**/target/
+
+# Local packaging and build scratch output
+/build/
+*.AppImage
+
+# Compiled artifacts inside vendored research checkouts
+research/*/_build/
+
+# Editor and OS noise
+*.swp
+*.swo
+*~
+.DS_Store

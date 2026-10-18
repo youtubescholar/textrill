@@ -1,0 +1,180 @@
+// Copyright (C) 2026 the textrill authors.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.  See the LICENSE file for the full text.
+
+//! Serialise the whole option set to the JSON blob the Python GUI stored.
+//!
+//! `mainwindow.py` persisted `optionspanel.values()`, keyed by each option's
+//! canonical name and typed the way the widget was (bool, int, str, list of
+//! str, or a `table_type` object). This reproduces that shape from `cli::SPECS`,
+//! so a settings file written by either front end restores in the other.
+
+use textrill::cli::{self, Kind};
+use textrill::options::Options;
+
+use crate::json::{self, Json};
+use crate::options_panel::gui_ignored;
+use crate::settings::parse_bool;
+
+/// The option set as a JSON object, in `cli::SPECS` order.
+pub fn encode(opts: &Options) -> String {
+    let mut entries: Vec<(&str, Json)> = Vec::new();
+    for spec in cli::SPECS {
+        let name = spec.names[0];
+        let value = match spec.kind {
+            Kind::Flag => Json::Bool(parse_bool(&cli::get_value(opts, name).unwrap_or_default())),
+            Kind::Int => Json::Number(
+                cli::get_value(opts, name)
+                    .ok()
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0),
+            ),
+            Kind::Str => Json::Str(cli::get_value(opts, name).unwrap_or_default()),
+            Kind::StrArray => Json::Array(
+                cli::get_value(opts, name)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+            ),
+            Kind::TableType => Json::Object(vec![
+                ("ALIGN".to_string(), opts.table_type.align),
+                ("PGSQL".to_string(), opts.table_type.pgsql),
+                ("BORDER".to_string(), opts.table_type.border),
+                ("DELIM".to_string(), opts.table_type.delim),
+            ]),
+        };
+        // The Python panel forced this on when it serialised, because the GUI
+        // always writes UTF-8 and must declare it. Match that, or a later
+        // restore would show the checkbox the engine defaults it to.
+        let value = if name == "meta_charset" {
+            Json::Bool(true)
+        } else {
+            value
+        };
+        entries.push((name, value));
+    }
+    json::write_object(&entries)
+}
+
+/// Apply a stored blob to `opts`. Unknown names and unreadable values are
+/// skipped, which is what Python's `set_values` did with a bad blob.
+pub fn decode(text: &str, opts: &mut Options) {
+    let Some(entries) = json::parse_object(text) else {
+        return;
+    };
+    for (name, value) in entries {
+        apply(opts, &name, &value);
+    }
+}
+
+fn apply(opts: &mut Options, name: &str, value: &Json) {
+    // Options the GUI cannot act on ([`gui_ignored`]) are left at their
+    // defaults, however they were stored: restoring a value that can never be
+    // used would only put a stale edge back in the panel and the next save.
+    if cli::lookup(name).is_some_and(gui_ignored) {
+        return;
+    }
+    // The blob is a full-state snapshot, not a command line. `cli::set_value`
+    // treats the two doctype flags as transitions -- `xhtml: false` read as
+    // `--no-xhtml` means "go to HTML4" and clears `html5` -- which is right
+    // for parsing arguments and wrong for replaying a saved panel, where
+    // `html5: true` sitting next to `xhtml: false` records what *is* on and
+    // must survive `cli::SPECS` order (html5 first, xhtml last). Assign the
+    // two directly, as the Python panel's `set_values` did; the rest of the
+    // blob is plain values either way.
+    if let Json::Bool(on) = value {
+        match cli::lookup(name) {
+            Some(cli::Opt::Html5) => {
+                opts.html5 = *on;
+                return;
+            }
+            Some(cli::Opt::Xhtml) => {
+                opts.xhtml = *on;
+                return;
+            }
+            _ => {}
+        }
+    }
+    let mut set = |v: &str| {
+        let _ = cli::set_value(opts, name, v);
+    };
+    match value {
+        Json::Bool(on) => set(if *on { "true" } else { "false" }),
+        Json::Number(n) => set(&n.to_string()),
+        Json::Str(s) => set(s),
+        Json::Array(items) => {
+            for item in items {
+                set(item);
+            }
+        }
+        Json::Object(pairs) => {
+            let text = pairs
+                .iter()
+                .map(|(key, on)| format!("{key}={}", u8::from(*on)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            set(&text);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `var` is a `Vec<(String, String)>`, one of the two shapes a `StrArray`
+    /// can take. It must survive a store/restore like the `Vec<String>` arrays:
+    /// a panel edit that is not persisted is the same bug as one that is
+    /// dropped by the widget.
+    #[test]
+    fn template_variables_round_trip() {
+        let mut opts = Options::default();
+        cli::set_value(&mut opts, "var", "name=World").expect("set var");
+        cli::set_value(&mut opts, "var", "color=blue").expect("set var");
+
+        let blob = encode(&opts);
+        assert!(blob.contains("name=World"), "var missing from blob: {blob}");
+
+        let mut restored = Options::default();
+        decode(&blob, &mut restored);
+        assert_eq!(
+            restored.vars,
+            vec![
+                ("name".to_string(), "World".to_string()),
+                ("color".to_string(), "blue".to_string()),
+            ]
+        );
+    }
+
+    /// The command-line pipeline options do nothing in the GUI, so a value for
+    /// one is never restored and never re-stored: it would be a stale edge,
+    /// shown disabled and saved again, with no way to ever act on it.
+    #[test]
+    fn pipeline_options_do_not_round_trip() {
+        let stored = r#"{"stream": true, "chunk": true, "report": true,
+            "outfile": "/tmp/out.html", "infile": ["in.txt"], "instring": ["s"]}"#;
+        let default = Options::default();
+        let mut opts = Options::default();
+        decode(stored, &mut opts);
+
+        assert_eq!(opts.stream, default.stream, "stream must not restore");
+        assert_eq!(opts.chunk, default.chunk, "chunk must not restore");
+        assert_eq!(opts.report, default.report, "report must not restore");
+        assert_eq!(opts.outfile, default.outfile, "outfile must not restore");
+        assert!(opts.infile.is_empty(), "infile must not restore");
+        assert!(opts.instring.is_empty(), "instring must not restore");
+
+        let blob = encode(&opts);
+        assert!(!blob.contains("out.html"), "outfile leaked: {blob}");
+        assert!(!blob.contains("in.txt"), "infile leaked: {blob}");
+        assert!(
+            blob.contains("\"stream\": false"),
+            "stream not reset: {blob}"
+        );
+    }
+}

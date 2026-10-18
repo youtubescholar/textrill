@@ -1,0 +1,5 @@
+5. [*] tags get cut-off if '\0' found (end up with <p>12</p><p>3</p> instead of <p>123</p>)
+4. [ ] lists with sub-items aren't parsed properly (e.g. `1.a.`)
+3. [*] binaries compiled with musl don't work as intended (no reason for this to be compiler-bound)
+2. [*] there are a few memory leaks to fix (see valgrind output)
+1. [*] for some reason the first <ol> in test.txt is parsed as a single <li>.

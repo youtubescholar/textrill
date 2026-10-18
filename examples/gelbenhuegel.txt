@@ -1,0 +1,1236 @@
+---
+title: Drachen
+description: The dragons of the East Lands
+tags:
+---
+The dragons of Gelbenhügel are genderless, solitary, and reproduce asexually. Individual dragons may adopt a female or male persona when dealing with creatures that possess the concept of gender.
+
+Once a dragon reaches 1,000 years of age, it gains the power to create offspring. It takes the most magnificent gems, precious metals, and magical items it has in its horde, and uses its fiery breath to melt them down into a large, scintillating egg. Upon the egg it inscribes the draconic ideogram for “life.”
+
+It takes the egg and hides it far away from its lair, somewhere it believes it will never be discovered. Then it forgets about it. Over the course of a century, the egg absorbs the *wesen* around it, feeding the dragon embryo locked inside. Once it reaches maturity, the dragon breaks out of its egg, saving the fragments of the shell to begin its own horde.
+
+Rarely, a dragon is unable to hatch from its egg. In these unlucky cases, the trapped dragon petrifies and becomes a *steinherz*, a “stone heart.” The egg continues to absorb wesen, and over the centuries transforms into a wellspring of unimaginable magical energy.
+---
+title: Hexen
+description: The hags of Gelbenhügel
+tags:
+---
+
+---
+title: Kartoffelkäfer
+description: Giant, voracious potato bugs
+tags:
+---
+Giant potato bugs the size of dogs. They form swarms and devour acres of farmland in wet weather.
+---
+title: Krampus
+description: The Midwinter Monster
+tags:
+---
+
+---
+title: Säbelzahn Stachelschwein
+description: Giant, saber-toothed porcupines.
+tags:
+  - megafauna
+---
+Giant, saber-toothed porcupines.
+---
+title: Akademiegarten
+description: Academy Garden
+tags:
+  - district
+---
+
+---
+title: Die Wiesen
+description: The Meadows
+tags:
+  - district
+slug: die-wiesen
+---
+
+---
+title: Koboldstadt
+description: Goblin Town
+tags:
+  - district
+---
+
+---
+title: Kronenviertel
+description: Crown Quarter
+tags:
+  - district
+---
+
+---
+title: Kunstareal
+description: Art District
+tags:
+  - district
+---
+
+---
+title: Lagerbezirk
+description: Warehouse District
+tags:
+  - district
+---
+
+---
+title: Marktviertel
+description: Market Quarter
+tags:
+  - district
+---
+
+---
+title: Stiefelviertel
+description: Boot Quarter
+tags:
+  - district
+---
+
+---
+title: Sturmseite
+description: Stormside
+tags:
+  - district
+---
+
+---
+title: Tempelviertel
+description: Temple Quarter
+tags:
+  - district
+---
+
+---
+title: Untergrund
+description: The underground
+tags:
+---
+
+---
+title: Wohnviertel
+description: Residential District
+tags:
+  - district
+---
+
+
+
+
+---
+title: Zauberviertel
+description: Magic District
+tags:
+  - district
+---
+
+---
+title: Alchemistengilde
+description: Alchemists' Guild
+tags:
+  - Kronenviertel
+  - faction
+---
+
+---
+title: Crimson Cardinals Questing Company
+description: Adventuring company
+tags:
+  - Kronenviertel
+  - adventuring-company
+  - faction
+---
+
+---
+title: Rose and Crown Ranger Guild
+description: Adventuring company
+tags:
+  - Stiefelviertel
+  - faction
+  - adventuring-company
+---
+
+- Focused on wilderness exploration
+---
+title: The Secret Keepers
+description: Information brokers
+tags:
+  - koboldstadt
+---
+information brokers, smugglers, and philanthropists
+---
+title: Silver Hammer Exploration Club
+description: Adventuring company
+tags:
+  - Marktviertel
+  - faction
+  - adventuring-company
+---
+
+- Focused on exploration of the underworld
+---
+title: Heretics of Nichtswesens
+description: The nihilistic cult that ushered in the Great War
+tags:
+  - faction
+---
+
+---
+title: Perilous Peregrine Questing Company
+description: Adventuring company
+tags:
+  - Wohnviertel
+  - faction
+  - adventuring-company
+link: perilous-peregrine
+---
+
+---
+title: About your world
+description: Basic knowledge about the city of Gelbenhügel
+tags:
+---
+As a native of the glorious city of Gelbenhügel, there are a few things that your character would consider basic knowledge.
+
+## Spirits are everywhere
+
+*Gelbenhügel* and the lands that surround it are filled with spirits. They inhabit and animate mountains, lakes, rivers, trees, clouds, fields, and waterfalls. They cause the rain to fall, the rivers to flow, the wind to gust, and the crops to grow. They are the forces of nature, they are everywhere, and keeping them happy is the key to ensuring good fortune.
+
+Because the spirits that animate the world are immanent in the daily lives of *Gelbenhügeler*, there isn’t much debate about their shape, substance, or ethos. In fact, the relationship between an average person and the spirits they interact with is primarily transactional and hyper-local.
+
+Farmers will take care of the spirits that inhabit their fields so that the crops will grow and the harvest will be bountiful. Fishermen tend to the spirits of the streams and river. Everyone pays homage to the ancestor spirits that watch over their families; the spirits are part of the fabric of daily life.
+
+## Magic is everywhere
+
+Gelbenhügel is filled with magical spells, powers, items, and effects. In these lands, magic is the result of manipulating *Wesen*, the vital essence that permeates all things. Some creatures entreat spirits to manipulate Wesen on their behalf while others are able to manipulate it directly. Some creatures produce magical effects by learning to control the Wesen within themselves and others produce them by using magical weapons, armor, and other wondrous items.
+
+Everyone in Gelbenhügel expects to see and use magic in their everyday lives. Most peasants have one or two common magical items in their possession, alchemists offer basic medical care, and hedge mages use low-level magic to provide useful services.
+
+## Portals are everywhere
+
+The Great War destroyed lives, cultures, and entire empires but it also left the veils between worlds in tatters. Since the war ended, the Volk of Gelbenhügel have discovered a multitude of gates and portals that connect their city to other planes, worlds, and dimensions. Some of these portals are easily discernible, while others blend into the background of the city. Some take no effort to open, while others require considerable effort.
+
+In addition, Gelbenhügel is filled with pocket dimensions — worlds within worlds. The bottom of a forgotten well may be ten times the size it should be and contain an ancient slumbering horror, shrines to various spirits contain entire worlds, and mysterious staircases lead into impossible landscapes.
+
+## Undead are everywhere
+
+When a sentient being dies, its spirit typically moves from the physical world to the spirit world. The spirit's movement opens a conduit through which necrotic energy flows. Without a *Geistliche* to perform the proper rites and guide the spirit to the netherworld, the necrotic energy will reanimate the deceased creature’s corpse, creating a zombie.
+
+Spirits of Volk that die with unfinished business often remain trapped in the physical world, haunting a person or place until they can be put to rest. Others become trapped by the intensity of their emotions — typically jealousy, rage, or hatred — and spend eternity tormenting the living.
+---
+title: Adventuring
+description: A guide to the adventuring life
+tags:
+  - adventuring-company
+---
+Adventurers are treasure hunters, explorers, troubleshooters, and, very often, first responders. Neophyte adventurers clear giant rats out of basements and locate lost heirlooms, while veteran adventurers foil the plots of mad wizards, destroy portals to the netherworlds, and fight off the rampaging forces of nature.
+
+In addition to being popular among the citizenry because of their utility, adventurers are popular among the city's leadership because the guilds generate significant tax revenue. Inside city limits, adventurers have quasi-legal authority, so they are often given significant deference while in the midst of a quest.
+
+While an average citizen who wants to talk to the mayor might be told to go talk to the city clerk to schedule an appointment that will be repeatedly delayed and rescheduled, an adventurer who wants to alert the authorities to a threat against the city will be ushered directly into the mayor's office.
+
+## Laws of adventuring
+
+Gelbenhügel's city council issues charters to adventuring companies and issues the laws by which they must abide.
+
+- **First**, all adventurers must belong to a chartered adventuring company to operate within the city and surrounding territory.
+- **Second**, violence between members of rival companies is prohibited and is punished by expulsion.
+- **Third**, members of an adventuring company may lay claim to a newly discovered passage or dungeon by placing their company's mark at the entrance of the dungeon. Once placed, other adventurers are expected to respect the claim, even when the claiming adventurer is no longer physically present.
+- **Fourth**, an adventurer may pass through and take treasure from another company's claim, but they are expected to remit half of any recovered treasure to the claiming company.
+- **Fifth**, claim disputes can be resolved by any judge or licensed arbitrator.
+- **Finally**, if an adventurer saves another adventurer from certain death, they are entitled to half of whatever treasure the other adventurer is carrying.
+
+## Guild benefits
+
+Guild points
+
+- fame
+- discounts?
+- access to the best quests?
+- access to relics?
+
+## Adventuring Companies
+
+- [Perilous Peregrine Questing Company](../factions/perilous-peregrine-questing-company.md)
+- [Rose and Crown Ranger Guild](../factions/rose-and-crown-ranger-guild.md)
+- [Silver Hammer Exploration Club](../factions/silver-hammer-exploration-club.md)
+- [Crimson Cardinals Questing Company](../factions/crimson-cardinals-questing-company.md)
+---
+title: Calendar
+description: The calendar of Gelbenhügel
+tags:
+---
+Gelbenhügeler mark the passage of time by counting the rotation of the sun disk and the orbits of the outer worlds. Each rotation of the sun disk, which takes approximately twenty hours, is recorded as one day. The outer worlds make one orbit around the world disk every 320 days, which is recorded as a year. Within the year, they divide the days into 40 groups of eight, called weeks.
+
+Before the Great War, the Volk standardized the names of the days of the week for ease of commerce. In any given language, the days are known as:
+
+- First Day
+- Second Day
+- Third Day
+- Midweek
+- Fifth Day
+- Sixth Day
+- Seventh Day
+- Week End
+
+Gelbenhügeler typically view Midweek as a day of rest and relaxation and Week End as a day for celebration and frivolity. Whenever there is not *another* festival being held on Week End, the clergy of the Spirit of the City hold *Wochenendfestival*, a massive, lager-fueled feast in the Volkshalle, beneath the colossal bronze statue of the city's founder.
+
+The 320 day year has 4 major seasons and 20 micro-seasons, each two weeks long.
+
+| Season              | Name             |
+| ------------------- | ---------------- |
+| **Spring**          | **Frühling**     |
+| New Year            | Neujahr          |
+| Rainwater           | Regenwasser      |
+| Insects awaken      | Insektenmorgen   |
+| Flower time         | Blumenzeit       |
+| Spring rains        | Frühlingsregen   |
+| **Summer**          | **Sommer**       |
+| Asparagus time      | Spargelzeit      |
+| Fruit time          | Fruchtzeit       |
+| Grains seed         |                  |
+| Barley season       | Gerstenerntezeit |
+| Old woman's summer  | Altweibersommer  |
+| **Autumn**          | **Herbst**       |
+| Leaf falling time   | Laubfallzeit     |
+| Heat retreats       |                  |
+| White dew           |                  |
+| Cold dew            |                  |
+| Frost falls         |                  |
+| **Winter**          | **Winter**       |
+| Beginning of winter |                  |
+| Lesser snow         |                  |
+| High winter         | Hochwinter       |
+| Deep winter         | Tiefwinter       |
+| Greater cold        |                  |
+## Holidays and Festivals
+
+- **Wochenendfestival** is held almost every Week End in the Volkshalle in honor of the Spirit of the City. When other major festivals are held, the clergy of the Spirit of the City take a well-deserved break.
+- **Neujahr** — the First Day of spring marks the beginning of the year.
+- **Starkbierfest** — the "strong beer festival" runs for three weeks in early spring. Held in each brewery instead of a central location, as each brewery produces its own version of a hearty, higher-proof beer.
+- **Frühlingsfest** — end of spring beer festival.
+- **Senffest** — the Mustard Festival is held the first and second Week End of summer in the [Promenadeplatz](../places/promenadeplatz.md). Residents of the city gather to eat pretzels and wursts, drink lager and *[Sprudelwasser](./food-and-drink.md)*, and sample mustard from the finest farmers and artisans in the Eastlands.
+- **Kocherlball** — early morning dancing and beer in early summer. "Cooks Ball" originated as an early morning festival for domestic service staff.
+- **Mittsommer** —
+- **Wintermarkt** — winter market, held during the month leading up to Midwinter in Annaplatz. Seasonal food and crafts: *Glühwein* and *Kinderpunsch*, gingerbread, gifts and decorations.
+- **Krampusnacht** — families put out offerings of schnapps so that the [Midwinter Monster](../creatures/krampus.md) does not take their children.
+- **Mittwinter**
+---
+title: Commerce
+description: Buying and selling goods and service
+tags:
+  - adventuring-company
+---
+In the Age of Empires, the gold coin became the world-wide standard. Silver coins are worth one-tenth of a gold coin, and bronze coins are worth one-tenth of a silver. In Gelbenhügel, breweries also offer their own coins, each redeemable for one beer. Patrons typically buy ten coins at a time and get one free.
+## Silver weapons
+
+Cost x10 to get a silver version of a weapon. 1 GP to get a weapon silvered. Wears off after 1d4 fights. When used against creatures that aren't vulnerable to silver, 2-in-6 chance that the weapon is no longer usable.
+---
+title: Creating a character
+description: Creating an adventurer in Gelbenhügel
+tags:
+---
+
+---
+title: Food and Drink
+description: Food and Drink
+tags:
+---
+- Wirtshaus — large-scale breweries that produce lagers.
+- Bierküchen — small-scale beer kitchens that brew ales.
+- Sprudelwasser — naturally effervescent sparkling water. The second most commonly consumed beverage after lager.
+- Glühwein — A warm, spiced alcoholic beverage made by heating red or sometimes white wine with various mulling spices such as cinnamon, cloves, star anise, and citrus peel, often sweetened with sugar or honey.
+- Kinderpunsch — A warm, non-alcoholic punch typically made from fruit juices and spices, popular during the winter season
+---
+title: Geography
+description: The world on which Gelbenhügel exists
+tags:
+---
+Gelbenhügel exists on the eastern edge of Gilea, a flat, disk world orbited by an ever-increasing number of flat, disk moons. In the center of the disk is a supercontinent, referred to simply as the Continent, where the majority of Volk live. There, dwarves and dragons battle for supremacy in the mountains, elves and hags wrestle for control in the great forests, and humans fight off orcs on the coastal plains.
+
+Surrounding the Continent are a number of island chains that stretch into the Ocean at the End of the World. At the edge of the disk, the ocean falls away into the Aether, creating a roiling ring of mist. The water vapor rises into the atmosphere where it cools, condenses, and creates precipitation.
+
+In the center of the Continent are the *Risafjöll*, mountains so tall that they stretch beyond the atmosphere of Gilea directly into the Aether. Below the disk hang the *Undirheima*, massive stalactites that house an entire world of darkness-dwelling creatures.
+
+The sun disk, *Zon*, orbits the perimeter of Gilea, projecting its warm, life-giving glow throughout the world over the course of roughly twenty hours. Zon’s light cone is oriented in such a way that roughly half the surface of the disk is illuminated at any time, creating a natural day/night cycle. The Risafjöll are in perpetual twilight, as they are constantly at the edge of the light cone.
+
+The climate is warmest near the edge of the disk, where the ocean meets the sun disk. The island chains are tropical, the farmlands near the coast are subtropical, the forests temperate, and the center of the continent is arctic.
+
+At the heart of the Risafjöll is *Íshjarta*, a massive living glacier that is constantly growing and which replaces any water lost to the Aether at the disk’s edge.
+---
+title: Introduction
+description: Greetings adventurer!
+tags:
+---
+
+Greetings, adventurer!
+
+On behalf of the leadership and staff of the [Perilous Peregrine Questing Company](../factions/perilous-peregrine-questing-company.md), allow me to extend a hearty welcome and congratulate you on your decision to affiliate yourself with the finest adventuring company in Gelbenhügel.
+
+Within this guide you’ll find useful information on the various goods and services our caring and attentive staff and shopkeepers provide. You’ll also find helpful tips and tricks that you may find useful when navigating the dangerous and often deceptive lands that lay beyond our walls and below our feet.
+
+If you are a student of ancient history, then you will recall that, before the Great War, the mighty empires of dwarves, elves, gnomes, and humans built a world of peace and prosperity through diplomacy and trade. Our great city is an artifact of that era — at its height, we housed 350,000 Volk within our borders.
+
+Then the [Heretics of Nichtswesens](../factions/heretics-of-nichtswesens.md) opened the Demon Gate and shattered the peace. Pestilence, famine, and war decimated our world, destroyed the mighty empires, and devastated our city. We were left with nothing but dilapidated ruins, hungry monsters, and murderous bandits…which, to the resilient Volk of Gelbenhügel, meant endless opportunity for power and glory!
+
+Adventuring companies like ours powered the city's recovery by reclaiming treasures of ages past, protecting our citizens from fearsome monsters, and driving gangs of bandits and raiders far beyond our borders. You have chosen to follow in the storied footsteps of our city's bravest and boldest heroes.
+
+So spread your wings, adventurer! Explore crumbling catacombs, slay ravenous beasts, and bring back as much of that glittering treasure of ages past as you can fit in your backpack.
+
+May the spirits be ever in your favor,
+
+[Andreas Stieler](../people/andreas-stieler.md), Gildenmeister
+---
+title: Law and Order
+description: Law and Order
+tags:
+---
+Royal guards
+
+Judges
+
+Inquisitorial system. Charges can be brought by another Volk (or Volk representing another creature) or by the court itself.
+
+Major crimes
+
+Murder, manslaughter, arson, robbery, and rape
+
+Murder is punishable by beheading. Manslaughter, arson, robbery are punishable by banning. Rape is punishable by immolation.
+
+Minor crimes
+
+Mopery — idleness or aversion to work. Punishable by imprisonment.
+
+Vogelfrei — outlaws
+---
+title: Names
+description: Names
+tags:
+---
+
+To create a name that feels native to Gelbenhügel, roll 1d20 two times on the following table — once for a masculine or feminine given name, and once for the family name.
+
+| d20 | Masculine | Feminine | Family    |
+| --- | --------- | -------- | --------- |
+| 1   | Albert    | Anna     | Bauer     |
+| 2   | Erich     | Astrid   | Becker    |
+| 3   | Felix     | Bettina  | Fischer   |
+| 4   | Fritz     | Brigitte | Hoffman   |
+| 5   | Gregor    | Dita     | Huber     |
+| 6   | Günter    | Edith    | Jäger     |
+| 7   | Hans      | Elke     | Koch      |
+| 8   | Heinz     | Elsa     | Köhler    |
+| 9   | Johann    | Greta    | Krüger    |
+| 10  | Jürgen    | Gretchen | Müller    |
+| 11  | Karl      | Heidi    | Pfeiffer  |
+| 12  | Klaus     | Helga    | Richter   |
+| 13  | Ludwig    | Hilde    | Schäfer   |
+| 14  | Oskar     | Inga     | Schmidt   |
+| 15  | Otto      | Isolde   | Schneider |
+| 16  | Philipp   | Liesel   | Schubert  |
+| 17  | Robert    | Petra    | Schulze   |
+| 18  | Rolf      | Sibylle  | Wagner    |
+| 19  | Rupert    | Ursula   | Weber     |
+| 20  | Ulrich    | Verena   | Ziegler   |
+
+---
+title: Volk
+description: The people of Gelbenhügel
+tags:
+---
+
+---
+title: Liesel
+description: Bibliothekar for the Perilous Peregrine Questing Company
+tags:
+  - person
+  - halfling
+  - Wohnviertel
+---
+Bibliothekar for the [Perilous Peregrine Questing Company](../factions/perilous-peregrine-questing-company.md)
+---
+title: Andreas Stieler
+description: Guildmaster of the Perilous Peregrine Questing Co
+tags:
+  - person
+  - human
+  - Wohnviertel
+---
+Guildmaster of the [Perilous Peregrine Questing Company](../factions/perilous-peregrine-questing-company.md)
+---
+title: Anna Senfbauer
+description: Bürgermeister
+tags:
+- person
+- Wohnviertel
+- city-council
+---
+
+- Mayor of Gelbenhügel. Commonly found at the [Rathaus](../places/rathaus.md) during the day.
+- Patron of [Brauhaus Weißwolf](../places/brauhaus-weisswolf.md), the smallest of the four breweries. Due to her position as mayor, her beer is now prominently on tap in the [Ratskeller](../places/ratskeller.md)
+- Her non-noble mustard farming family bought the brewery when the owner died with no heirs.
+- Previous family's symbol was a wolf, but they still use it on the bottle.
+---
+title: Bettina von Vierbäume
+description: Owner of the Glücksfuchs Brauhaus
+tags:
+  - person
+  - city-council
+---
+
+- Brewer and City Council member
+- Owner of the [Glucksfuchs Brauhaus](../places/glucksfuchs-brauhaus.md)
+- Hates [Heinz von Kleinerfluss](./heinz-von-kleinerfluss.md)' family
+- Symbol is a fox
+---
+title: Britta Funkensturm
+description: Purveyor of unique, strange, and possibly cursed relics.
+tags:
+---
+Purveyor of unique, strange, and possibly cursed relics.
+---
+title: Else von Nesselweber
+description: Owner of the Durstigeber Brauhaus
+tags:
+  - person
+  - city-council
+---
+- Brewer and City Council member
+- Owner of [Wirtshaus zum durstigen Eber](../places/wirtshaus-zum-durstigen-eber.md), the biggest of Gelbenhügel's four breweries. Biggest ego as well.
+- Hates everyone
+- Symbol is a boar
+---
+title: Ernst and Felix der Rote
+description: Identical twin dwarven alchemists
+tags:
+  - person
+  - dwarf
+  - alchemist
+  - Kronenviertel
+slug: ernst-and-felix-der-rote
+---
+Identical twin dwarven alchemists who have forgotten who is who. Early twenties with long, red beards. Their shop sits along the [Alchemistengasse](../places/alchemistengasse.md).
+
+Co-presidents of the [Alchemistengilde](../factions/alchemistengilde.md).
+---
+title: Frieda Stein
+description: Dwarven Sculpter
+tags:
+---
+Sculpter
+
+---
+title: Heinz von Kleinerfluss
+description: Owner of the Elchgeweihbrauerei
+tags:
+  - person
+  - city-council
+---
+- Brewer and City Council member
+- Owner of the [Elchgeweihbrauerei](../places/elchgeweihbrauerei.md)
+- Hates [Bettina von Vierbaume](./bettina-von-vierbaume.md)'s family
+- Symbol is a moose
+---
+title: Hildegard Sumpfgas
+description: Owner of Omas Küche
+tags:
+  - person
+  - hag
+  - Kronenviertel
+---
+Owner of [Omas Küche](../places/omas-kuche.md), located on the [Alchemistengasse](../places/alchemistengasse.md).
+
+A `hag` who has renounced her wicked ways and retired to the city to bake cruelty-free meat pies. They are bewitchingly delicious. Maybe a little *too* delicious. 
+
+Hates [Ernst and Felix de Rote](./ernst-and-felix-der-rote.md) and their stinky alchemical concoctions.
+---
+title: Johann Vogel
+description: Luxury clockmaker
+tags:
+---
+Luxury clockmaker
+---
+title: Marta Wolff
+description: Herbalist
+tags:
+---
+Herbalist
+---
+title: Walter Kraus
+description: Soapmaker
+tags:
+---
+Soapmaker
+---
+title: Alchemistengasse
+description: Alchemists' Row
+tags:
+  - Kronenviertel
+  - neighborhood
+---
+
+---
+title: Annasplatz
+description: Anna's Place
+tags:
+  - Wohnviertel
+  - platz
+---
+Main square in the city center, on which the [Rathaus](./rathaus.md) is situated.
+---
+title: Bibliothek
+description: Library
+tags:
+  - akademiegarten
+---
+
+---
+title: Bogenschießplatz
+description: Archery Field
+tags:
+  - die-weisen
+---
+
+---
+title: Elchgeweihbrauerei
+description: Moose Antlers Brewery
+tags:
+  - Wohnviertel
+  - brewery
+---
+
+---
+title: Essigfabrik
+description: Vinegar Works
+tags:
+  - die-weisen
+---
+
+---
+title: Geheimniswahrer
+description: Temple of the Secret Keepers
+tags:
+  - shrine
+  - koboldstadt
+---
+
+---
+title: Glockenspiel
+description: A chiming clock on the front of the Rathaus
+tags:
+  - Wohnviertel
+---
+
+---
+title: Heumarkt
+description: Hay Market
+tags:
+  - Marktviertel
+---
+
+---
+title: Hofgarten
+description: Royal Garden
+tags:
+  - Wohnviertel
+  - garden
+---
+
+---
+title: Hoftheater
+description: Royal Theater
+tags:
+  - Wohnviertel
+  - theater
+---
+
+---
+title: Ilsasplatz
+description: Ilsa's Square
+tags:
+  - Kronenviertel
+  - platz
+---
+
+---
+title: Ilsastraße
+description: Ilsa's Street
+tags:
+  - lagerbezirk
+  - neighborhood
+---
+
+---
+title: Kammerspiele
+description: Chamber Theater
+tags:
+  - lagerbezirk
+  - theater
+---
+
+---
+title: Kunstmarkt
+description: Art Market
+tags:
+  - kunstareal
+  - markt
+---
+
+---
+title: Luftschiffhafen
+description: Airship Port
+tags:
+  - tempelviertel
+---
+
+---
+title: Marktplatz
+description: Market Square
+tags:
+  - platz
+  - Marktviertel
+---
+
+---
+title: Odeon
+description: Odeon Theater
+tags:
+  - theater
+  - Kronenviertel
+---
+
+---
+title: Ostinstitut
+description: Eastern Institute
+tags:
+  - school
+  - akademiegarten
+---
+
+---
+title: Pilzfarm
+description: Mushroom Farm
+tags:
+  - sturmseite
+  - farm
+---
+
+---
+title: Post
+description: Post Office
+tags:
+  - Wohnviertel
+---
+
+---
+title: Promenadeplatz
+description: Parade Square
+tags:
+  - Kronenviertel
+  - platz
+---
+
+---
+title: Rathaus
+description: City Hall
+tags:
+  - Wohnviertel
+---
+
+---
+title: Ratskeller
+description: Common eating area in the basement of the Rathaus
+tags:
+  - Wohnviertel
+---
+
+---
+title: Reliquienkammer
+description: Relics Gallery
+tags:
+  - tempelviertel
+  - museum
+---
+
+---
+title: Residenz
+description: Residence of the Grand Dutchess
+tags:
+  - Wohnviertel
+---
+
+---
+title: Schrannenhalle
+description: Market Hall
+tags:
+  - Marktviertel
+---
+
+---
+title: Skulpturensammlung
+description: Sculpture Gallery
+tags:
+  - kunstareal
+  - museum
+---
+
+---
+title: Volkshalle
+description: People's Hall
+tags:
+  - Kronenviertel
+---
+
+---
+title: Volkstheater
+description: People's Theater
+tags:
+  - sturmseite
+  - theater
+---
+
+---
+title: Zaubererschule
+description: Magic Academy
+tags:
+  - Zauberviertel
+---
+
+---
+title: Alte Gemäldegalerie
+description: Old Picture Gallery
+tags:
+  - kunstareal
+  - museum
+---
+
+---
+title: Alter Hof
+description: Old Court
+tags:
+  - Wohnviertel
+---
+The old residence of the Grand Duke
+---
+title: Amselplatz
+description: Blackbird Square
+tags:
+  - platz
+  - die-Weisen
+  - Marktviertel
+  - Stiefelviertel
+---
+
+---
+title: Amseltor
+description: Blackbird Gate
+tags:
+  - Stiefelviertel
+  - Marktviertel
+  - gate
+---
+
+---
+title: Bogenschießplatz
+description: Archery Field
+tags:
+  - die-weisen
+---
+
+---
+title: Brauhaus Weißwolf
+description: Brewhouse Whitewolf
+tags:
+  - Marktviertel
+  - brewery
+---
+
+---
+title: Brauschule
+description: Brewing School
+tags:
+  - akademiegarten
+  - school
+---
+
+---
+title: Der Stadtgeist
+description: The Spirit of the City
+tags:
+  - statue
+  - Kronenviertel
+---
+130m tall bronze statue of the founder of [Hilde Brauer](../spirits/hilde-brauer.md), the founder of Gelbenhügel, wearing a dirndl and holding aloft a beer stein. Mustard flowers in her hair.
+---
+title: Glasschrein
+description: Glass Shrine
+tags:
+  - shrine
+  - tempelviertel
+---
+
+---
+title: Glücksfuchs Brauhaus
+description: Lucky Fox Brewery
+tags:
+  - Kronenviertel
+  - brewery
+---
+
+---
+title: Herzogspital
+description: Duke's Hospital
+tags:
+  - Stiefelviertel
+---
+
+---
+title: Ilsastraße
+description: Ilsa's Street
+tags:
+  - lagerbezirk
+  - neighborhood
+---
+
+---
+title: Königsplatz
+description: King's Square
+tags:
+  - tempelviertel
+  - kunstareal
+  - platz
+---
+
+---
+title: Neue Galerie
+description: New Picture Gallery
+tags:
+  - kunstareal
+  - museum
+---
+
+---
+title: Odeonsplatz
+description: Odeon's Square
+tags:
+  - Kronenviertel
+  - Wohnviertel
+---
+
+---
+title: Omas Küche
+description: Grandma's Kitchen
+tags:
+  - Kronenviertel
+  - food
+---
+Bakery run by [Hildegard Sumpfgas](../people/hildegard-sumpfgas.md), a reformed hag.
+---
+title: Östlicher Garten
+description: Eastern Garden
+tags:
+  - akademiegarten
+  - garden
+---
+
+---
+title: Residenzplatz
+description: Residence Square
+tags:
+  - platz
+  - Wohnviertel
+---
+
+---
+title: Sturmtor
+description: Storm Gate
+tags:
+  - Marktviertel
+  - Wohnviertel
+  - gate
+---
+
+---
+title: Volksplatz
+description: People's Square
+tags:
+  - Kronenviertel
+  - platz
+---
+
+---
+title: Wilhelmsplatz
+description: Wilhelm's Square
+tags:
+  - Kronenviertel
+  - platz
+---
+
+---
+title: Wirtshaus zum durstigen Eber
+description: Thirsty Boar Tavern
+tags:
+  - Marktviertel
+  - brewery
+---
+
+---
+title: Zauberinstitut
+description: Institute for Magical Studies
+tags:
+  - Kronenviertel
+  - school
+---
+
+
+---
+title: Credits and copyright
+description: Credits and copyright
+tags:
+---
+**Written and illustrated by** David Garrett
+
+**Playtested by** Sibel Baslamisli, Elizabeth Conley, Mason Fisher, Gretta Foxx, Matt Friedlander, Allison Halco, Rob Hays, Andrew Key, David Kuchler, Dave McQuery, Virginia Meyer, Ellie Miller, Scott Perry, Jared Woodard, Patrick Zmina
+
+——
+
+*The Glorious City of Gelbenhügel* is a free and open city setting based on historic Munich for [Shadowdark](https://www.thearcanelibrary.com/collections/shadowdark-rpg), [Cairn](https://cairnrpg.com/), and other rules-light fantasy games. It is a diverse, inclusive, optimistic, post-post-apocalyptic, high-fantasy world filled with nature spirits, the ruins of ages past, heroic quantities of beer and pretzels, and a mysterious, mythic underworld.
+
+*Gelbenhügel* is free — all material developed for it is available at no cost. Additionally, the source assets of the project will always be made available for ease of reuse: markdown for words and Affinity or Procreate files for maps and images.
+
+*Gelbenhügel* is open — it is dedicated to the public domain. ALL words, cartography, and art produced by Amalara Game Studio for the project are available under the [Creative Commons Zero (CC0)](https://creativecommons.org/publicdomain/zero/1.0/) designation, which means that you can copy, modify, and distribute any element made available here for personal or commercial use without asking for permission.
+
+*Gelbenhügel* also has a permissive Third Party Compatibility License for those interested in claiming official compatibility with the setting or using the compatibility logo.
+
+——
+
+*The Glorious City of Gelbenhügel* is copyright © 2024-2026 by David Garrett. This work is marked with CC0 1.0, dedicating it to the public domain. To view a copy of this license, visit https://creativecommons.org/publicdomain/zero/1.0/​
+
+*Cairn* by Yochai Gal is licensed for use under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
+
+Shadowdark
+---
+title: Gelbenhügel Third Party License
+description: Gelbenhügel Third Party License
+tags:
+---
+*Gelbenhügel* content published by Amalara Game Studio is dedicated to the public domain using the [Creative Commons 0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/) license. This includes, but is not limited to, art, text, and cartography as well as the proper names and descriptions of locations, characters, factions, and creatures. This means that you are free to distribute, remix, adapt, and build upon the material in any medium or format, even for commercial purposes.
+
+If you wish to additionally indicate compatibility with *Gelbenhügel*, such as using the "Designed With Care in Gelbenhügel" logo or tagline, you must abide by the following terms:
+
+1. Your product cannot use the *Amalara Game Studio* or *Gelbenhügel* logo without explicit permission.
+2. You are allowed and encouraged (but not required) to use the *Gelbenhügel* compatibility logo.
+3. You may not give the impression that this is an official *Gelbenhügel* product or that Amalara Game Studio endorses you in any way without a separate agreement.
+
+Remember that *Gelbenhügel* is an optimistic, inclusive, and diverse setting. Fascism, homophobia, transphobia, racism, xenophobia, and sexism aren't welcome.
+## Logos
+
+Download the "Designed with Care in Gelbenhügel" compatibility logos below.
+
+![](../../../assets/compatibility-logo.svg)![](../../../assets/compatibility-logo-black-and-white.svg)
+---
+title: Using this guide
+description: Using this guide
+tags:
+---
+
+`S` for Shadowdark specific rules.
+
+`C` for Cairn specific rules.
+---
+title: Hilde Brauer
+description: Hilde Brauer, founder of Gelbenhügel
+tags:
+---
+
+---
+title: Geistertrank
+description: A magical potion that restores ability damage
+tags:
+  - magic
+  - consumable
+---
+
+---
+title: Maßkrug
+description: A magical beer stein
+tags:
+  - magic
+  - rechargable
+---
+No self-respecting adventurer would venture outside a city, let alone into a dark and dangerous dungeon without their maßkrug in hand. When this stoneware beer stein is filled with exactly one liter of liquid, you can use transform that liquid, no matter how putrid, fetid, or toxic, into exactly one liter of pure, thirst-quenching beer.
+
+After one use, you can recharge the maßkrug by filling it with fresh beer, which is happily absorbed by the stein.
+---
+title: Schrumpftrank
+description: A magical shrinking potion
+tags:
+  - magic
+  - consumable
+---
+Shrinks consumer to 2 feet tall. Lasts 4 hours.
+---
+title: Wunderkammer
+description: Magical vending machines
+tags:
+  - adventuring-company
+  - magic
+---
+Members in good standing can open a wunderkammer with a touch. Critical items are always in stock and relics are randomly available. By withdrawing an item from a wunderkammer, a guild member immediately incurs a debt to the guild.
+
+Characters can find at least one of each item on the *Gear* list, along with:
+
+| Item                                               | gp  |
+| -------------------------------------------------- | --- |
+| Geistertrank (restores all ability damage)         | 500 |
+| Rations (3 uses)                                   | 10  |
+| Stärkungsmittel (a tonic that removes all fatigue) | 10  |
+| Schrumpftrank (shrinking potions)                  | 5   |
+|                                                    |     |
+
+---
+title: Zaubersenf
+description: Magical mustard that makes mystery meat edible
+tags:
+  - magic
+  - consumable
+---
+This magical yellow mustard makes edible any meat that it is applied to. You may apply one serving of zaubersenf to a cut of meat no larger than 16oz. The mustard immediately neutralizes any poisons or toxins present in the meat and renders it both tasty and delicious. Each jar contains ten servings.
+
+*”Karl! You’ve got to try this new wurst I just made!”*
+
+*Karl stroked his beard and squinted at his diminutive adventuring companion. Jürgen hadn’t brought any meat with them into the dungeon, so where in the blazes had he found the ingredients to make a piping hot wurst? The rats?*
+
+*He looked at the full jar of zaubersenf sitting by the fire, looked back at his eager friend, and sighed — better not to ask.*
+---
+title: Maßkrug
+description: A magical beer stein
+tags:
+  - magic
+  - rechargable
+---
+No self-respecting adventurer would venture outside a city, let alone into a dark and dangerous dungeon without their maßkrug in hand. When this stoneware beer stein is filled with exactly one liter of liquid, you can use transform that liquid, no matter how putrid, fetid, or toxic, into exactly one liter of pure, thirst-quenching beer.
+
+After one use, you can recharge the maßkrug by filling it with fresh beer, which is happily absorbed by the stein.
+---
+title: The Eastern Crown
+description: A magical crown that is both the symbol and the spirit of state
+tags:
+  - magic
+---
+Dukes and duchesses rule in the name of the crown. It is houses the spirit of the Ostreich, and is therefore superior to the ruling monarch themself.
+
+Coronation crown — only worn during coronation. At all other times, it is guarded by “crown guards.”
+---
+title: Questing Medallion
+description: A magical medallion that allows for a quick and safe return
+tags:
+  - magic
+  - rechargable
+---
+Powered by the patron spirits of the guild, the Questing Medallion is the primary benefit of membership.
+
+As an action, a member in good standing may speak the command word and be *teleported* back to their guild house. This command will work anywhere within the borders of the world of Gilea, but does not allow the individual to be transported across planar boundaries.
+
+Recharge the medallion by donating 100 gold to the guild's operating funds.
+---
+title: Stärkungsmittel
+description: A magical potion that restores fatigue
+tags:
+  - magic
+  - consumable
+---
+Restorative tonic — removes all fatigue.
+---
+title: Dwarves
+description: The Volk of the mountains
+tags:
+  - volk
+---
+**Dwarves** are the short, bearded Volk of the mountains. They have skin the color of granite and eyes as black as coal. They are all bald, so they decorate, dye, and style their beards.
+
+:::note[Cairn]
+- +2 Strength
+- **Iron Gut**: Poison damage against you (regardless of source) is always `impaired`
+:::
+---
+title: Elves
+description: The Volk of the woods
+tags:
+  - volk
+---
+**Elves** are the slender, androgynous Volk of the woods. They have skin the color of tree bark, sapphire-green eyes, and flower-filled hair that resembles cotton, thistledown, or dandelion fluff.
+
+:::note[Cairn]
+- +2 DEX
+- Ranged attacks are always `enhanced`
+:::
+
+---
+title: Gnomes
+description: The Volk of the hills
+tags:
+  - volk
+---
+**Gnomes** are the short, stout Volk of the hills. They are shorter than dwarves, but otherwise resemble humans. They are highly social, sharing childrearing and other domestic duties within large extended families.
+
+You know the Common and Gnomish languages.
+
+:::note[Cairn]
+ - +2 Willpower
+ - **Trickery**: Three times per day, you can cause a damage roll against you or an ally who you can see to be `impaired`.
+ :::
+
+:::note[Shadowdark]
+:::
+
+
+---
+title: Goblins
+description: The Volk of the underground
+tags:
+  - volk
+---
+Goblins are the small, green Volk of the *Untergründ*.
+
+> [!info] Cairn
+>
+> **Keen Senses.** You can't be surprised
+
+---
+title: Halflings
+description: The Volk of the fields
+tags:
+  - volk
+---
+Halflings are the Volk of the fields. They are expert farmers, bakers, and brewers and are famed for their hospitality.
+---
+title: Humans
+description: The Volk of the plains
+tags:
+  - volk
+---
+
+---
+title: Kobolds
+description: The Volk of the wetlands
+tags:
+  - volk
+---
+**Kobolds** are the short, reptilian Volk of the wetlands.
+---
+title: Half Orc
+description: The volk of
+tags:
+---
+While most orcs enjoy eating other intelligent creatures, a select few eschew the practice and integrate into civil society. These are typically the parents of `half-orcs`, who enjoy legal standing as Volk.
+
+> [!info] Cairn
+> +2 Strength
+
+
