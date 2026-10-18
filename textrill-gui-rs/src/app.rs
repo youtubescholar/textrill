@@ -1,0 +1,1597 @@
+// Copyright (C) 2026 the textrill authors.
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.  See the LICENSE file for the full text.
+
+//! Application state and layout.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use egui::Ui;
+use textrill::options::Options;
+
+use crate::args::Args;
+use crate::dialogs::{self, Chooser, NativeChooser};
+use crate::document::Document;
+use crate::file_browser::{BrowserOutcome, FileBrowser, FileIntent};
+use crate::options_panel::OptionsPanel;
+use crate::presets::{self, Preset};
+use crate::settings::Settings;
+use crate::summary;
+use crate::theme::{self, Theme};
+use crate::worker::ConversionWorker;
+
+/// How long to wait after the last change before converting.
+pub const AUTO_CONVERT_DELAY: Duration = Duration::from_millis(300);
+
+const NEW_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::N);
+const SAVE_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
+const SAVE_TEXT_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers {
+        command: true,
+        shift: true,
+        ..egui::Modifiers::NONE
+    },
+    egui::Key::S,
+);
+const CONVERT_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Enter);
+const COPY_HTML_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers {
+        command: true,
+        shift: true,
+        ..egui::Modifiers::NONE
+    },
+    egui::Key::C,
+);
+const QUIT_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
+/// Toggle the immersive "focus" view that hides the menus and the toolbar,
+/// leaving the text and a slim Convert/Save HTML action bar.
+/// `Ctrl/cmd+Shift+F` is the convention browsers give fullscreen; the *same*
+/// shortcut is a second, keyboard-only way back alongside the visible
+/// "Exit focus" button.
+const FOCUS_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers {
+        command: true,
+        shift: true,
+        ..egui::Modifiers::NONE
+    },
+    egui::Key::F,
+);
+/// The reset command needs a route that does not depend on any widget being
+/// on screen, because the whole point of it is recovering a layout that is
+/// off-screen or folded away. `Ctrl/Cmd+Alt+0` is outside the set egui's own
+/// zoom shortcuts (`Ctrl/Cmd` with `+`, `-`, `0`) consume.
+const RESET_WINDOW_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers {
+        command: true,
+        alt: true,
+        ..egui::Modifiers::NONE
+    },
+    egui::Key::Num0,
+);
+
+/// What a save command wants next.
+///
+/// There is no dialog yet, so a save with nowhere to write reports the name it
+/// would have proposed. The chrome slice wires that to a real file chooser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SaveRequest {
+    /// Written to this path.
+    Saved(PathBuf),
+    /// The caller must choose a name; this is what `Save As` would propose.
+    NeedsName(PathBuf),
+}
+
+/// The user's answer to the unsaved-changes prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveAnswer {
+    /// Write the text back first, then carry out the waiting command.
+    Save,
+    /// Throw the edits away and carry out the waiting command.
+    Discard,
+    /// Do nothing.
+    Cancel,
+}
+
+/// The command waiting behind the unsaved-changes prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingAction {
+    New,
+    Open,
+    LoadSample,
+    Quit,
+}
+
+/// The whole front end.
+pub struct TextrillApp {
+    /// The open document and its file state.
+    pub doc: Document,
+    /// The live option set. The panel writes straight through
+    /// `textrill::cli::set_value`, so this is the same model the engine sees.
+    pub opts: Options,
+    /// The options form and its filter.
+    pub panel: OptionsPanel,
+    /// Whether the options dialog is shown (`View → Show options`).
+    pub show_options: bool,
+    /// Whether the About window is open.
+    pub about_open: bool,
+    /// The command held back until the unsaved-changes prompt is answered.
+    pending: Option<PendingAction>,
+    /// Set once the window has been told to close, so an in-flight
+    /// `close_requested` cannot re-open the prompt.
+    closing: bool,
+    /// Rendered HTML, or the error text after a failed conversion.
+    pub output: String,
+    /// Status line: `Ready`, `converting…`, a summary, or `error`.
+    pub status: String,
+    /// The newest conversion requested.
+    pub latest: u64,
+    /// The newest conversion applied. `latest > completed` means work is out.
+    pub completed: u64,
+    /// Convert as the text changes, after [`AUTO_CONVERT_DELAY`].
+    pub auto: bool,
+    worker: Arc<ConversionWorker>,
+    waker_installed: bool,
+    /// When the debounced conversion is due, if one is pending.
+    deadline: Option<Instant>,
+    /// The window title last sent to the platform, so it is only sent on
+    /// change. Sending it every frame requests a repaint every frame, which
+    /// never lets the UI go to sleep.
+    title_sent: Option<String>,
+    settings: Settings,
+    /// The last normal (non-maximized) window size, in points *before* zoom, so
+    /// it is unaffected by a change of zoom and can be handed straight back to
+    /// `ViewportBuilder::with_inner_size`. Never the maximized size; see
+    /// [`crate::window_state`].
+    pub window_size: [f32; 2],
+    /// Whether the window was maximized the last time it was observed.
+    pub window_maximized: bool,
+    /// The UI zoom the user last chose.
+    pub zoom: f32,
+    /// The colour theme, from the window's own [`Theme`] set.
+    pub theme: Theme,
+    /// The plain-text size multiplier over the built-in type scale.
+    pub text_size: f32,
+    /// Whether animation is switched off (WCAG `prefers-reduced-motion`).
+    pub reduce_motion: bool,
+    /// Immersive view: menus and toolbar hidden, leaving the text, a slim
+    /// Convert/Save HTML action bar, and the way back.
+    pub focus_mode: bool,
+    /// Whether the chosen theme/text size/motion has been pushed into the egui
+    /// context yet. `draw` does it on the first frame, so the look is applied
+    /// from the very first paint both in the window and under `egui_kittest`.
+    applied_style: bool,
+    /// The file choosers. Tests swap in a stub so the command logic can run
+    /// without a desktop portal.
+    chooser: Box<dyn Chooser>,
+    /// Use the in-app [`FileBrowser`] instead of the desktop's own chooser.
+    ///
+    /// Defaults on when no usable native dialog is present (see
+    /// [`dialogs::system_dialog_available`]), which is what makes a native
+    /// install on a portal-less desktop work. The user can flip it either way
+    /// from the View menu, and the choice is remembered.
+    use_builtin_browser: bool,
+    /// Whether [`dialogs::system_dialog_available`] reported a usable desktop
+    /// dialog when the app started. Cached so the status line can explain a
+    /// chooser that never appeared without probing the filesystem per frame.
+    native_dialog_available: bool,
+    /// Whether this process runs inside a Flatpak sandbox
+    /// ([`dialogs::in_flatpak`]), decided once at startup. In a Flatpak the
+    /// portal is always present, so the app always uses it and never offers the
+    /// built-in browser, which the sandbox's lack of home access would leave
+    /// staring at an empty tree.
+    in_flatpak: bool,
+    /// The built-in browser, when one is open.
+    file_browser: Option<FileBrowser>,
+    /// The directory the last open or save used, so the next dialog starts
+    /// there (or in the user's Documents) instead of wherever the input was
+    /// launched from. `None` until one is recorded or loaded from settings.
+    last_dir: Option<PathBuf>,
+    /// The key of the chosen preset ([`crate::presets`]). A starting point, not
+    /// a mode: the options it set are the live ones, and the window shows a
+    /// "Modified" marker as soon as they are edited away from the preset's
+    /// bundle.
+    preset: &'static str,
+}
+
+impl Default for TextrillApp {
+    fn default() -> Self {
+        Self::with_settings(Settings::from_default())
+    }
+}
+
+impl TextrillApp {
+    /// Build an app backed by `settings`, applying the stored `auto` choice.
+    ///
+    /// Tests pass a [`Settings`] in a temporary directory so a developer's real
+    /// configuration cannot change what the tests observe.
+    pub fn with_settings(settings: Settings) -> Self {
+        let in_flatpak = dialogs::in_flatpak();
+        // In a Flatpak the FileChooser portal is always reachable, so treat a
+        // dialog as available even when the filesystem probe cannot see the
+        // host's `.portal` files.
+        let native_dialog_available = dialogs::system_dialog_available() || in_flatpak;
+        let mut app = Self {
+            doc: Document::new(),
+            opts: Options::default(),
+            panel: OptionsPanel::default(),
+            show_options: false,
+            about_open: false,
+            pending: None,
+            closing: false,
+            output: String::new(),
+            status: "Ready".to_string(),
+            latest: 0,
+            completed: 0,
+            auto: true,
+            worker: ConversionWorker::new(2),
+            waker_installed: false,
+            deadline: None,
+            title_sent: None,
+            settings,
+            window_size: crate::window_state::DEFAULT_SIZE,
+            window_maximized: false,
+            zoom: 1.0,
+            theme: Theme::default(),
+            text_size: theme::DEFAULT_TEXT_SIZE,
+            reduce_motion: false,
+            focus_mode: false,
+            applied_style: false,
+            chooser: Box::new(NativeChooser),
+            use_builtin_browser: !native_dialog_available,
+            native_dialog_available,
+            in_flatpak,
+            preset: presets::default_preset().key,
+            file_browser: None,
+            last_dir: None,
+        };
+        app.restore_settings();
+        app
+    }
+
+    /// Replace the file choosers. Tests use this to answer prompts without a
+    /// desktop portal. It also routes file commands to the stub (rather than
+    /// the built-in browser), so a stub always answers them.
+    pub fn set_chooser(&mut self, chooser: Box<dyn Chooser>) {
+        self.chooser = chooser;
+        self.use_builtin_browser = false;
+        // A stub always answers, so no "no dialog" note applies to it.
+        self.native_dialog_available = true;
+    }
+
+    /// Whether file commands use the built-in browser rather than the desktop
+    /// chooser.
+    pub fn uses_builtin_browser(&self) -> bool {
+        self.use_builtin_browser
+    }
+
+    /// Override the cached result of the startup dialog probe. Tests use this to
+    /// exercise the "no dialog" status note on a host that does have one.
+    pub fn set_native_dialog_available(&mut self, available: bool) {
+        self.native_dialog_available = available;
+    }
+
+    /// Whether the built-in browser may be offered here. It is not in a
+    /// Flatpak: the manifest grants no home access to browse, and the portal is
+    /// always present instead, so the app uses the portal and this choice is
+    /// withheld rather than shown as a dead end.
+    pub fn builtin_browser_available(&self) -> bool {
+        !self.in_flatpak
+    }
+
+    /// Override the Flatpak detection. Tests use this to exercise the
+    /// portal-only path without an actual sandbox.
+    pub fn set_in_flatpak(&mut self, in_flatpak: bool) {
+        self.in_flatpak = in_flatpak;
+        if in_flatpak {
+            self.use_builtin_browser = false;
+        }
+    }
+
+    /// Whether the built-in browser is currently on screen.
+    pub fn is_browsing(&self) -> bool {
+        self.file_browser.is_some()
+    }
+
+    /// The directory the built-in browser is showing, if one is open. For
+    /// tests that pin where a file dialog starts.
+    pub fn browser_directory(&self) -> Option<&std::path::Path> {
+        self.file_browser.as_ref().map(FileBrowser::directory)
+    }
+
+    /// Choose which chrome file commands use: `true` for the built-in browser,
+    /// `false` for the desktop's own chooser. The choice is remembered.
+    pub fn set_builtin_browser(&mut self, builtin: bool) {
+        self.use_builtin_browser = builtin;
+        if let Err(error) = self.settings.set_builtin_browser(builtin) {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// The chosen preset's key, for tests and the settings store.
+    pub fn preset_key(&self) -> &'static str {
+        self.preset
+    }
+
+    /// The chosen preset. An unknown stored key falls back to Plain, so a
+    /// hand-edited settings file can never leave the window presetting to
+    /// nothing.
+    pub fn current_preset(&self) -> &'static Preset {
+        presets::get(self.preset).unwrap_or_else(presets::default_preset)
+    }
+
+    /// Whether the live options differ from the chosen preset's bundle. This is
+    /// the "Modified" marker; a preset is a starting point, so editing any
+    /// option away from it is normal, not an error.
+    pub fn preset_is_modified(&self) -> bool {
+        !presets::same_options(&self.opts, &self.current_preset().options())
+    }
+
+    /// Adopt `preset`: write its option bundle and remember the choice. The
+    /// options it sets stay editable, so this is a starting point rather than a
+    /// lock.
+    pub fn apply_preset(&mut self, preset: &Preset) {
+        self.opts = preset.options();
+        self.preset = preset.key;
+        if let Err(error) = self.settings.set_preset(preset.key) {
+            self.status = format!("could not save settings: {error}");
+        }
+        self.schedule_convert(Instant::now());
+    }
+
+    /// The options a conversion actually uses.
+    ///
+    /// `meta_charset` is forced on: the engine defaults it off so no golden
+    /// moves, which is right for a byte-compatible CLI, but the GUI always
+    /// writes UTF-8 and hands the file to a browser, which guesses wrong
+    /// without a declaration.
+    pub fn conversion_options(&self) -> Options {
+        let mut opts = self.opts.clone();
+        opts.meta_charset = true;
+        opts
+    }
+
+    /// Apply the persisted `auto` choice, option set and window geometry, if
+    /// there are any. Everything read back is clamped or defaulted, so a
+    /// hand-edited file can never stop the window from opening.
+    pub fn restore_settings(&mut self) {
+        if let Some(auto) = self.settings.auto() {
+            self.auto = auto;
+        }
+        if let Some(json) = self.settings.options() {
+            crate::options_store::decode(&json, &mut self.opts);
+        }
+        self.window_size = self
+            .settings
+            .window_size()
+            .unwrap_or(crate::window_state::DEFAULT_SIZE);
+        self.window_maximized = self.settings.maximized().unwrap_or(false);
+        self.zoom = self.settings.zoom().unwrap_or(1.0);
+        if let Some(theme) = self.settings.theme() {
+            self.theme = theme;
+        }
+        if let Some(text_size) = self.settings.text_size() {
+            self.text_size = text_size;
+        }
+        if let Some(reduce_motion) = self.settings.reduce_motion() {
+            self.reduce_motion = reduce_motion;
+        }
+        if let Some(builtin) = self.settings.builtin_browser() {
+            // A remembered choice cannot re-enable the built-in browser inside
+            // a Flatpak, where it has no home access to browse.
+            self.use_builtin_browser = builtin && !self.in_flatpak;
+        }
+        self.last_dir = self.settings.last_dir();
+        if let Some(key) = self.settings.preset() {
+            // An unreadable key is Plain, never a dangling choice.
+            self.preset = presets::get(&key)
+                .unwrap_or_else(presets::default_preset)
+                .key;
+        }
+    }
+
+    /// Persist the display choices the user made (theme, text size, motion).
+    fn store_display_settings(&mut self) {
+        if let Err(error) =
+            self.settings
+                .store_display(self.theme, self.text_size, self.reduce_motion)
+        {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Put the chosen theme, text size and motion into effect on `ctx`.
+    ///
+    /// Called once at startup (so the window never flashes at the stock look)
+    /// and again whenever a control changes one of the three.
+    pub fn apply_ui_style(&self, ctx: &egui::Context) {
+        theme::apply(ctx, self.theme, self.text_size, self.reduce_motion);
+    }
+
+    /// Persist the current `auto` choice and option set.
+    pub fn store_settings(&mut self) {
+        let json = crate::options_store::encode(&self.opts);
+        let stored = self
+            .settings
+            .set_auto(self.auto)
+            .and_then(|()| self.settings.set_options(&json));
+        if let Err(error) = stored {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Persist the window size, maximized flag and zoom in one atomic write.
+    ///
+    /// The stored size is always the last *normal* size, never the size a
+    /// maximized window happens to have, so un-maximizing on the next launch
+    /// gives back a window the user can still grab.
+    pub fn store_window_state(&mut self) {
+        let stored =
+            self.settings
+                .set_window_state(self.window_size, self.window_maximized, self.zoom);
+        if let Err(error) = stored {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Persist everything the window owns: the option set and the geometry.
+    fn persist(&mut self) {
+        self.store_settings();
+        self.store_window_state();
+    }
+
+    /// `View → Reset window size and zoom`: return to the size a first run
+    /// opens at, at 100%, and forget the stored geometry so the reset survives
+    /// a restart too. This is the one action that always undoes a geometry the
+    /// user does not want.
+    pub fn reset_window_state(&mut self, ctx: &egui::Context) {
+        self.window_size = crate::window_state::DEFAULT_SIZE;
+        self.window_maximized = false;
+        self.zoom = 1.0;
+        ctx.set_zoom_factor(1.0);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            crate::window_state::DEFAULT_SIZE[0],
+            crate::window_state::DEFAULT_SIZE[1],
+        )));
+        if let Err(error) = self.settings.clear_window_state() {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Apply the startup choices from the command line, in the order `app.py`
+    /// did: open the file, set the dialect/table options, then reconvert if an
+    /// option was given so the preview matches straight away.
+    pub fn apply_command_line(&mut self, args: &Args) {
+        if let Some(file) = &args.file {
+            if let Err(error) = self.load_file(file) {
+                self.status = error;
+            }
+        }
+        if let Some(xhtml) = args.xhtml {
+            let value = if xhtml { "true" } else { "false" };
+            let _ = textrill::cli::set_value(&mut self.opts, "xhtml", value);
+        }
+        if args.tables {
+            let _ = textrill::cli::set_value(&mut self.opts, "make_tables", "true");
+        }
+        if args.xhtml.is_some() || args.tables {
+            self.convert_now();
+        }
+    }
+
+    // ----------------------------------------------------------- converting
+
+    /// Queue a conversion of the current text and options.
+    ///
+    /// Waiting work is dropped by the worker; a burst of edits leaves the
+    /// newest job waiting, not one copy of the document per keystroke.
+    pub fn request_conversion(&mut self) {
+        let opts = self.conversion_options();
+        self.latest = self.worker.convert(&self.doc.text, &opts);
+        self.status = "converting…".to_string();
+    }
+
+    /// A text edit: mark the document dirty and, when auto is on, debounce.
+    pub fn on_edit(&mut self, now: Instant) {
+        self.doc.dirty = true;
+        if self.auto {
+            self.schedule_convert(now);
+        }
+    }
+
+    /// Queue a conversion, coalescing a burst of changes.
+    ///
+    /// When auto is off an *option* change still converts immediately, but a
+    /// never-converted document does too, so the preview is never empty by
+    /// default.
+    pub fn schedule_convert(&mut self, now: Instant) {
+        if self.auto || self.latest == 0 {
+            self.deadline = Some(now + AUTO_CONVERT_DELAY);
+        } else {
+            self.convert_now();
+        }
+    }
+
+    /// Convert immediately, cancelling any pending debounce.
+    pub fn convert_now(&mut self) {
+        self.deadline = None;
+        self.request_conversion();
+    }
+
+    /// Fire the debounced conversion if its deadline has passed.
+    pub fn tick(&mut self, now: Instant) {
+        if let Some(deadline) = self.deadline {
+            if now >= deadline {
+                self.convert_now();
+            }
+        }
+    }
+
+    /// Apply every finished conversion, dropping results older than the newest
+    /// request.
+    pub fn drain(&mut self) {
+        while let Some(outcome) = self.worker.poll() {
+            if outcome.generation < self.latest {
+                continue; // a newer conversion is already under way
+            }
+            self.completed = outcome.generation;
+            match outcome.error {
+                Some(error) => {
+                    self.output = error;
+                    self.status = "error".to_string();
+                }
+                None => {
+                    let lines = if outcome.html.is_empty() {
+                        0
+                    } else {
+                        outcome.html.matches('\n').count() + 1
+                    };
+                    self.output = outcome.html;
+                    self.doc.note_converted(&self.output);
+                    self.status = format!("{lines} lines · {:.0} ms", outcome.seconds * 1000.0);
+                }
+            }
+        }
+    }
+
+    // ----------------------------------------------------------- documents
+
+    /// `File → New`, after the unsaved-changes prompt when there are edits.
+    pub fn new_document(&mut self) {
+        if self.doc.dirty {
+            self.pending = Some(PendingAction::New);
+        } else {
+            self.do_new();
+        }
+    }
+
+    fn do_new(&mut self) {
+        self.doc.reset();
+        self.convert_now();
+    }
+
+    /// `File → Load example`, after the prompt when there are edits.
+    pub fn load_sample(&mut self) {
+        if self.doc.dirty {
+            self.pending = Some(PendingAction::LoadSample);
+        } else {
+            self.do_load_sample();
+        }
+    }
+
+    fn do_load_sample(&mut self) {
+        self.doc.load_sample();
+        self.convert_now();
+    }
+
+    /// Open `path`, remembering its encoding. Never overwrites the text on
+    /// failure.
+    pub fn load_file(&mut self, path: &std::path::Path) -> Result<(), String> {
+        self.doc.load(path)?;
+        self.convert_now();
+        Ok(())
+    }
+
+    /// `File → Save text`. Uses the opened path, or reports the one to propose.
+    pub fn save_text(&mut self) -> Result<SaveRequest, String> {
+        match self.doc.path.clone() {
+            Some(path) => {
+                self.doc.save_text_to(&path)?;
+                Ok(SaveRequest::Saved(path))
+            }
+            None => Ok(SaveRequest::NeedsName(self.doc.suggested_text_name())),
+        }
+    }
+
+    /// `File → Save text`, to an explicit path.
+    pub fn save_text_to(&mut self, path: &std::path::Path) -> Result<(), String> {
+        self.doc.save_text_to(path)
+    }
+
+    /// `File → Save`: write the HTML, never over the text file being converted.
+    pub fn save_document(&mut self) -> Result<SaveRequest, String> {
+        match self.doc.output_path.clone() {
+            Some(path) => {
+                self.save_html_to(&path)?;
+                Ok(SaveRequest::Saved(path))
+            }
+            None => Ok(SaveRequest::NeedsName(self.doc.suggested_output_name())),
+        }
+    }
+
+    /// `File → Save As`, to an explicit path.
+    pub fn save_html_to(&mut self, path: &std::path::Path) -> Result<(), String> {
+        self.doc.save_html_to(path, &self.output)
+    }
+
+    /// The name `Save As` should propose.
+    pub fn suggested_output_name(&self) -> PathBuf {
+        self.doc.suggested_output_name()
+    }
+
+    // ------------------------------------------------------------- commands
+
+    /// `Edit → Reset options`.
+    pub fn reset_options(&mut self) {
+        self.opts = Options::default();
+        self.schedule_convert(Instant::now());
+    }
+
+    /// `Edit → Copy HTML`.
+    pub fn copy_html(&mut self, ctx: &egui::Context) {
+        ctx.copy_text(self.output.clone());
+        self.status = "HTML copied to the clipboard".to_string();
+    }
+
+    /// `File → Open…`: ask about unsaved text, then choose a file.
+    pub fn open_document(&mut self) {
+        if self.doc.dirty {
+            self.pending = Some(PendingAction::Open);
+        } else {
+            self.do_open();
+        }
+    }
+
+    /// The directory a file dialog should open in. A freshly opened document
+    /// wins, so saving stays beside its source; otherwise the last directory
+    /// used is remembered, and failing that the user's Documents. This is what
+    /// stops an untitled conversion (the sample, a paste) from dropping its
+    /// output in whatever transient folder the app happened to start in.
+    fn file_dialog_dir(&self) -> PathBuf {
+        if let Some(dir) = self
+            .doc
+            .path
+            .as_deref()
+            .and_then(|path| path.parent())
+            .filter(|dir| dir.is_dir())
+        {
+            return dir.to_path_buf();
+        }
+        if let Some(dir) = self.last_dir.as_ref().filter(|dir| dir.is_dir()) {
+            return dir.clone();
+        }
+        documents_dir()
+    }
+
+    /// The directory `Save As` should open in.
+    ///
+    /// The already-written HTML's directory wins (a second `Save As` returns to
+    /// where the HTML last went), then the source file's, then the same
+    /// recent/Documents place an open starts in. [`Self::file_dialog_dir`] alone
+    /// would always use the source's directory and forget an output location
+    /// the user chose.
+    fn save_html_dir(&self) -> PathBuf {
+        self.doc
+            .output_path
+            .as_deref()
+            .or(self.doc.path.as_deref())
+            .and_then(std::path::Path::parent)
+            .filter(|dir| dir.is_dir())
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| self.file_dialog_dir())
+    }
+
+    /// Remember `path`'s directory for the next file dialog, and persist it.
+    fn remember_dir(&mut self, path: &std::path::Path) {
+        let Some(dir) = path.parent().filter(|dir| dir.is_dir()) else {
+            return;
+        };
+        self.last_dir = Some(dir.to_path_buf());
+        if let Err(error) = self.settings.set_last_dir(dir) {
+            self.status = format!("could not save settings: {error}");
+        }
+    }
+
+    /// Explain a `None` from the native chooser when no dialog was expected to
+    /// appear at all.
+    ///
+    /// A `None` is normally the user cancelling, and stays silent. But when the
+    /// built-in browser is off on a desktop [`dialogs::system_dialog_available`]
+    /// reported as having no file dialog, a `None` almost certainly means the
+    /// dialog never appeared — a missing portal daemon is indistinguishable from
+    /// a cancel to `rfd` — so say how to get a chooser back. This is a
+    /// best-effort heuristic, not a live probe.
+    fn note_if_no_dialog(&mut self) {
+        if !self.use_builtin_browser && !self.native_dialog_available {
+            self.status =
+                "No file dialog is available here; turn on View → Use built-in file browser."
+                    .to_string();
+        }
+    }
+
+    fn do_open(&mut self) {
+        let dir = self.file_dialog_dir();
+        if self.use_builtin_browser {
+            self.file_browser = Some(FileBrowser::for_open_in(dir));
+        } else if let Some(path) = self.chooser.open_text(Some(&dir)) {
+            self.load_or_report(path);
+        } else {
+            self.note_if_no_dialog();
+        }
+    }
+
+    /// Load `path`, reporting any failure on the status line.
+    fn load_or_report(&mut self, path: PathBuf) {
+        match self.load_file(&path) {
+            Ok(()) => self.remember_dir(&path),
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// Write the HTML to `path`, reporting the result on the status line.
+    fn save_html_or_report(&mut self, path: PathBuf) {
+        match self.save_html_to(&path) {
+            Ok(()) => {
+                self.status = format!("saved {}", path.display());
+                self.remember_dir(&path);
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// Write the text to `path`, reporting the result on the status line.
+    fn save_text_or_report(&mut self, path: PathBuf) {
+        match self.save_text_to(&path) {
+            Ok(()) => {
+                self.status = format!("saved text to {}", path.display());
+                self.remember_dir(&path);
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// `File → Save`: write the HTML where it is already going, or ask.
+    pub fn save_document_command(&mut self) {
+        if self.doc.output_path.is_some() {
+            self.report_document();
+        } else {
+            self.save_document_as_command();
+        }
+    }
+
+    /// `File → Save As…`: always ask where the HTML should go.
+    pub fn save_document_as_command(&mut self) {
+        let dir = self.save_html_dir();
+        let name = self
+            .suggested_output_name()
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "output.html".to_string());
+        if self.use_builtin_browser {
+            self.file_browser = Some(FileBrowser::for_save_in(FileIntent::SaveHtml, dir, name));
+        } else {
+            let suggested = dir.join(name);
+            if let Some(path) = self.chooser.save_html(&suggested) {
+                self.save_html_or_report(path);
+            } else {
+                self.note_if_no_dialog();
+            }
+        }
+    }
+
+    /// `File → Save text…`: write the text to the opened path, or ask.
+    pub fn save_text_command(&mut self) {
+        match self.doc.path.clone() {
+            Some(path) => self.save_text_or_report(path),
+            None => {
+                let dir = self.file_dialog_dir();
+                let name = self
+                    .doc
+                    .suggested_text_name()
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "untitled.txt".to_string());
+                if self.use_builtin_browser {
+                    self.file_browser =
+                        Some(FileBrowser::for_save_in(FileIntent::SaveText, dir, name));
+                } else {
+                    let suggested = dir.join(name);
+                    if let Some(path) = self.chooser.save_text(&suggested) {
+                        self.save_text_or_report(path);
+                    } else {
+                        self.note_if_no_dialog();
+                    }
+                }
+            }
+        }
+    }
+
+    fn report_document(&mut self) {
+        match self.save_document() {
+            Ok(SaveRequest::Saved(path)) => self.status = format!("saved {}", path.display()),
+            Ok(SaveRequest::NeedsName(path)) => {
+                self.status = format!("no output path for {}", path.display());
+            }
+            Err(error) => self.status = error,
+        }
+    }
+
+    /// `File → Quit`. Asks about unsaved text first, like any editor.
+    pub fn quit(&mut self, ctx: &egui::Context) {
+        if self.doc.dirty {
+            self.pending = Some(PendingAction::Quit);
+        } else {
+            self.closing = true;
+            self.persist();
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    /// Whether the unsaved-changes prompt is on screen.
+    pub fn is_prompting(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Answer the unsaved-changes prompt.
+    ///
+    /// `Save` writes the *text* (what the prompt is about), never the HTML, and
+    /// only carries out the waiting command if the write actually happened. A
+    /// `Save` that has nowhere to write is the same as the Python dialog being
+    /// cancelled: the command is dropped, not the edits.
+    pub fn resolve_save_prompt(&mut self, answer: SaveAnswer, ctx: &egui::Context) {
+        let Some(action) = self.pending else {
+            return;
+        };
+        match answer {
+            SaveAnswer::Cancel => self.pending = None,
+            SaveAnswer::Discard => self.perform(action, ctx),
+            SaveAnswer::Save => {
+                self.save_text_command();
+                if self.file_browser.is_some() {
+                    // A built-in browser is asking for a name. It will carry
+                    // the waiting command out once it has one, so `pending`
+                    // stays set and the prompt is hidden behind the browser.
+                } else if self.doc.dirty {
+                    // Cancelled or failed: drop the waiting command, keep edits.
+                    self.pending = None;
+                } else {
+                    self.perform(action, ctx);
+                }
+            }
+        }
+    }
+
+    /// Carry out a command the prompt has cleared.
+    fn perform(&mut self, action: PendingAction, ctx: &egui::Context) {
+        self.pending = None;
+        match action {
+            PendingAction::New => self.do_new(),
+            PendingAction::Open => self.do_open(),
+            PendingAction::LoadSample => self.do_load_sample(),
+            PendingAction::Quit => {
+                self.persist();
+                self.closing = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ ui
+
+    /// Remember the current window geometry so it can be saved on exit.
+    ///
+    /// The size is recorded in points *before* zoom (`viewport * zoom`), which
+    /// is the value `ViewportBuilder::with_inner_size` takes on the next
+    /// launch. While maximized the last normal size is deliberately kept:
+    /// storing the screen-sized rectangle would restore a window with no
+    /// resize grips. `viewport_rect` is used rather than the viewport's
+    /// `inner_rect` because the latter is `None` on Wayland.
+    fn note_window_state(&mut self, ctx: &egui::Context) {
+        let zoom = ctx.zoom_factor();
+        self.zoom = zoom;
+        let maximized = ctx.input(|i| i.viewport().maximized).unwrap_or(false);
+        self.window_maximized = maximized;
+        if !maximized {
+            let size = ctx.viewport_rect().size() * zoom;
+            if size.x >= 1.0 && size.y >= 1.0 {
+                self.window_size = [size.x, size.y];
+            }
+        }
+    }
+
+    /// Send the window title, but only when it changes.
+    fn set_title(&mut self, ctx: &egui::Context) {
+        let title = self.doc.title();
+        if self.title_sent.as_deref() != Some(title.as_str()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title_sent = Some(title);
+        }
+    }
+
+    /// Act on the keyboard shortcuts the menu advertises.
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        let (
+            mut new,
+            mut save,
+            mut save_text,
+            mut convert,
+            mut copy,
+            mut quit,
+            mut reset_window,
+            mut focus,
+        ) = (false, false, false, false, false, false, false, false);
+        ctx.input_mut(|input| {
+            new = input.consume_shortcut(&NEW_SHORTCUT);
+            save_text = input.consume_shortcut(&SAVE_TEXT_SHORTCUT);
+            save = input.consume_shortcut(&SAVE_SHORTCUT);
+            convert = input.consume_shortcut(&CONVERT_SHORTCUT);
+            copy = input.consume_shortcut(&COPY_HTML_SHORTCUT);
+            quit = input.consume_shortcut(&QUIT_SHORTCUT);
+            reset_window = input.consume_shortcut(&RESET_WINDOW_SHORTCUT);
+            focus = input.consume_shortcut(&FOCUS_SHORTCUT);
+        });
+        if reset_window {
+            self.reset_window_state(ctx);
+        }
+        if focus {
+            self.focus_mode = !self.focus_mode;
+        }
+        if new {
+            self.new_document();
+        }
+        if save {
+            self.save_document_command();
+        }
+        if save_text {
+            self.save_text_command();
+        }
+        if convert {
+            self.convert_now();
+        }
+        if copy {
+            self.copy_html(ctx);
+        }
+        if quit {
+            self.quit(ctx);
+        }
+    }
+
+    /// Open the first file dropped onto the window, as the Python window did.
+    fn accept_dropped_files(&mut self, ctx: &egui::Context) {
+        let dropped: Vec<PathBuf> = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .map(|file| file.path().to_path_buf())
+                .collect()
+        });
+        if dropped.is_empty() {
+            return;
+        }
+        // Clear them, or the drop fires again on every frame.
+        ctx.input_mut(|input| input.raw.dropped_files.clear());
+        if let Some(path) = dropped.first() {
+            if let Err(error) = self.load_file(path) {
+                self.status = error;
+            }
+        }
+    }
+
+    fn menu_bar(&mut self, ui: &mut Ui) {
+        egui::MenuBar::new().ui(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("New").clicked() {
+                    self.new_document();
+                    ui.close();
+                }
+                if ui.button("Open…").clicked() {
+                    self.open_document();
+                    ui.close();
+                }
+                if ui.button("Save").clicked() {
+                    self.save_document_command();
+                    ui.close();
+                }
+                if ui.button("Save As…").clicked() {
+                    self.save_document_as_command();
+                    ui.close();
+                }
+                if ui.button("Save text…").clicked() {
+                    self.save_text_command();
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("Load example").clicked() {
+                    self.load_sample();
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("Quit").clicked() {
+                    self.quit(ui.ctx());
+                    ui.close();
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                if ui.button("Copy HTML").clicked() {
+                    self.copy_html(ui.ctx());
+                    ui.close();
+                }
+                if ui.button("Convert now").clicked() {
+                    self.convert_now();
+                    ui.close();
+                }
+                if ui.button("Reset options").clicked() {
+                    self.reset_options();
+                    ui.close();
+                }
+            });
+            ui.menu_button("View", |ui| {
+                ui.checkbox(&mut self.show_options, "Show options");
+                ui.separator();
+                // The built-in browser is not offered in a Flatpak: with no
+                // home filesystem access it could show only an empty tree, and
+                // the FileChooser portal is always present there instead.
+                if self.builtin_browser_available() {
+                    let mut builtin = self.use_builtin_browser;
+                    if ui
+                        .checkbox(&mut builtin, "Use built-in file browser")
+                        .on_hover_text(
+                            "Pick files with the in-app browser instead of the \
+                             desktop's dialog. Useful where no file dialog exists \
+                             (for example Sway without xdg-desktop-portal-gtk).",
+                        )
+                        .changed()
+                    {
+                        self.set_builtin_browser(builtin);
+                    }
+                    ui.separator();
+                }
+                ui.checkbox(&mut self.focus_mode, "Focus mode")
+                    .on_hover_text("Hide the menus and toolbar, keep the text and a slim action bar (Ctrl+Shift+F)");
+                if ui
+                    .checkbox(&mut self.reduce_motion, "Reduce motion")
+                    .changed()
+                {
+                    self.apply_ui_style(ui.ctx());
+                    self.store_display_settings();
+                }
+                // Whole-UI zoom, for the same reason a browser has it: a 4K
+                // laptop and a 96 DPI desktop should not dictate the same
+                // physical text size. The keyboard shortcuts (Ctrl/⌘ + / - / 0)
+                // work too; these buttons make the feature discoverable. They
+                // live in the menu rather than the toolbar, which keeps the
+                // toolbar short. `zoom_factor` multiplies the OS's own scale
+                // factor, so a HiDPI screen is already handled.
+                ui.separator();
+                ui.label(egui::RichText::new("Display").small());
+                ui.horizontal(|ui| {
+                    if ui
+                        .button("Zoom out")
+                        .on_hover_text("Zoom out (Ctrl+-)")
+                        .clicked()
+                    {
+                        egui::gui_zoom::zoom_out(ui.ctx());
+                    }
+                    ui.label(format!("{:.0}%", ui.ctx().zoom_factor() * 100.0));
+                    if ui
+                        .button("Zoom in")
+                        .on_hover_text("Zoom in (Ctrl+=)")
+                        .clicked()
+                    {
+                        egui::gui_zoom::zoom_in(ui.ctx());
+                    }
+                    if ui
+                        .button("Reset zoom")
+                        .on_hover_text("Reset to 100% (Ctrl+0)")
+                        .clicked()
+                    {
+                        ui.ctx().set_zoom_factor(1.0);
+                    }
+                });
+
+                // Plain-text size, in the spirit of a browser's font-size
+                // control: it scales the type and therefore the resting size of
+                // controls with it, but leaves the whole-window zoom above
+                // alone.
+                ui.separator();
+                ui.label(egui::RichText::new("Text").small());
+                let sizes = theme::TEXT_SIZES;
+                let step = sizes
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, (a, _)), (_, (b, _))| {
+                        (a - self.text_size)
+                            .abs()
+                            .partial_cmp(&(b - self.text_size).abs())
+                            .unwrap()
+                    })
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(step > 0, egui::Button::new("A−"))
+                        .on_hover_text("Smaller text")
+                        .clicked()
+                    {
+                        self.text_size = sizes[step - 1].0;
+                        self.apply_ui_style(ui.ctx());
+                        self.store_display_settings();
+                    }
+                    ui.label(format!("{:.0}%", self.text_size * 100.0));
+                    if ui
+                        .add_enabled(step + 1 < sizes.len(), egui::Button::new("A+"))
+                        .on_hover_text("Larger text")
+                        .clicked()
+                    {
+                        self.text_size = sizes[step + 1].0;
+                        self.apply_ui_style(ui.ctx());
+                        self.store_display_settings();
+                    }
+                    if ui
+                        .button("Reset text size")
+                        .on_hover_text("Back to the default size (100%)")
+                        .clicked()
+                    {
+                        self.text_size = theme::DEFAULT_TEXT_SIZE;
+                        self.apply_ui_style(ui.ctx());
+                        self.store_display_settings();
+                    }
+                });
+
+                // The theme picker. Both of egui's internal themes were
+                // replaced with this theme's full style, so switching is one
+                // row. Rows rather than a combo: an interactive popup cannot
+                // live inside a menu, which closes on the click.
+                ui.separator();
+                ui.label(egui::RichText::new("Theme").small());
+                for theme in Theme::ALL {
+                    if ui
+                        .selectable_label(self.theme == theme, theme.name())
+                        .clicked()
+                    {
+                        self.theme = theme;
+                        self.apply_ui_style(ui.ctx());
+                        self.store_display_settings();
+                    }
+                }
+
+                ui.separator();
+                if ui
+                    .button("Reset window size and zoom")
+                    .on_hover_text("Ctrl+Alt+0")
+                    .clicked()
+                {
+                    self.reset_window_state(ui.ctx());
+                    ui.close();
+                }
+            });
+            ui.menu_button("Help", |ui| {
+                if ui.button("About").clicked() {
+                    self.about_open = true;
+                    ui.close();
+                }
+            });
+        });
+    }
+
+    fn toolbar(&mut self, ui: &mut Ui) {
+        // `horizontal_wrapped`, not `horizontal`: at a narrow width or a high
+        // zoom the row must fold onto the next line rather than run off the
+        // edge, where the trailing controls would be clipped and unreachable.
+        // This is the Reflow half of staying usable at 200% (WCAG 1.4.10).
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("New").clicked() {
+                self.new_document();
+            }
+            if ui.button("Save").clicked() {
+                self.save_document_command();
+            }
+            if ui.button("Example").clicked() {
+                self.load_sample();
+            }
+            ui.separator();
+            if ui.button("Convert").clicked() {
+                self.convert_now();
+            }
+            if ui.checkbox(&mut self.auto, "auto").changed() {
+                self.store_settings();
+                if self.auto {
+                    self.schedule_convert(Instant::now());
+                } else {
+                    self.deadline = None;
+                }
+            }
+            ui.separator();
+            if ui
+                .button("Options")
+                .on_hover_text("Open the options panel")
+                .clicked()
+            {
+                self.show_options = true;
+            }
+            ui.separator();
+            if ui
+                .button("Focus")
+                .on_hover_text("Immersive view: hide the menus and toolbar, keep the text and a slim action bar (Ctrl+Shift+F)")
+                .clicked()
+            {
+                self.focus_mode = true;
+            }
+        });
+        // The status is its own wrapped row: a long message can then never push
+        // a control off the edge, and it stays readable when the buttons fold.
+        ui.horizontal_wrapped(|ui| {
+            ui.label(&self.status);
+        });
+    }
+
+    /// The preset strip: one button per starting point, plus a "Modified"
+    /// marker once the live options have been edited away from the chosen one.
+    /// A preset seeds the options; diverging from it is visible rather than
+    /// silently wrong.
+    fn preset_bar(&mut self, ui: &mut Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Preset");
+            for preset in presets::PRESETS {
+                let chosen = self.preset == preset.key;
+                if ui
+                    .selectable_label(chosen, preset.name)
+                    .on_hover_text(preset.description())
+                    .clicked()
+                {
+                    self.apply_preset(preset);
+                }
+            }
+            if self.preset_is_modified() {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("Modified").small().weak())
+                    .on_hover_text(
+                        "These options have been edited away from the chosen \
+                         preset. Pick the preset again to restore them.",
+                    );
+            }
+        });
+    }
+
+    /// The source-and-destination strip: the file being converted and where the
+    /// HTML will go, with the same `*` and `+` marks the window title uses, so
+    /// the stripes of the window and the title never disagree. The full paths
+    /// are one hover away.
+    fn file_strip(&mut self, ui: &mut Ui) {
+        let input = format!(
+            "{}{}",
+            self.doc.source_name(),
+            if self.doc.dirty { "*" } else { "" }
+        );
+        let output = format!(
+            "{}{}",
+            self.doc.output_name(),
+            if self.doc.output_stale { "+" } else { "" }
+        );
+        let line = format!("Input: {input}  \u{00b7}  Output: {output}");
+        let detail = match (&self.doc.path, &self.doc.output_path) {
+            (Some(src), Some(out)) => format!("{}\n\u{2192} {}", src.display(), out.display()),
+            (Some(src), None) => {
+                format!(
+                    "{}\n\u{2192} not saved yet (Ctrl+S writes it)",
+                    src.display()
+                )
+            }
+            (None, Some(out)) => format!("new text\n\u{2192} {}", out.display()),
+            (None, None) => "Nothing has been loaded or saved yet.".to_string(),
+        };
+        let detail = format!("{detail}\n\n* unsaved text \u{00b7} + unsaved HTML");
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(line).weak())
+                .on_hover_text(detail);
+        });
+    }
+
+    /// The options dialog, qBittorrent-style: a category list beside a
+    /// scrolling page. Opened from the toolbar's `Options` button or the View
+    /// menu, and closed with its own title-bar `x`.
+    fn options_window(&mut self, ctx: &egui::Context) {
+        if !self.show_options {
+            return;
+        }
+        let mut open = self.show_options;
+        egui::Window::new("Textrill options")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_size([780.0, 560.0])
+            .min_width(560.0)
+            .min_height(360.0)
+            .show(ctx, |ui| {
+                ui.set_min_width(540.0);
+                if self.panel.draw(ui, &mut self.opts) {
+                    self.schedule_convert(Instant::now());
+                }
+            });
+        self.show_options = open;
+    }
+
+    fn about_window(&mut self, ctx: &egui::Context) {
+        if !self.about_open {
+            return;
+        }
+        egui::Window::new("About textrill")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut self.about_open)
+            .show(ctx, |ui| {
+                ui.label(format!("textrill {}", env!("CARGO_PKG_VERSION")));
+                ui.label("Plain text to HTML, with an egui front end.");
+                ui.label("Structure is inferred from layout; no markup required.");
+                ui.label("Released under the GNU General Public License, version 3 or later.");
+            });
+    }
+
+    /// The modal three-way prompt Qt showed before a command could discard text.
+    fn save_prompt_window(&mut self, ctx: &egui::Context) {
+        if self.pending.is_none() {
+            return;
+        }
+        let mut answer = None;
+        let response = egui::Modal::new(egui::Id::new("unsaved-changes")).show(ctx, |ui| {
+            ui.set_max_width(340.0);
+            ui.heading("Unsaved changes");
+            ui.label("The text has unsaved changes.  Save them?");
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Save").clicked() {
+                    answer = Some(SaveAnswer::Save);
+                }
+                if ui.button("Discard").clicked() {
+                    answer = Some(SaveAnswer::Discard);
+                }
+                if ui.button("Cancel").clicked() {
+                    answer = Some(SaveAnswer::Cancel);
+                }
+            });
+        });
+        let answer = match answer {
+            Some(answer) => answer,
+            // Escape or a click on the backdrop is the same as Cancel.
+            None if response.should_close() => SaveAnswer::Cancel,
+            None => return,
+        };
+        self.resolve_save_prompt(answer, ctx);
+    }
+
+    /// Drive the built-in file browser, if one is open, and act on its answer.
+    fn file_browser_window(&mut self, ctx: &egui::Context) {
+        let Some(mut browser) = self.file_browser.take() else {
+            return;
+        };
+        match browser.show(ctx) {
+            BrowserOutcome::Pending => self.file_browser = Some(browser),
+            BrowserOutcome::Cancelled => {
+                // A browser opened for the unsaved-changes prompt drops the
+                // waiting command, exactly as cancelling the native dialog did.
+                self.pending = None;
+            }
+            BrowserOutcome::Chosen(path) => match browser.intent() {
+                FileIntent::OpenText => self.load_or_report(path),
+                FileIntent::SaveHtml => self.save_html_or_report(path),
+                FileIntent::SaveText => {
+                    self.save_text_or_report(path);
+                    // The save may have been the one the unsaved-changes prompt
+                    // was waiting for; carry its command out now.
+                    if !self.doc.dirty {
+                        if let Some(action) = self.pending.take() {
+                            self.perform(action, ctx);
+                        }
+                    }
+                }
+            },
+        }
+    }
+
+    /// Draw the whole UI into `ui`.
+    pub fn draw(&mut self, ui: &mut Ui) {
+        // Apply the chosen look on the first frame. `main` could do it once at
+        // startup, but that would leave a test harness (and any other driver)
+        // drawing at the wrong appearance unless it knew to call this first.
+        if !self.applied_style {
+            self.apply_ui_style(ui.ctx());
+            self.applied_style = true;
+        }
+        // The worker asks for a redraw when a result lands, so the preview does
+        // not wait for the next input event to appear.
+        if !self.waker_installed {
+            let ctx = ui.ctx().clone();
+            self.worker.set_waker(move || ctx.request_repaint());
+            self.waker_installed = true;
+        }
+        self.drain();
+        self.tick(Instant::now());
+        if self.deadline.is_some() {
+            ui.ctx().request_repaint_after(AUTO_CONVERT_DELAY);
+        }
+        self.set_title(ui.ctx());
+        self.note_window_state(ui.ctx());
+
+        // The window's own close button goes through the unsaved-changes prompt
+        // too, unless we are already closing.
+        if !self.closing && ui.ctx().input(|i| i.viewport().close_requested()) {
+            // Persist before the window goes away, then hold the close only if
+            // there is unsaved text to ask about.
+            self.persist();
+            if self.doc.dirty {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.pending = Some(PendingAction::Quit);
+            }
+        }
+        // A pending prompt or an open browser owns the keyboard, so shortcuts
+        // cannot stack commands behind it.
+        if self.pending.is_none() && self.file_browser.is_none() {
+            self.handle_shortcuts(ui.ctx());
+            self.accept_dropped_files(ui.ctx());
+        }
+
+        if self.focus_mode {
+            // Focus mode drops the menu bar and the toolbar, but not the work:
+            // Convert and Save HTML stay within reach, so a manual conversion
+            // or a save never forces a trip back to the chrome. Immersion is
+            // still one click deep — the first control is the one visible way
+            // back (and `Ctrl+Shift+F` works too).
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .button("Exit focus")
+                    .on_hover_text("Back to the window chrome (Ctrl+Shift+F)")
+                    .clicked()
+                {
+                    self.focus_mode = false;
+                }
+                ui.separator();
+                if ui
+                    .button("Convert")
+                    .on_hover_text("Convert now (Ctrl+Enter)")
+                    .clicked()
+                {
+                    self.convert_now();
+                }
+                if ui
+                    .button("Save HTML")
+                    .on_hover_text("Write the HTML output (Ctrl+S)")
+                    .clicked()
+                {
+                    self.save_document_command();
+                }
+                ui.separator();
+                ui.label(&self.status);
+            });
+        } else {
+            self.menu_bar(ui);
+            self.toolbar(ui);
+            self.preset_bar(ui);
+            self.file_strip(ui);
+            // The landing view: a plain-language reading of what the current
+            // settings will do. Open by default so a first-time user sees the
+            // answers without opening the panel, and collapsible so it costs
+            // nothing once they know their way around.
+            egui::CollapsingHeader::new("Summary")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.label(summary::describe(
+                        &self.opts,
+                        self.current_preset(),
+                        self.preset_is_modified(),
+                    ));
+                });
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Title");
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut self.opts.title)
+                        .hint_text("Document title: shown as a heading in the HTML"),
+                )
+                .changed()
+            {
+                self.schedule_convert(Instant::now());
+            }
+        });
+
+        // Both panes are bounded and scroll on their own. A multiline
+        // `TextEdit` grows to fit every line (its `desired_rows` is only a
+        // minimum), so without a scroll area the HTML preview is simply clipped
+        // off the bottom of the window once the two panes together exceed it.
+        ui.label("Input");
+        egui::ScrollArea::vertical()
+            .id_salt("input-pane")
+            .max_height((ui.available_height() * 0.4).max(80.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if ui
+                    .add(egui::TextEdit::multiline(&mut self.doc.text).desired_rows(6))
+                    .changed()
+                {
+                    self.on_edit(Instant::now());
+                }
+            });
+
+        if self.show_options {
+            self.options_window(ui.ctx());
+        }
+
+        ui.separator();
+        ui.label("HTML");
+        egui::ScrollArea::vertical()
+            .id_salt("html-pane")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.output)
+                        .code_editor()
+                        .desired_rows(8),
+                );
+            });
+
+        self.about_window(ui.ctx());
+        if self.file_browser.is_some() {
+            // The browser covers the prompt it may have been opened from.
+            self.file_browser_window(ui.ctx());
+        } else {
+            self.save_prompt_window(ui.ctx());
+        }
+    }
+}
+
+impl eframe::App for TextrillApp {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        // eframe's `ui()` is a bare canvas: no margin, no background, and the
+        // framebuffer clears to the window's default clear colour (near-black)
+        // until something paints over it. A central-panel frame gives the whole
+        // surface the theme's `panel_fill`, so the ink always sits on the
+        // theme's paper rather than on that dark canvas. `draw` itself stays a
+        // plain widget pass, which is what the test harness drives.
+        egui::Frame::central_panel(ui.style()).show(ui, |ui| self.draw(ui));
+    }
+
+    /// What the framebuffer is cleared to before egui paints. eframe's default
+    /// is a translucent near-black, which would flash against every theme; this
+    /// clears to the theme's own panel colour, so there is never a dark frame —
+    /// not on the first paint and not between theme switches.
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        visuals.panel_fill.to_normalized_gamma_f32()
+    }
+}
+
+/// Where a first file dialog should start when nothing has been remembered yet:
+/// the user's Documents directory, their home, or the working directory.
+fn documents_dir() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if let Some(home) = home.as_ref() {
+        let documents = home.join("Documents");
+        if documents.is_dir() {
+            return documents;
+        }
+    }
+    home.filter(|home| home.is_dir())
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
+}

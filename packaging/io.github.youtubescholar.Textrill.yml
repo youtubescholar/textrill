@@ -1,0 +1,101 @@
+# Flatpak manifest for textrill.
+#
+# The app-id follows the GitHub owner, resolved 2026-10-08 to `youtubescholar`
+# (the same account as `repository` in `textrill/Cargo.toml` and
+# `textrill-gui-rs/Cargo.toml`): `io.github.youtubescholar.Textrill`. The
+# filename matches the id, as the format requires.
+#
+# `cargo-sources-*.json`, referenced by the modules below, are generated, not
+# committed; `make cargo-sources` writes them with `flatpak-cargo-generator`
+# (pip). See packaging/README.md. Generate them once before building.
+#
+# The CLI stays independently distributable — this manifest installs it as well as
+# the GUI so the single artifact carries both, per the refined delivery goal.
+
+app-id: io.github.youtubescholar.Textrill
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: textrill-gui
+
+# The Rust toolchain lives in an SDK extension rather than in the base SDK. It
+# is a build-time extension only, so it is declared here instead of being
+# installed into the SDK by a module.
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+
+finish-args:
+  - --share=ipc
+  # Wayland first; X11 (XWayland) only when the compositor offers no Wayland.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # No --filesystem=home. Open and Save go through the FileChooser portal,
+  # which hands the app only the file the user picked, so broad home access is
+  # not needed. No portal talk-name is needed either: Flatpak always allows the
+  # org.freedesktop.portal.* interfaces. The in-app file browser is not offered
+  # inside the sandbox (it would have no home access to browse); the GUI detects
+  # the Flatpak and uses the portal, whose dialog still works. The CLI ships in
+  # the same sandbox and so reads only paths passed to it, as any Flatpak CLI
+  # does.
+
+modules:
+  # Engine first: textrill-gui-rs depends on it by path, so the CLI has to exist
+  # before the GUI module configures. Installed to /app/bin so the single artifact
+  # ships both.
+  - name: textrill
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/textrill/cargo
+        CARGO_NET_OFFLINE: 'true'
+    build-commands:
+      # There is no workspace Cargo.toml at the repo root, so each crate is
+      # built by manifest path; the target directory lands beside its manifest.
+      - cargo build --release --locked --offline --manifest-path textrill/Cargo.toml
+      - install -Dm755 textrill/target/release/textrill ${FLATPAK_DEST}/bin/textrill
+    sources:
+      - type: dir
+        path: ..
+        skip:
+          - target
+          - textrill/target
+          - textrill-gui-rs/target
+          - ref
+          - research
+          - stubs
+          - packaging
+          - .git
+      # A bare filename here (not `type: file`) makes flatpak-builder expand
+      # the generated JSON into this module's source list.
+      - cargo-sources-textrill.json
+
+  - name: textrill-gui
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/textrill-gui/cargo
+        CARGO_NET_OFFLINE: 'true'
+    build-commands:
+      - cargo build --release --locked --offline --manifest-path textrill-gui-rs/Cargo.toml
+      # The fonts are compiled into the binary via include_bytes!; there is
+      # nothing to install alongside it.
+      - install -Dm755 textrill-gui-rs/target/release/textrill-gui ${FLATPAK_DEST}/bin/textrill-gui
+    sources:
+      # The repo root, not the crate directory: textrill-gui-rs depends on
+      # ../textrill by path, so the sibling has to be inside the module.
+      - type: dir
+        path: ..
+        skip:
+          - target
+          - textrill/target
+          - textrill-gui-rs/target
+          - ref
+          - research
+          - stubs
+          - packaging
+          - .git
+      - cargo-sources-textrill-gui.json

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Textrill: a text document turned into a marked-up page. Vector shapes
+       only, so the icon renders identically without a font. -->
+  <rect width="256" height="256" rx="48" fill="#2D5B8E"/>
+  <path d="M70 32 L154 32 L194 72 L194 216 Q194 224 186 224 L78 224 Q70 224 70 216 Z" fill="#F5F7FA"/>
+  <path d="M154 32 L194 72 L154 72 Z" fill="#C3CFDD"/>
+  <rect x="88" y="104" width="88" height="11" rx="5.5" fill="#2D5B8E"/>
+  <rect x="88" y="130" width="88" height="11" rx="5.5" fill="#2D5B8E"/>
+  <rect x="88" y="156" width="58" height="11" rx="5.5" fill="#2D5B8E"/>
+  <path d="M96 178 L86 190 L96 202" fill="none" stroke="#3FA34D" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M116 182 L108 198" fill="none" stroke="#3FA34D" stroke-width="9" stroke-linecap="round"/>
+  <path d="M128 178 L138 190 L128 202" fill="none" stroke="#3FA34D" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

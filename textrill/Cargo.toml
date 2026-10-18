@@ -1,0 +1,28 @@
+[package]
+name = "textrill"
+version = "0.1.0"
+edition = "2021"
+description = "Convert plain text to HTML. A Rust reimplementation of HTML::TextToHTML / txt2html."
+license = "GPL-3.0-or-later"
+repository = "https://github.com/youtubescholar/textrill"
+
+[lib]
+name = "textrill"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "textrill"
+path = "src/main.rs"
+
+[dependencies]
+fancy-regex = "0.14"
+# Parses link patterns for the required-substring prefilter in `prefilter`.
+# Already in the tree via fancy-regex/regex-automata; a real parser matters
+# because an unsound literal silently drops links.
+regex-syntax = "0.8"
+# SIMD substring search for the required-literal prefilter.
+memchr = "2.8"
+
+[profile.release]
+lto = true
+strip = true
