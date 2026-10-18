@@ -15,23 +15,31 @@ git (`origin` = `/home/vicpu/build2/forges/textrill.git`), upstream GitHub
 These hold across every phase. A phase that breaks one is redesigned, not
 shipped.
 
-1. **Pure Rust.** Engine, CLI and GUI stay Rust end to end — no Python, no Qt,
-   no Node, no server runtime. New capability is a Rust crate or an engine
-   feature. (The Perl reference stays a *test-only* cross-check behind
-   `make diff`.)
+1. **Pure Rust, dependency-free engine.** Engine, CLI and GUI stay Rust end to
+   end — no Python, no Qt, no Node, no server runtime. The **engine crate grows
+   no dependencies**: it keeps its current three (`fancy-regex`,
+   `regex-syntax`, `memchr`) and nothing more. A new format the engine must read
+   (e.g. a pack manifest) gets a small parser we own, not a new crate.
 2. **Determinism and content preservation are the product.** No phase may
    silently change conversion output. Any intended output change is recaptured
    (`make accept-write` / `make examples-write`) and reviewed as the diff.
-3. **Offline-first, no network on the conversion path.** Anything that fetches
-   (template registry, updates) is explicit, opt-in and cached. A conversion
-   never reaches the network.
-4. **Small, auditable, test-gated.** `make verify` is the gate and means the
+3. **No network, ever, in the tool.** Textrill does not connect to the internet —
+   not in conversion, not in the GUI, not in the CLI core. Portfolio features
+   are local and file-based; sharing is a file you copy, not a service it calls.
+   Anything that fetches, if it ever exists, is a *separate* tool the user runs,
+   never the engine or the app.
+4. **The Perl port is a separate pipeline.** The Rust crate is the product and
+   owns all forward behaviour. The Perl reference, the differential harness and
+   the byte-parity modes (`--xhtml`, `--no-html5`) are isolated as a frozen,
+   optional parity concern (see §8.5) — they do not define the product and do
+   not constrain the Rust design.
+5. **Small, auditable, test-gated.** `make verify` is the gate and means the
    same thing on every machine. New behaviour earns a named test; the properties
    (no dropped text, well-formed, deterministic, bounded) never regress.
-5. **Options, not modes; presets are data.** The engine is a set of composable
+6. **Options, not modes; presets are data.** The engine is a set of composable
    options. A "feature" is usually an option (or a curated bundle of them), not
    a new code path.
-6. **The GUI is thin over the engine.** Widget metadata comes from
+7. **The GUI is thin over the engine.** Widget metadata comes from
    `textrill::cli::SPECS`; the panel cannot drift from `--help` or offer a value
    the engine rejects. Templates stay plain HTML + fixed slots — no template
    language, no control flow, no JavaScript in output.
@@ -71,8 +79,8 @@ the "delivery system" to replace.
 | 0 | Version control & local forge | repo, `.gitignore`, local bare remote | first push |
 | 1 | UI/UX foundation | real layout, split panes, app bar, empty state, status bar | GUI suite green |
 | 2 | Template delivery v1 | discovery, pack format, validation, `templates` commands, manager UI | pack tests + golden-stable |
-| 3 | Template registry & sharing | index, install/search/update, integrity, offline cache | registry tests |
-| 4 | Preview & editing | rendered preview, outline, problems panel, recents/session | GUI suite green |
+| 3 | Template sharing (offline) | local catalogs, install/search/verify, integrity | catalog tests |
+| 4 | Preview & editing | native subset preview, outline, problems panel, recents/session | GUI suite green |
 | 5 | Option & preset ergonomics | user presets, `{{textrill:lang}}`, changed badges | engine tests + goldens |
 | 6 | Distribution | Flatpak complete, AppImage releases, Windows/macOS, crates.io | artifacts build |
 | 7 | Hardening & sustainability | fuzz, cargo-deny, reproducible builds, benchmarks | deny/fuzz green |
@@ -206,8 +214,12 @@ academic-book/
   LICENSE              # required if manifest license != shipped set
 ```
 
-Manifest (`template.toml`, TOML parsed by a small Rust reader — no new heavy
-dep; `toml` crate is acceptable):
+Manifest (`template.toml`). The engine stays dependency-free, so we ship a
+**small reader we own** for a documented **strict subset of TOML**: top-level
+`key = value`, arrays of tables (`[[templates]]`, `[[templates.vars]]`), and
+string / integer / boolean / string-array values. Anything outside the subset is
+a **hard error naming the line**, never a silent misread — so a manifest written
+as full TOML fails loudly rather than being half-understood:
 
 ```toml
 schema = 1
@@ -258,7 +270,7 @@ Keep the option grammar; add two options and one additive command group.
   - `list [--tag T] [--json]`
   - `inspect <id>[:<template>]` — manifest, slots, vars, source path
   - `new <name>` — scaffold a pack (manifest + minimal valid template)
-  - `install <PATH|URL|id>` — from a pack dir, a `.tar.gz`/`.zip`, or (Phase 3) a registry id
+  - `install <PATH>` — from a pack dir or a `.tar.gz`/`.zip` **on disk** (no URL; see §6)
   - `remove <id>` — user-installed packs only
   - `pack <dir>` / `unpack <archive>` — deterministic archive (sorted entries, fixed mtime)
   - `validate <dir|archive>` — the 5.3 checks
@@ -283,11 +295,12 @@ state:
   with a fix hint).
 - **Reveal on disk**, **Export pack** (deterministic archive), **Remove** (user
   packs only).
-- **Install** — drop a pack folder/archive or paste a URL; validation result
-  shown before it is accepted.
+- **Install** — drop a pack folder/archive (drag-and-drop or a file picker);
+  validation result shown before it is accepted. No URL field: the app does not
+  fetch.
 
 ### Files
-New `textrill/src/pack/{mod,manifest,registry,archive}.rs`,
+New `textrill/src/pack/{mod,manifest,catalog,archive}.rs`,
 `textrill/src/library.rs` (merge discovered + shipped), `textrill/src/cli.rs`
 (new options), a `templates` command entry in `main.rs`, GUI
 `templates_window.rs`, `options_panel.rs` (Template source radio gains
@@ -306,59 +319,74 @@ New `textrill/src/pack/{mod,manifest,registry,archive}.rs`,
 - GUI manager lists, filters, previews and applies a template end to end.
 
 ### Risks / decisions
-- New dependency for TOML is justified; keep it to one.
+- **Decided: no new dependency.** The manifest reader is ours and covers a
+  documented subset; unsupported syntax is a hard error, not a silent guess.
 - Naming: reject all bare-name collisions rather than guessing a priority the
   user cannot see.
 - Archive extraction must defend against traversal/symlink/executable payloads.
 
 ---
 
-## 6. Phase 3 — Template registry & sharing
+## 6. Phase 3 — Template sharing (offline, file-based)
 
-**Goal.** People can share and fetch template packs without emailing files, and
-the tool can find them — with integrity and an offline cache, and no central
-authority required.
+**Goal.** People can share whole *libraries* of template packs without emailing
+one `.html` at a time — while Textrill itself **never touches the network**. The
+tool reads catalogs the user already has on disk; how those files arrived (git,
+a browser, a shared drive, email) is the user's business, not the tool's.
+
+**Why this shape.** "No internet in the tool" rules out the usual
+fetch-a-registry design. The sharing model is therefore *git-native and
+file-based*: a catalog is a directory of packs plus an index file; the user
+obtains it however they move files, and the tool installs from it locally.
 
 ### Workstreams
 
-1. **Index format** — a `registry.json` (or `registry.toml`): packs with `id`,
-   latest + all `version`s, `sha256` per archive, `min_textrill` version,
-   `license`, `tags`, `homepage`, and a `signature` (optional). Small Rust
-   reader (serde_json already in the GUI tree; the engine should not grow a JSON
-   dep — the CLI command can live where it is acceptable, or use a tiny parser).
-2. **Transports** — a registry is *any* compatible index reachable by:
-   - **git** (`git clone`/`git fetch` a `textrill-templates` repo), and
-   - **HTTPS** (fetch `registry.json` + archives from raw URLs).
-   `--registry URL` (repeatable) selects sources; a default public registry is a
-   suggestion, never a requirement.
-3. **Commands** — `templates search <query>`, `templates install <id>[@ver]`,
-   `templates update [<id>]`, `templates verify <id>` (hash check),
-   `templates sources` (list configured registries).
-4. **Integrity & security** — SHA-256 of each archive verified against the
-   index; optional detached signature (minisign-compatible or sigstore);
-   `--offline` uses the cache only; the index cache lives in
-   `$XDG_CACHE_HOME/textrill`; **no** network ever occurs inside a conversion.
+1. **Catalog format** — a `catalog` is a directory with a `catalog.toml` index
+   (parsed by our own reader, §5.2) listing packs: `id`, all `version`s,
+   `sha256` per archive, `min_textrill`, `license`, `tags`, `description`. No
+   server, no JSON dependency.
+2. **Local sources** — `--catalog DIR` (repeatable, option so it can live in
+   `.textrillrc`) registers a catalog directory. A canonical layout
+   (`textrill-templates/` git repo with `catalog.toml` + `packs/`) is documented
+   so a community repo is just a clone.
+3. **Commands** — `templates search <query> --catalog DIR`,
+   `templates install <id>[@ver] --catalog DIR` (resolves an archive *already on
+   disk*), `templates verify <id>` (hash check), `templates sources` (list
+   registered catalogs), `templates update` (re-scan catalogs, no fetching).
+4. **Integrity** — SHA-256 of each archive verified against `catalog.toml`;
+   optional detached signature; a mismatch is a hard error. Nothing is installed
+   unverified by default.
 5. **Versioning** — semver; a pack declares `min_textrill`; incompatible packs
-   are filtered out with a reason, not a crash.
-6. **Self-hosting** — document how a lab/archive runs its own registry (a git
-   repo of packs + an index), so templates can be curated internally.
+   are listed with a reason, never crash.
+6. **Self-hosting / a "public registry"** — if a central library is wanted, it
+   is simply a public git repo of packs and a generated `catalog.toml`. Users
+   `git clone` it (or use the optional small companion below) and point
+   `--catalog` at it. The repo is the registry; no service is required.
+
+### Optional companion (out of core, not in the engine or the GUI)
+
+If users want "fetch", provide a **separate**, tiny helper — a shell script or a
+small `git`-based tool (`textrill-catalog`) — that clones/pulls a catalog repo.
+It is deliberately *not* part of the textrill binary and *not* wired into the
+app, so the product keeps its no-network property. Decision deferred; the
+in-core story is complete without it.
 
 ### Files
-`textrill/src/pack/registry.rs`, `textrill/src/pack/fetch.rs` (git/HTTP behind a
-feature or a small dep), packaging docs `docs/templates.md`, GUI "Browse
-registry" tab in `templates_window.rs`.
+`textrill/src/pack/catalog.rs` (index read/verify), `textrill/src/pack/archive.rs`,
+`textrill/src/cli.rs` (new options), docs `docs/templates.md` (catalog layout and
+how to publish one via git), GUI "Catalogs" tab in `templates_window.rs` (lists
+local catalogs, installs from them).
 
 ### Acceptance criteria
-- A fresh machine with `--offline` and an empty cache reports "not found"
-  clearly; with network, `install` fetches, verifies the hash, and installs.
+- With a catalog dir on disk, `search`/`install`/`verify` work fully offline.
 - Tampering with an archive fails `verify` with a hash mismatch.
-- `update` moves a pack forward only when `min_textrill` is satisfied.
-- No code path invoked by a plain conversion performs I/O beyond the input and
-  output files.
+- `install` refuses a pack whose `min_textrill` is unmet, naming the reason.
+- **No code path in the engine or GUI performs network I/O** (auditable: no
+  HTTP/TLS/socket dependency anywhere in the tree).
 
 ### Risks
-- A network stack in the CLI is the largest new surface; isolate it behind a
-  module and a feature, and keep it out of the engine crate's core.
+- Sharing without fetching UX is less convenient; the companion helper and clear
+  docs are the mitigation.
 - Key management for signing is a policy decision; ship hash-only first,
   signatures opt-in.
 
@@ -370,11 +398,17 @@ registry" tab in `templates_window.rs`.
 problem?" inside the app.
 
 ### Workstreams
-1. **Rendered preview.** Default is safest-and-dependency-free: **Open in
-   browser** (write to a temp file, hand to the OS handler). For in-app render,
-   add an **optional** embedded webview (`wry`/`webview2`) behind a Cargo
-   feature — never a default, never required to build. A native egui HTML
-   renderer is explicitly *not* attempted (too large, low fidelity).
+1. **Rendered preview — a native egui subset renderer (pure Rust, no deps).**
+   egui cannot render HTML, and we will not embed a browser engine (`wry`/
+   WebKitGTK is a large C dependency and against the GUI's deliberate no-GTK
+   stance) nor add a network path. Instead, draw an **honest subset** of the
+   produced HTML natively: headings, paragraphs, lists (ul/ol/dl), `strong`/
+   `em`/`code`, blockquotes, `<pre>`, tables, links, and the `<header>`/TOC
+   landmarks — using the engine's own structure, themed by `theme.rs`. It is not
+   pixel-identical to a browser and says so; it is a fast, offline, deterministic
+   *preview*. A **local** escape hatch (`Open in browser`) writes the exact
+   bytes to a temp file and hands them to the OS handler — that is a local
+   program launch, **not** a network request.
 2. **Outline.** Draw the document structure (headings + anchors + TOC) as an
    `egui` tree from the engine's section data — natively rendered, no HTML.
    Clicking scrolls the source to the heading.
@@ -388,7 +422,10 @@ problem?" inside the app.
    existing `settings.rs` / `window_state.rs`).
 
 ### Acceptance criteria
-- Rendered preview opens the exact bytes that "Save HTML" would write.
+- The native preview reflects the same structure as the produced HTML (headings,
+  lists, emphasis, links, tables) for every example document.
+- `Open in browser` writes the exact bytes that "Save HTML" would write and
+  performs no network I/O.
 - Outline entries match the produced headings and anchors; clicking navigates.
 - A deliberately broken document lists its problems and no output is produced.
 - Session restore is opt-in and cannot clobber an unsaved buffer silently.
@@ -415,10 +452,34 @@ it.
 4. **Options panel polish.** A "changed from default" badge and a per-option
    reset; grouping already exists (`CATEGORIES`); add search over *values* and a
    "show only changed" filter. Presets become the curated entry point.
-5. **Engine modularisation (behavior-preserving).** `convert.rs` is ~189 kB in
-   one file. Split into `convert/{prolog,paragraphs,headings,lists,tables,
-   preformat,inline}.rs` with **zero output change** — the goldens are the proof.
-   Do this only after Phase 1 so the GUI churn is already landed.
+5. **Engine modularisation (behavior-preserving).** `convert.rs` is **4,866
+   lines in one file** today. It holds, in order: encoding/decode plus the
+   single-byte tables (LATIN1/CP1252/CP1251/CP1253/KOI8R), BOM/UTF-16 sniffing
+   and CR chopping; the action bitflags/constants; the `Converter` struct and
+   its ~2,900-line impl (tag emission, hrules, mail headers/quotes, paragraphs,
+   lists, tables, preformat, headings, caps/delimiters, links, template/page
+   assembly, TOC/pager, chunking, streaming); free helpers (regex predicates,
+   table-shape detectors, byte slicing); the streaming `ParagraphReader` and
+   `split_blank_lines`; a `ReplAll` regex trait; and ~940 lines of in-file tests.
+   Because we are **free to drift from Perl**, take the *clean seams, not the
+   Perl function names*. Proposed layout:
+
+   | New module | Moves |
+   |---|---|
+   | `convert/decode.rs` | encoding detection, single-byte tables, BOM/UTF-16 sniff, CR chop |
+   | `convert/tags.rs` | action flags, `get_tag`/`close_tag`/`tagline` |
+   | `convert/paragraph.rs` | `paragraph`, `shortline`, mail header/quote |
+   | `convert/lists.rs` | `listprefix`/`startlist`/`endlist`/`continuelist`/`liststuff` |
+   | `convert/tables.rs` | every `table_*` / `is_*table` |
+   | `convert/preformat.rs` | `is_preformatted`, `preformat`, explicit markers |
+   | `convert/headings.rs` | `heading`, `anchor_*`, `is_heading`, `custom_heading`, `unhyphenate` |
+   | `convert/inline.rs` | `caps`, `do_delim`, `delim_replace`, `delim_loop`, `apply_links` |
+   | `convert/pages.rs` | `apply_template`, `build_head`, chunking, TOC/pager, `finish_*` |
+   | `convert/stream.rs` | `ParagraphReader`, `paragraph_records`, `split_blank_lines` |
+   | `convert/tests.rs` | the in-file tests |
+
+   Zero output change; the byte-goldens are the proof. Do this only after
+   Phase 1 so GUI churn has landed.
 
 ### Acceptance criteria
 - A user preset applied via GUI and via `--preset` produce identical options.
@@ -426,6 +487,31 @@ it.
   reviewed, and the `{{textrill:lang}}` behaviour tested.
 - `convert.rs` split changes no golden byte and no test.
 - Options panel changed-badges match `cli::get_opt` vs. defaults exactly.
+
+### 8.5 Perl parity as a separate pipeline (new)
+
+**Decision.** The Rust crate is the product. The Perl `HTML::TextToHTML`
+heritage stops shaping the architecture. Rather than deleting it (it is a real
+asset for auditing), **isolate** it:
+
+- Move `ref/` (the reference tarball), the stubs, and the differential harness
+  (`make ref`, `make diff`, `make scale`'s Perl timing) into a clearly separated
+  concern — a top-level `parity/` directory with its own README, or a separate
+  `textrill-parity` crate — with its **own non-gating CI job**.
+- Recast `--xhtml` / `--no-html5` as a **frozen compatibility layer**: document
+  them as "reproduce the Perl reference's skeleton, for porting and audit", not
+  as part of the product's identity. They keep their byte-parity tests; they no
+  longer constrain new features.
+- The main `make verify` gate stays Perl-free (it already is). Parity work is
+  opt-in and can lag without blocking the Rust roadmap.
+- Long-term option: expose parity as a Cargo feature (`parity`) so the default
+  build is lean and the reference behaviour is available on demand.
+
+**Acceptance criteria**
+- No Rust roadmap item depends on Perl or on the `ref/` tree.
+- `make verify` passes with `parity/` absent.
+- `--xhtml`/`--no-html5` output remains byte-identical to today (goldens pin it),
+  but their tests live in the parity pipeline.
 
 ---
 
@@ -473,7 +559,7 @@ it.
    binaries across two builds.
 4. **Benchmarks.** `criterion` for large-document conversion; keep the
    `alloctest` resource guarantees as hard gates, not just measurements.
-5. **Docs.** A short `docs/templates.md` (pack authoring + registry), an issue
+5. **Docs.** A short `docs/templates.md` (pack authoring + catalogs), an issue
    template, and a release checklist. Keep the "small docs" house rule.
 
 ### Acceptance criteria
@@ -486,7 +572,7 @@ it.
 ## 11. Sequencing & dependencies
 
 ```
-Phase 0 (done) ──► Phase 1 (UI shell) ──┬─► Phase 2 (template delivery v1) ──► Phase 3 (registry)
+Phase 0 (done) ──► Phase 1 (UI shell) ──┬─► Phase 2 (template delivery v1) ──► Phase 3 (sharing/catalog)
                                         ├─► Phase 4 (preview/editing)
                                         └─► Phase 5 (options/presets) ──► Phase 6 (distribution) ──► Phase 7 (hardening)
 ```
@@ -517,25 +603,36 @@ Phase 0 (done) ──► Phase 1 (UI shell) ──┬─► Phase 2 (template de
 Still out of scope, restated so phases do not drift: no markup language, no
 WYSIWYG page layout, no OCR, no HTML→text reverse converter, no document
 manager/CMS, no template *language* (loops/conditionals/includes), no AI/model,
-no network in the conversion path. See `Scopev1.md` §1.4, §6.2.
+no network anywhere in the tool (not just the conversion path). See
+`Scopev1.md` §1.4, §6.2.
 
 ---
 
 ## 14. Open questions (need the maker's call)
 
+**Resolved**
+
+- **Engine dependencies** — *dependency-free.* The engine keeps its current
+  three crates and grows nothing; the pack-manifest reader is ours (a documented
+  strict subset, hard-error on anything outside it). *(was Q3)*
+- **Rendered preview** — *native egui subset renderer*, pure Rust, no webview,
+  no network; `Open in browser` is a local escape hatch only. *(was Q4)*
+- **`convert.rs` split** — *yes, do it*, with the module map in §8, and drift
+  from Perl's internal shape is welcome. *(was Q5)*
+- **Perl parity** — *separate pipeline* (§8.5); the Rust crate is the product
+  and no roadmap item depends on Perl. *(new)*
+
+**Still open**
+
 1. **Local forge semantics** — is `/home/vicpu/build2/forges/textrill.git` the
    intended "local GitHub", or should I stand up a local Forgejo/Gitea and/or
    wire the real GitHub remote now?
-2. **Registry authority** — a single official `textrill-templates` repo, or
-   registry-agnostic from the start (self-hosting first-class)?
-3. **TOML dependency** — accept the `toml` crate for manifests, or hand-roll a
-   minimal parser to keep the engine dependency-free?
-4. **Rendered preview** — is "Open in browser" sufficient, or is an optional
-   embedded webview (`wry`) wanted in-app?
-5. **`convert.rs` split** — worth the (golden-safe) churn now, or defer until
-   the template/UI phases settle?
-6. **Large research tarballs** — keep in git history or move out before the
-   first public push?
+2. **Sharing authority** — should there be a single canonical
+   `textrill-templates` catalog repo, or catalog-agnostic from the start
+   (self-hosting first-class)? And is the optional out-of-core fetching helper
+   (§6) wanted at all?
+3. **Large research tarballs** — keep the HandBrake/qBittorrent/pandoc archives
+   in git history or move them out before the first public push?
 
 ---
 
@@ -545,3 +642,8 @@ no network in the conversion path. See `Scopev1.md` §1.4, §6.2.
   (Phase 2) and registry (Phase 3) specified against the current
   `library.rs`/`template.rs` code; UI overhaul (Phase 1) specified against the
   current `app.rs` stack.
+- v2 — recorded the maker's decisions: engine stays dependency-free (hand-rolled
+  subset manifest reader); the tool **never uses the network** (Phase 3 recast
+  as offline, file/git-based catalog sharing; preview becomes a native egui
+  subset renderer); `convert.rs` modularisation specified with a real module map;
+  Perl parity isolated as a separate, non-gating pipeline (§8.5).
