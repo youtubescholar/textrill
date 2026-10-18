@@ -1603,3 +1603,66 @@ fn the_file_strip_shows_source_and_destination() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_file(&conf);
 }
+
+/// The three view modes switch with Ctrl+1/2/3, not only from the View menu.
+/// It uses a temporary settings file: switching a mode persists the choice, and
+/// a test must never write to the developer's real configuration.
+#[test]
+fn the_view_modes_switch_with_the_keyboard() {
+    use textrill_gui::settings::ViewMode;
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!(
+        "textrill-viewmode-{}-{nanos}.conf",
+        std::process::id()
+    ));
+
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+    assert_eq!(harness.state().view_mode(), ViewMode::Split);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num2);
+    harness.run();
+    assert_eq!(harness.state().view_mode(), ViewMode::Source);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num3);
+    harness.run();
+    assert_eq!(harness.state().view_mode(), ViewMode::Html);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num1);
+    harness.run();
+    assert_eq!(harness.state().view_mode(), ViewMode::Split);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+/// With an empty document the quick-start actions are offered, and "Try the
+/// example" loads the sample. They vanish once there is text.
+#[test]
+fn the_empty_state_offers_working_shortcuts() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.set_size(egui::vec2(1000.0, 800.0));
+    harness.run();
+
+    // The pointer-based `click()` mis-reads the rect under the Split pane's
+    // nested layout; the AccessKit action exercises the same wired handler.
+    harness.get_by_label("Try the example").click_accesskit();
+    harness.run();
+    assert!(
+        !harness.state().doc.text.is_empty(),
+        "Try the example did not load the sample"
+    );
+
+    // Once there is text the quick-start row is gone.
+    assert!(
+        harness.query_by_label_contains("Try the example").is_none(),
+        "the quick-start row should disappear once the document has text"
+    );
+}
