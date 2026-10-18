@@ -134,11 +134,13 @@ panes cannot be resized, split, or shown side by side.
 
 ### Workstreams
 
-1. **Layout engine** — replace the vertical stack with `egui` panels:
-   `TopBottomPanel::top` (app bar + toolbar), `SidePanel` (optional outline /
-   templates), `CentralPanel` with a **resizable split** (`egui_extras`-style or
-   a custom `SidePanel`/`TopBottomPanel` divider) between Source and Preview.
-   Persist the split ratio in `settings.rs` alongside window/zoom.
+1. **Layout engine** — replace the vertical stack with a **resizable source/HTML
+   split** driven from `draw`: a bare-`Ui` horizontal layout with a custom drag
+   divider between Source and Preview, and the split ratio persisted in
+   `settings.rs` alongside window/zoom. (Deliberately *not*
+   `TopBottomPanel`/`SidePanel`/`CentralPanel`: those attach to `Context` and
+   cannot run inside `draw(&mut self, ui)`, the seam `egui_kittest` drives — see
+   the resolved note in §14.)
 2. **View modes** — tabs or a segmented control for `Source`, `HTML`,
    `Preview` (Phase 4 fills Preview; Phase 1 lands the slot), and `Outline`.
    Keyboard-first: `Ctrl+1/2/3`.
@@ -270,10 +272,20 @@ Keep the option grammar; add two options and one additive command group.
   - `list [--tag T] [--json]`
   - `inspect <id>[:<template>]` — manifest, slots, vars, source path
   - `new <name>` — scaffold a pack (manifest + minimal valid template)
-  - `install <PATH>` — from a pack dir or a `.tar.gz`/`.zip` **on disk** (no URL; see §6)
+  - `install <PATH>` — from a **pack directory** or a **deterministic
+    uncompressed `.tar`** on disk (no URL; no `.tar.gz`/`.zip` in core — see the
+    archive decision below)
   - `remove <id>` — user-installed packs only
-  - `pack <dir>` / `unpack <archive>` — deterministic archive (sorted entries, fixed mtime)
+  - `pack <dir>` / `unpack <archive>` — deterministic **uncompressed `.tar`**
+    (sorted entries, fixed mtime); `unpack` reads the same
   - `validate <dir|archive>` — the 5.3 checks
+
+**Archive decision (resolved, §14).** Core ships **directory packs plus a
+deterministic uncompressed `.tar`** only. gzip/zip need DEFLATE, which a
+dependency-free engine would have to hand-roll — a large, security-sensitive
+surface. Users (or the optional companion, §6) unpack `.tar.gz`/`.zip` with
+`tar`/`unzip` first. `pack`/`unpack` stay byte-exact round-trips without
+pulling in an inflate implementation.
 
 `--template_library NAME` now resolves across discovered packs as well as the
 shipped set; the shipped five keep working unchanged.
@@ -621,6 +633,14 @@ no network anywhere in the tool (not just the conversion path). See
   from Perl's internal shape is welcome. *(was Q5)*
 - **Perl parity** — *separate pipeline* (§8.5); the Rust crate is the product
   and no roadmap item depends on Perl. *(new)*
+- **Template archives** — *directory packs + deterministic uncompressed `.tar`
+  only* in core; no `.tar.gz`/`.zip` (DEFLATE) in the dependency-free engine.
+  Users or the optional companion unpack compressed archives first. *(new)*
+- **Phase 1 layout** — a *bare-`Ui` horizontal splitter with a drag handle*,
+  not egui `TopBottomPanel`/`SidePanel`/`CentralPanel`: panels attach to
+  `Context` and cannot live inside `draw(&mut self, ui)`, which is the seam all
+  58 acceptance tests drive via `egui_kittest`. The roadmap's original "panels"
+  wording is corrected; the test harness is not reworked. *(new)*
 
 **Still open**
 

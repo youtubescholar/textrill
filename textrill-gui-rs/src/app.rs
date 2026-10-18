@@ -219,6 +219,12 @@ pub struct TextrillApp {
     /// While the split handle is dragged: the pointer x and split ratio where
     /// the drag began, so the ratio tracks the pointer without running away.
     drag_start: Option<(f32, f32)>,
+    /// The `--report` counts of the last produced HTML, cached when a conversion
+    /// lands so the status bar never rescans a large document every frame.
+    counts: textrill::report::Counts,
+    /// The source editor's caret, as 1-based (line, column); `None` when the
+    /// editor has never been focused this run.
+    cursor: Option<(usize, usize)>,
 }
 
 impl Default for TextrillApp {
@@ -275,6 +281,8 @@ impl TextrillApp {
             view_mode: crate::settings::ViewMode::default(),
             density: crate::settings::Density::default(),
             drag_start: None,
+            counts: textrill::report::Counts::default(),
+            cursor: None,
         };
         app.restore_settings();
         app
@@ -615,6 +623,7 @@ impl TextrillApp {
                     };
                     self.output = outcome.html;
                     self.doc.note_converted(&self.output);
+                    self.counts = textrill::report::Counts::of(&self.output);
                     self.status = format!("{lines} lines · {:.0} ms", outcome.seconds * 1000.0);
                 }
             }
@@ -1658,7 +1667,9 @@ impl TextrillApp {
                         egui::vec2(left, ui.available_height()),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
-                            let height = ui.available_height() * 0.6;
+                            // In Split the HTML sits beside us, so the source
+                            // pane takes the full height of its column.
+                            let height = ui.available_height();
                             self.source_pane(ui, height);
                         },
                     );
@@ -1713,9 +1724,9 @@ impl TextrillApp {
     /// pane instead of pushing the rest of the window off the screen.
     fn source_pane(&mut self, ui: &mut Ui, max_height: f32) {
         ui.label("Input");
-        // The hint is the empty state: with no text it points the first run at
-        // the two ways in (typing, or the Example button); once there is text
-        // it disappears without the widget ever going away.
+        // The hint plus a quick-start row is the empty state: with no text it
+        // points a first run at the ways in; once there is text both disappear
+        // without the editor ever going away.
         let empty = self.doc.text.is_empty();
         egui::ScrollArea::vertical()
             .id_salt("input-pane")
@@ -1723,14 +1734,62 @@ impl TextrillApp {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let mut editor = egui::TextEdit::multiline(&mut self.doc.text).desired_rows(6);
+                editor = editor.id(egui::Id::new("source-editor"));
                 if empty {
-                    editor =
-                        editor.hint_text("Type here, or press Example to load a sample document.");
+                    editor = editor.hint_text("Type here, or use the shortcuts below to start.");
                 }
-                if ui.add(editor).changed() {
+                let output = editor.show(ui);
+                if output.response.changed() {
                     self.on_edit(Instant::now());
                 }
+                // Remember the caret for the status bar's line:column readout.
+                if let Some(range) = output.cursor_range {
+                    let index: usize = range.primary.index.into();
+                    let (line, col) = line_col(&self.doc.text, index);
+                    self.cursor = Some((line, col));
+                }
+                if empty {
+                    self.quick_start(ui);
+                }
             });
+    }
+
+    /// The empty state's quick-start actions. Each reaches a real command; the
+    /// template entry is honest about arriving with Phase 2.
+    fn quick_start(&mut self, ui: &mut Ui) {
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button("Open file…")
+                .on_hover_text("Open a plain-text file (Ctrl+O)")
+                .clicked()
+            {
+                self.open_document();
+            }
+            if ui
+                .button("Paste")
+                .on_hover_text("Focus the editor, then paste with Ctrl+V")
+                .clicked()
+            {
+                ui.ctx()
+                    .memory_mut(|m| m.request_focus(egui::Id::new("source-editor")));
+            }
+            if ui
+                .button("Try the example")
+                .on_hover_text("Load a sample document that exercises the converter")
+                .clicked()
+            {
+                self.load_sample();
+            }
+            if ui
+                .button("Browse templates")
+                .on_hover_text("Pick a template pack — arrives with the template manager")
+                .clicked()
+            {
+                self.status =
+                    "Template browser arrives with the template manager (Phase 2).".to_string();
+            }
+        });
     }
 
     /// The converted-HTML pane: its label and the read-only editor over
@@ -1765,19 +1824,58 @@ impl TextrillApp {
         });
     }
 
-    /// The status bar: the live message on the left, and the document's size on
-    /// the right. It is pinned to the bottom of the working area so the status
-    /// is always readable without covering any control.
+    /// The status bar, pinned to the bottom of the working area. Left: the live
+    /// message. Right: the caret position, the source encoding, the `--report`
+    /// structure counts, the document size, and the unsaved marks.
     fn status_bar(&mut self, ui: &mut Ui) {
         let words = self.doc.text.split_whitespace().count();
         let chars = self.doc.text.chars().count();
+        let marks = format!(
+            "{}{}",
+            if self.doc.dirty { "*" } else { "" },
+            if self.doc.output_stale { "+" } else { "" }
+        );
+        let caret = self
+            .cursor
+            .map(|(l, c)| format!("{l}:{c}"))
+            .unwrap_or_default();
+        let counts = &self.counts;
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(&self.status).weak());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(format!("{words} words · {chars} chars")).weak());
+                let tail = format!(
+                    "{marks}  ·  {}  ·  {}w {}c  ·  {} ¶ {} H {} S {} BR  ·  {caret}",
+                    self.doc.encoding.name(),
+                    words,
+                    chars,
+                    counts.paragraphs,
+                    counts.headings,
+                    counts.strong,
+                    counts.br,
+                );
+                ui.label(egui::RichText::new(tail).weak());
             });
         });
     }
+}
+
+/// The 1-based (line, column) of a character index in `text`, counting columns
+/// in characters. Used for the status bar's caret readout.
+fn line_col(text: &str, char_index: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut col = 1;
+    for (n, ch) in text.chars().enumerate() {
+        if n >= char_index {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
 }
 
 impl eframe::App for TextrillApp {
