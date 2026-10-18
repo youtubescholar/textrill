@@ -65,6 +65,15 @@ const FOCUS_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     },
     egui::Key::F,
 );
+/// Pick which view the working area shows: `Ctrl+1` side by side, `Ctrl+2`
+/// source only, `Ctrl+3` converted HTML only. The View menu offers the same
+/// three choices by name.
+const VIEW_SPLIT_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num1);
+const VIEW_SOURCE_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num2);
+const VIEW_HTML_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num3);
 /// The reset command needs a route that does not depend on any widget being
 /// on screen, because the whole point of it is recovering a layout that is
 /// off-screen or folded away. `Ctrl/Cmd+Alt+0` is outside the set egui's own
@@ -200,6 +209,16 @@ pub struct TextrillApp {
     /// "Modified" marker as soon as they are edited away from the preset's
     /// bundle.
     preset: &'static str,
+    /// The source/preview split ratio: the fraction of the working area given
+    /// to the source pane, the rest to the preview. Clamped in the UI.
+    pub split_ratio: f32,
+    /// Which view the main working area shows (split, source-only, …).
+    pub view_mode: crate::settings::ViewMode,
+    /// How tightly the interface is packed.
+    pub density: crate::settings::Density,
+    /// While the split handle is dragged: the pointer x and split ratio where
+    /// the drag began, so the ratio tracks the pointer without running away.
+    drag_start: Option<(f32, f32)>,
 }
 
 impl Default for TextrillApp {
@@ -252,6 +271,10 @@ impl TextrillApp {
             preset: presets::default_preset().key,
             file_browser: None,
             last_dir: None,
+            split_ratio: 0.5,
+            view_mode: crate::settings::ViewMode::default(),
+            density: crate::settings::Density::default(),
+            drag_start: None,
         };
         app.restore_settings();
         app
@@ -314,6 +337,19 @@ impl TextrillApp {
         if let Err(error) = self.settings.set_builtin_browser(builtin) {
             self.status = format!("could not save settings: {error}");
         }
+    }
+
+    /// Show `mode` in the main working area and remember the choice.
+    pub fn set_view_mode(&mut self, mode: crate::settings::ViewMode) {
+        if self.view_mode != mode {
+            self.view_mode = mode;
+            self.store_layout_settings();
+        }
+    }
+
+    /// How tightly the interface is packed, for the layout code.
+    pub fn view_mode(&self) -> crate::settings::ViewMode {
+        self.view_mode
     }
 
     /// The chosen preset's key, for tests and the settings store.
@@ -396,6 +432,26 @@ impl TextrillApp {
                 .unwrap_or_else(presets::default_preset)
                 .key;
         }
+        if let Some(ratio) = self.settings.split_ratio() {
+            self.split_ratio = ratio;
+        }
+        if let Some(mode) = self.settings.view_mode() {
+            self.view_mode = mode;
+        }
+        if let Some(density) = self.settings.density() {
+            self.density = density;
+        }
+    }
+
+    /// Persist the layout choices the main panes own (split ratio, view mode,
+    /// density).
+    fn store_layout_settings(&mut self) {
+        if let Err(error) =
+            self.settings
+                .store_layout(self.split_ratio, self.view_mode, self.density)
+        {
+            self.status = format!("could not save settings: {error}");
+        }
     }
 
     /// Persist the display choices the user made (theme, text size, motion).
@@ -442,9 +498,11 @@ impl TextrillApp {
         }
     }
 
-    /// Persist everything the window owns: the option set and the geometry.
+    /// Persist everything the window owns: the option set, the layout and the
+    /// geometry.
     fn persist(&mut self) {
         self.store_settings();
+        self.store_layout_settings();
         self.store_window_state();
     }
 
@@ -938,7 +996,12 @@ impl TextrillApp {
             mut quit,
             mut reset_window,
             mut focus,
-        ) = (false, false, false, false, false, false, false, false);
+            mut view_split,
+            mut view_source,
+            mut view_html,
+        ) = (
+            false, false, false, false, false, false, false, false, false, false, false,
+        );
         ctx.input_mut(|input| {
             new = input.consume_shortcut(&NEW_SHORTCUT);
             save_text = input.consume_shortcut(&SAVE_TEXT_SHORTCUT);
@@ -948,12 +1011,24 @@ impl TextrillApp {
             quit = input.consume_shortcut(&QUIT_SHORTCUT);
             reset_window = input.consume_shortcut(&RESET_WINDOW_SHORTCUT);
             focus = input.consume_shortcut(&FOCUS_SHORTCUT);
+            view_split = input.consume_shortcut(&VIEW_SPLIT_SHORTCUT);
+            view_source = input.consume_shortcut(&VIEW_SOURCE_SHORTCUT);
+            view_html = input.consume_shortcut(&VIEW_HTML_SHORTCUT);
         });
         if reset_window {
             self.reset_window_state(ctx);
         }
         if focus {
             self.focus_mode = !self.focus_mode;
+        }
+        if view_split {
+            self.set_view_mode(crate::settings::ViewMode::Split);
+        }
+        if view_source {
+            self.set_view_mode(crate::settings::ViewMode::Source);
+        }
+        if view_html {
+            self.set_view_mode(crate::settings::ViewMode::Html);
         }
         if new {
             self.new_document();
@@ -1048,6 +1123,25 @@ impl TextrillApp {
             ui.menu_button("View", |ui| {
                 ui.checkbox(&mut self.show_options, "Show options");
                 ui.separator();
+                // Which view the working area shows: side by side, or the
+                // whole area given to one pane. Ctrl+1/2/3 reach the same
+                // choices without the menu.
+                ui.label("Layout");
+                let mode = self.view_mode;
+                for (label, want) in [
+                    ("Source and HTML", crate::settings::ViewMode::Split),
+                    ("Source only", crate::settings::ViewMode::Source),
+                    ("HTML only", crate::settings::ViewMode::Html),
+                ] {
+                    if ui
+                        .selectable_label(mode == want, label)
+                        .clicked()
+                    {
+                        self.set_view_mode(want);
+                        ui.close();
+                    }
+                }
+                ui.separator();
                 // The built-in browser is not offered in a Flatpak: with no
                 // home filesystem access it could show only an empty tree, and
                 // the FileChooser portal is always present there instead.
@@ -1074,6 +1168,20 @@ impl TextrillApp {
                 {
                     self.apply_ui_style(ui.ctx());
                     self.store_display_settings();
+                }
+                // How tightly the controls are packed. Compact gives a denser
+                // layout for a small screen; Comfortable is the default.
+                ui.separator();
+                ui.label(egui::RichText::new("Density").small());
+                let density = self.density;
+                for (label, want) in [
+                    ("Comfortable", crate::settings::Density::Comfortable),
+                    ("Compact", crate::settings::Density::Compact),
+                ] {
+                    if ui.selectable_label(density == want, label).clicked() {
+                        self.density = want;
+                        self.store_layout_settings();
+                    }
                 }
                 // Whole-UI zoom, for the same reason a browser has it: a 4K
                 // laptop and a 96 DPI desktop should not dictate the same
@@ -1237,11 +1345,6 @@ impl TextrillApp {
             {
                 self.focus_mode = true;
             }
-        });
-        // The status is its own wrapped row: a long message can then never push
-        // a control off the edge, and it stays readable when the buttons fold.
-        ui.horizontal_wrapped(|ui| {
-            ui.label(&self.status);
         });
     }
 
@@ -1417,6 +1520,13 @@ impl TextrillApp {
             self.apply_ui_style(ui.ctx());
             self.applied_style = true;
         }
+        // Pack the whole interface according to the chosen density. This is the
+        // one knob the density control owns; everything else inherits the
+        // theme's spacing.
+        ui.spacing_mut().item_spacing.y = match self.density {
+            crate::settings::Density::Compact => 2.0,
+            crate::settings::Density::Comfortable => 4.0,
+        };
         // The worker asks for a redraw when a result lands, so the preview does
         // not wait for the next input event to appear.
         if !self.waker_installed {
@@ -1516,29 +1626,116 @@ impl TextrillApp {
             }
         });
 
-        // Both panes are bounded and scroll on their own. A multiline
-        // `TextEdit` grows to fit every line (its `desired_rows` is only a
-        // minimum), so without a scroll area the HTML preview is simply clipped
-        // off the bottom of the window once the two panes together exceed it.
-        ui.label("Input");
-        egui::ScrollArea::vertical()
-            .id_salt("input-pane")
-            .max_height((ui.available_height() * 0.4).max(80.0))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if ui
-                    .add(egui::TextEdit::multiline(&mut self.doc.text).desired_rows(6))
-                    .changed()
-                {
-                    self.on_edit(Instant::now());
-                }
-            });
-
         if self.show_options {
             self.options_window(ui.ctx());
         }
 
-        ui.separator();
+        self.working_area(ui);
+        self.status_bar(ui);
+
+        self.about_window(ui.ctx());
+        if self.file_browser.is_some() {
+            // The browser covers the prompt it may have been opened from.
+            self.file_browser_window(ui.ctx());
+        } else {
+            self.save_prompt_window(ui.ctx());
+        }
+    }
+
+    /// The main working area: the source pane, the converted HTML, or the two
+    /// side by side with a drag-to-resize handle between them. `Split` gives
+    /// the source `split_ratio` of the width; the single-view modes give the
+    /// whole area to one pane.
+    fn working_area(&mut self, ui: &mut Ui) {
+        match self.view_mode {
+            crate::settings::ViewMode::Split => {
+                let handle_width = 6.0;
+                let total = (ui.available_width() - handle_width).max(160.0);
+                let left = (total * self.split_ratio).max(120.0);
+                let right = (total - left).max(120.0);
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(left, ui.available_height()),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            let height = ui.available_height() * 0.6;
+                            self.source_pane(ui, height);
+                        },
+                    );
+                    let handle = ui
+                        .allocate_exact_size(
+                            egui::vec2(handle_width, ui.available_height()),
+                            egui::Sense::click_and_drag(),
+                        )
+                        .1;
+                    if handle.drag_started() {
+                        let x = ui.input(|i| i.pointer.interact_pos().map(|p| p.x).unwrap_or(0.0));
+                        self.drag_start = Some((x, self.split_ratio));
+                    }
+                    if handle.dragged() {
+                        if let Some((start_x, start_ratio)) = self.drag_start {
+                            let now_x = ui.input(|i| {
+                                i.pointer.interact_pos().map(|p| p.x).unwrap_or(start_x)
+                            });
+                            self.split_ratio = crate::settings::clamp_split_ratio(
+                                start_ratio + (now_x - start_x) / total,
+                            );
+                        }
+                    }
+                    if handle.drag_stopped() {
+                        self.drag_start = None;
+                        self.store_layout_settings();
+                    }
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(right, ui.available_height()),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            self.html_pane(ui);
+                        },
+                    );
+                });
+            }
+            crate::settings::ViewMode::Source => {
+                let height = ui.available_height();
+                self.source_pane(ui, height);
+            }
+            crate::settings::ViewMode::Html => {
+                self.html_pane(ui);
+            }
+            crate::settings::ViewMode::Preview | crate::settings::ViewMode::Outline => {
+                self.pending_view(ui);
+            }
+        }
+    }
+
+    /// The source pane: its label, the bounded scroll area, and the edit hook.
+    /// `max_height` bounds the editor so a long document scrolls inside the
+    /// pane instead of pushing the rest of the window off the screen.
+    fn source_pane(&mut self, ui: &mut Ui, max_height: f32) {
+        ui.label("Input");
+        // The hint is the empty state: with no text it points the first run at
+        // the two ways in (typing, or the Example button); once there is text
+        // it disappears without the widget ever going away.
+        let empty = self.doc.text.is_empty();
+        egui::ScrollArea::vertical()
+            .id_salt("input-pane")
+            .max_height(max_height.max(80.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let mut editor = egui::TextEdit::multiline(&mut self.doc.text).desired_rows(6);
+                if empty {
+                    editor =
+                        editor.hint_text("Type here, or press Example to load a sample document.");
+                }
+                if ui.add(editor).changed() {
+                    self.on_edit(Instant::now());
+                }
+            });
+    }
+
+    /// The converted-HTML pane: its label and the read-only editor over
+    /// `self.output`.
+    fn html_pane(&mut self, ui: &mut Ui) {
         ui.label("HTML");
         egui::ScrollArea::vertical()
             .id_salt("html-pane")
@@ -1550,14 +1747,36 @@ impl TextrillApp {
                         .desired_rows(8),
                 );
             });
+    }
 
-        self.about_window(ui.ctx());
-        if self.file_browser.is_some() {
-            // The browser covers the prompt it may have been opened from.
-            self.file_browser_window(ui.ctx());
-        } else {
-            self.save_prompt_window(ui.ctx());
-        }
+    /// The placeholder for views that arrive in a later phase (the native
+    /// rendered preview and the outline). It fills the working area with an
+    /// explanation instead of an empty screen.
+    fn pending_view(&mut self, ui: &mut Ui) {
+        let text = match self.view_mode {
+            crate::settings::ViewMode::Outline => {
+                "Outline view arrives with the structure panel."
+            }
+            _ => "Rendered preview arrives in a later phase; this view will show the document as it will read, not its HTML.",
+        };
+        ui.vertical_centered(|ui| {
+            ui.add_space(ui.available_height() * 0.3);
+            ui.label(egui::RichText::new(text).weak());
+        });
+    }
+
+    /// The status bar: the live message on the left, and the document's size on
+    /// the right. It is pinned to the bottom of the working area so the status
+    /// is always readable without covering any control.
+    fn status_bar(&mut self, ui: &mut Ui) {
+        let words = self.doc.text.split_whitespace().count();
+        let chars = self.doc.text.chars().count();
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(&self.status).weak());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(format!("{words} words · {chars} chars")).weak());
+            });
+        });
     }
 }
 
