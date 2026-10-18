@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use textrill_gui::app::AUTO_CONVERT_DELAY;
 use textrill_gui::document::{Document, SAMPLE_TEXT};
-use textrill_gui::settings::{parse_bool, Settings};
+use textrill_gui::settings::{clamp_split_ratio, parse_bool, Density, Settings, ViewMode};
 use textrill_gui::TextrillApp;
 
 /// A directory that deletes itself when the test ends.
@@ -270,6 +270,127 @@ fn bools_accept_the_spellings_a_text_editor_might_produce() {
     for value in ["false", "0", "no", "off", "", "maybe"] {
         assert!(!parse_bool(value), "{value:?} should be false");
     }
+}
+
+// ------------------------------------------------- layout (split/view/density)
+
+#[test]
+fn the_layout_choice_round_trips_through_the_file() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+
+    let mut settings = Settings::with_path(&path);
+    assert_eq!(settings.split_ratio(), None, "no file means no choice yet");
+    assert_eq!(settings.view_mode(), None);
+    assert_eq!(settings.density(), None);
+
+    settings
+        .store_layout(0.25, ViewMode::Source, Density::Compact)
+        .expect("store");
+
+    let reopened = Settings::with_path(&path);
+    assert_eq!(reopened.split_ratio(), Some(0.25));
+    assert_eq!(reopened.view_mode(), Some(ViewMode::Source));
+    assert_eq!(reopened.density(), Some(Density::Compact));
+}
+
+#[test]
+fn an_absurd_split_ratio_is_clamped_not_trusted() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    // A hand-edited ratio that would collapse a pane to nothing.
+    std::fs::write(&path, "[General]\nsplit-ratio=0.001\n").expect("write config");
+
+    let settings = Settings::with_path(&path);
+    assert_eq!(settings.split_ratio(), Some(0.1), "the low end must clamp");
+
+    // And the store clamps on the way out too.
+    let mut settings = Settings::with_path(dir.path().join("out.conf"));
+    settings
+        .store_layout(9.0, ViewMode::Split, Density::default())
+        .expect("store");
+    assert_eq!(
+        Settings::with_path(dir.path().join("out.conf")).split_ratio(),
+        Some(0.9)
+    );
+}
+
+#[test]
+fn a_nonsense_view_mode_or_density_is_ignored() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    std::fs::write(&path, "[General]\nview-mode=rotating\ndensity=neon\n").expect("write config");
+
+    let settings = Settings::with_path(&path);
+    assert_eq!(settings.view_mode(), None, "an unknown mode is not a mode");
+    assert_eq!(
+        settings.density(),
+        None,
+        "an unknown density is not a density"
+    );
+}
+
+#[test]
+fn clamp_split_ratio_never_collapses_a_pane() {
+    assert_eq!(
+        clamp_split_ratio(f32::NAN),
+        0.5,
+        "NaN falls back to the middle"
+    );
+    assert_eq!(clamp_split_ratio(0.0), 0.1);
+    assert_eq!(clamp_split_ratio(1.0), 0.9);
+    assert_eq!(clamp_split_ratio(-3.0), 0.1);
+    assert_eq!(clamp_split_ratio(0.5), 0.5);
+}
+
+#[test]
+fn the_view_modes_spell_themselves_both_ways() {
+    for mode in [
+        ViewMode::Split,
+        ViewMode::Source,
+        ViewMode::Html,
+        ViewMode::Preview,
+        ViewMode::Outline,
+    ] {
+        assert_eq!(ViewMode::from_stored(mode.stored()), Some(mode));
+    }
+    assert_eq!(ViewMode::from_stored("rotating"), None);
+    assert_eq!(Density::from_stored("compact"), Some(Density::Compact));
+    assert_eq!(Density::from_stored("neon"), None);
+}
+
+#[test]
+fn the_app_adopts_a_stored_view_mode() {
+    let dir = TempDir::new();
+    let path = dir.path().join("textrill.conf");
+    {
+        let mut settings = Settings::with_path(&path);
+        settings
+            .store_layout(0.4, ViewMode::Html, Density::Compact)
+            .expect("store");
+    }
+
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    assert_eq!(app.view_mode(), ViewMode::Html);
+    assert_eq!(app.split_ratio, 0.4);
+
+    app.set_view_mode(ViewMode::Source);
+    assert_eq!(app.view_mode(), ViewMode::Source);
+    // And the change is written straight out.
+    assert_eq!(
+        Settings::with_path(&path).view_mode(),
+        Some(ViewMode::Source),
+        "set_view_mode must persist the choice"
+    );
+}
+
+#[test]
+fn a_first_launch_opens_in_split_view() {
+    let dir = TempDir::new();
+    let app = TextrillApp::with_settings(Settings::with_path(dir.path().join("textrill.conf")));
+    assert_eq!(app.view_mode(), ViewMode::Split);
+    assert!((app.split_ratio - 0.5).abs() < 1e-6);
+    assert_eq!(app.density, Density::default());
 }
 
 #[test]

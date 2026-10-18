@@ -149,6 +149,23 @@ impl Settings {
             .map(str::to_string)
     }
 
+    /// The saved source/preview split ratio, clamped; `None` when unset.
+    pub fn split_ratio(&self) -> Option<f32> {
+        self.get("split-ratio")
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .map(clamp_split_ratio)
+    }
+
+    /// The saved main-pane view mode; `None` when unset or unknown.
+    pub fn view_mode(&self) -> Option<ViewMode> {
+        self.get("view-mode").and_then(ViewMode::from_stored)
+    }
+
+    /// The saved UI density; `None` when unset or unknown.
+    pub fn density(&self) -> Option<Density> {
+        self.get("density").and_then(Density::from_stored)
+    }
+
     /// The directory the last open or save used, if one was remembered.
     pub fn last_dir(&self) -> Option<PathBuf> {
         self.get("last-dir")
@@ -193,6 +210,25 @@ impl Settings {
             "reduce-motion".to_string(),
             if reduce_motion { "true" } else { "false" }.to_string(),
         );
+        self.write()
+    }
+
+    /// Persist the layout choices the main panes own (split ratio, view mode,
+    /// density) in one atomic write, the way the display choices are.
+    pub fn store_layout(
+        &mut self,
+        split_ratio: f32,
+        view_mode: ViewMode,
+        density: Density,
+    ) -> Result<(), String> {
+        self.values.insert(
+            "split-ratio".to_string(),
+            format!("{:.4}", clamp_split_ratio(split_ratio)),
+        );
+        self.values
+            .insert("view-mode".to_string(), view_mode.stored().to_string());
+        self.values
+            .insert("density".to_string(), density.stored().to_string());
         self.write()
     }
 
@@ -358,4 +394,80 @@ pub fn parse_bool(value: &str) -> bool {
         value.trim().to_ascii_lowercase().as_str(),
         "true" | "1" | "yes" | "on"
     )
+}
+
+/// Keep the split ratio in a usable range so neither pane collapses to nothing.
+pub fn clamp_split_ratio(ratio: f32) -> f32 {
+    if ratio.is_nan() {
+        0.5
+    } else {
+        ratio.clamp(0.1, 0.9)
+    }
+}
+
+/// Which view the main working area shows.
+///
+/// The default is `Split` (source beside the converted HTML). The other modes
+/// give the whole working area to one view, for a narrow window or a focused
+/// read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ViewMode {
+    #[default]
+    Split,
+    Source,
+    Html,
+    Preview,
+    Outline,
+}
+
+impl ViewMode {
+    /// The value written to the settings file.
+    pub fn stored(self) -> &'static str {
+        match self {
+            ViewMode::Split => "split",
+            ViewMode::Source => "source",
+            ViewMode::Html => "html",
+            ViewMode::Preview => "preview",
+            ViewMode::Outline => "outline",
+        }
+    }
+
+    /// Recover a mode from its stored spelling; `None` for anything unknown.
+    pub fn from_stored(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "split" => Some(ViewMode::Split),
+            "source" => Some(ViewMode::Source),
+            "html" => Some(ViewMode::Html),
+            "preview" => Some(ViewMode::Preview),
+            "outline" => Some(ViewMode::Outline),
+            _ => None,
+        }
+    }
+}
+
+/// How tightly the interface is packed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Density {
+    Compact,
+    #[default]
+    Comfortable,
+}
+
+impl Density {
+    /// The value written to the settings file.
+    pub fn stored(self) -> &'static str {
+        match self {
+            Density::Compact => "compact",
+            Density::Comfortable => "comfortable",
+        }
+    }
+
+    /// Recover a density from its stored spelling; `None` for anything unknown.
+    pub fn from_stored(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "compact" => Some(Density::Compact),
+            "comfortable" => Some(Density::Comfortable),
+            _ => None,
+        }
+    }
 }
