@@ -641,6 +641,14 @@ no network anywhere in the tool (not just the conversion path). See
   `Context` and cannot live inside `draw(&mut self, ui)`, which is the seam all
   58 acceptance tests drive via `egui_kittest`. The roadmap's original "panels"
   wording is corrected; the test harness is not reworked. *(new)*
+- **Design-system icons** — the toolbar keeps its **text** labels, i.e. the
+  roadmap's "text fallback" rather than glyph icons. Every acceptance test
+  reaches a control by the exact label a user reads at 320px/200% zoom
+  (`New`, `Save`, `Convert`, …); glyph icons would need texture infrastructure
+  and break that, while buying nothing the text labels do not. The rest of the
+  design-system pass landed as density spacing tokens (`Density`) and pane
+  headings, and the four-theme WCAG contrast is already pinned by the
+  `theme.rs` tests. *(new)*
 
 **Still open**
 
@@ -667,3 +675,11 @@ no network anywhere in the tool (not just the conversion path). See
   as offline, file/git-based catalog sharing; preview becomes a native egui
   subset renderer); `convert.rs` modularisation specified with a real module map;
   Perl parity isolated as a separate, non-gating pipeline (§8.5).
+- v3 — Phase 1 built, and its open calls recorded: the layout became a
+  bare-`Ui` horizontal splitter (not `Context` panels) to keep the `draw` test
+  seam; template archives settled as directory packs + deterministic
+  uncompressed `.tar` only (§5.4); the toolbar keeps text labels rather than
+  glyph icons. The Phase 1 workstreams landed — resizable split, view modes with
+  `Ctrl+1/2/3`, empty-state quick start, status bar, `Ctrl+K` command palette,
+  density spacing tokens and pane headings — with the four-theme WCAG contrast
+  staying pinned by the `theme.rs` tests.

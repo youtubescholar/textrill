@@ -1666,3 +1666,80 @@ fn the_empty_state_offers_working_shortcuts() {
         "the quick-start row should disappear once the document has text"
     );
 }
+
+/// The Ctrl/Cmd+K palette starts closed, lists its commands when opened, and
+/// closes again on Escape. The command rows are probed by the label a user
+/// would read, which is also how the palette is distinguished from the File
+/// menu (its other home) — that menu is closed here.
+#[test]
+fn the_command_palette_opens_and_closes_with_the_shortcut() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.run();
+    assert_eq!(
+        harness.query_all_by_label("Load example").count(),
+        0,
+        "the palette should start closed"
+    );
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::K);
+    harness.run();
+    assert_eq!(
+        harness.query_all_by_label("Load example").count(),
+        1,
+        "Ctrl+K should open the palette and list its commands"
+    );
+
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert_eq!(
+        harness.query_all_by_label("Load example").count(),
+        0,
+        "Escape should close the palette"
+    );
+}
+
+/// Typing narrows the list to what matches, and Enter runs the highlighted
+/// row. This is the palette's whole reason to exist: name a command in a few
+/// letters and fire it without hunting through a menu.
+#[test]
+fn the_command_palette_filters_and_runs_what_you_pick() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.run();
+    assert!(harness.state().doc.text.is_empty());
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::K);
+    harness.run();
+
+    // The search box takes focus the moment the palette opens, so the very
+    // first keystroke lands in it rather than in the source editor.
+    let search = harness
+        .get_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|node| node.is_focused())
+        .expect("the palette search box should hold focus when it opens");
+    search.type_text("example");
+    harness.run();
+
+    assert_eq!(
+        harness.query_all_by_label("Load example").count(),
+        1,
+        "the matching command should stay listed"
+    );
+    assert_eq!(
+        harness.query_all_by_label("Copy HTML").count(),
+        0,
+        "a non-matching command should be filtered out"
+    );
+
+    harness.key_press(egui::Key::Enter);
+    harness.run();
+    assert!(
+        !harness.state().doc.text.is_empty(),
+        "Enter should run the highlighted, filtered command"
+    );
+}
