@@ -114,6 +114,7 @@ option_table![
     MetaCharset, Flag, "Emit <meta charset=\"utf-8\"> in the document head.", ["meta_charset"];
     LinksDictionaries, StrArray, "Link dictionary to use; repeat for several.", ["links_dictionaries", "link", "l"];
     LinkOnly, Flag, "Only convert URLs, leave the rest of the text alone.", ["link_only", "linkonly", "LO"];
+    ListTemplates, Flag, "List the discovered templates on standard output and exit.", ["list_templates"];
     LowerCaseTags, Flag, "Emit lower-case HTML tags.", ["lower_case_tags", "lc_tags", "LC"];
     Mailmode, Flag, "Recognise mail headers and quoted replies.", ["mailmode", "m"];
     MakeAnchors, Flag, "Add named anchors to headings and mail messages.", ["make_anchors", "anchors"];
@@ -139,7 +140,8 @@ option_table![
     TabWidth, Int, "Width of a tab character.", ["tab_width", "tabwidth", "tw"];
     TableType, TableType, "Enable one table type, e.g. ALIGN=0.", ["table_type"];
     BodyTemplate, Str, "Wrap the body in a template file; the whole-document counterpart is --document_template. The old name --template still works but is deprecated.", ["body_template", "template"];
-    TemplateLibrary, Str, "Use a shipped template by name: article, book, manpage, slide, bare.", ["template_library"];
+    TemplateDir, StrArray, "Directory to search for template packs; repeat for several.", ["template_dir"];
+    TemplateLibrary, Str, "Use a template by name: article, book, manpage, slide, bare, or pack-id:name from a discovered pack.", ["template_library"];
     Title, Str, "Document title.", ["title", "t"];
     Titlefirst, Flag, "Use the first line of the text as the title.", ["titlefirst", "tf"];
     Toc, Flag, "Prepend a generated table of contents.", ["toc"];
@@ -157,7 +159,7 @@ option_table![
 /// The README quotes the option count; binding it here makes an addition a
 /// deliberate, compile-time act rather than a silent prose drift.
 const _: () = assert!(
-    Opt::ALL.len() == 72,
+    Opt::ALL.len() == 74,
     "option count changed; update this assertion and README.md"
 );
 
@@ -255,6 +257,22 @@ pub fn set_opt(opts: &mut Options, opt: Opt, value: &str) -> Result<(), String> 
         Opt::IndentParBreak => opts.indent_par_break = parse_flag(value)?,
         Opt::LangRuns => opts.lang_runs = parse_flag(value)?,
         Opt::LinkOnly => opts.link_only = parse_flag(value)?,
+        // Three states rather than a boolean: off, "text" (the default
+        // listing) and "json"; the bare flag and `=true` both mean "text".
+        Opt::ListTemplates => {
+            opts.list_templates = match value {
+                "text" | "json" => value.to_string(),
+                other => match parse_bool(other) {
+                    Ok(true) => "text".to_string(),
+                    Ok(false) => String::new(),
+                    Err(_) => {
+                        return Err(format!(
+                            "--list_templates=json or --list_templates=text, got {other:?}"
+                        ))
+                    }
+                },
+            };
+        }
         Opt::LowerCaseTags => opts.lower_case_tags = parse_flag(value)?,
         Opt::Mailmode => opts.mailmode = parse_flag(value)?,
         Opt::MakeAnchors => opts.make_anchors = parse_flag(value)?,
@@ -338,6 +356,7 @@ pub fn set_opt(opts: &mut Options, opt: Opt, value: &str) -> Result<(), String> 
         Opt::Infile => opts.infile.push(value.to_string()),
         Opt::Instring => opts.instring.push(value.to_string()),
         Opt::LinksDictionaries => opts.links_dictionaries.push(value.to_string()),
+        Opt::TemplateDir => opts.template_dir.push(value.to_string()),
         // Parse name=value eagerly; values may include `=` and newlines. One per occurrence.
         Opt::Var => {
             if value.is_empty() {
@@ -383,6 +402,14 @@ pub fn get_opt(opts: &Options, opt: Opt) -> String {
         Opt::IndentParBreak => opts.indent_par_break.to_string(),
         Opt::LangRuns => opts.lang_runs.to_string(),
         Opt::LinkOnly => opts.link_only.to_string(),
+        // Off reads as "false" like every other flag; a format reads as itself.
+        Opt::ListTemplates => {
+            if opts.list_templates.is_empty() {
+                "false".to_string()
+            } else {
+                opts.list_templates.clone()
+            }
+        }
         Opt::LowerCaseTags => opts.lower_case_tags.to_string(),
         Opt::Mailmode => opts.mailmode.to_string(),
         Opt::MakeAnchors => opts.make_anchors.to_string(),
@@ -444,6 +471,7 @@ pub fn get_opt(opts: &Options, opt: Opt) -> String {
         Opt::Infile => opts.infile.join("\n"),
         Opt::Instring => opts.instring.join("\n"),
         Opt::LinksDictionaries => opts.links_dictionaries.join("\n"),
+        Opt::TemplateDir => opts.template_dir.join("\n"),
         Opt::Var => opts
             .vars
             .iter()
@@ -483,8 +511,13 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
     let mut it = args.iter().peekable();
     let mut table_type_seen = false;
     while let Some(arg) = it.next() {
-        let argline = || -> String { label.to_string() };
-        let at = |e: String| -> String { format!("{}: {e}", argline()) };
+        let at = |e: String| -> String {
+            if label.is_empty() {
+                e
+            } else {
+                format!("{label}: {e}")
+            }
+        };
         let (name, mut inline) = if let Some(rest) = arg.strip_prefix("--") {
             if rest.is_empty() {
                 // End of options: everything after -- is input filenames
@@ -527,12 +560,30 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
 
         match opt.kind() {
             Kind::Flag => {
-                let on = match inline.take() {
-                    Some(v) => parse_bool(&v).map_err(at)?,
-                    None => true,
-                };
-                let on = if negated { !on } else { on };
-                set_opt(opts, opt, if on { "true" } else { "false" }).map_err(at)?;
+                // --list_templates[=text|json] names a listing format rather
+                // than a boolean: the bare form and `--no-` reduce to on/off,
+                // a value goes to the setter, which knows the three states.
+                if opt == Opt::ListTemplates {
+                    let value = match inline.take() {
+                        Some(v) => {
+                            if negated {
+                                return Err(at(
+                                    "--list_templates cannot be combined with --no-".to_string()
+                                ));
+                            }
+                            v
+                        }
+                        None => (if negated { "false" } else { "true" }).to_string(),
+                    };
+                    set_opt(opts, opt, &value).map_err(at)?;
+                } else {
+                    let on = match inline.take() {
+                        Some(v) => parse_bool(&v).map_err(at)?,
+                        None => true,
+                    };
+                    let on = if negated { !on } else { on };
+                    set_opt(opts, opt, if on { "true" } else { "false" }).map_err(at)?;
+                }
             }
             // The remaining kinds take a value: an inline `=value`, or the next token.
             Kind::Str | Kind::Int | Kind::StrArray | Kind::TableType => {

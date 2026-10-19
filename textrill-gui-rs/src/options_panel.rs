@@ -92,7 +92,8 @@ fn category(opt: Opt) -> &'static str {
         | Opt::Utf8
         | Opt::EightBitClean
         | Opt::Stream
-        | Opt::Report => "Input & Output",
+        | Opt::Report
+        | Opt::ListTemplates => "Input & Output",
         Opt::Doctype
         | Opt::Html5
         | Opt::Xhtml
@@ -105,6 +106,7 @@ fn category(opt: Opt) -> &'static str {
         | Opt::DocumentTemplate
         | Opt::BodyTemplate
         | Opt::TemplateLibrary
+        | Opt::TemplateDir
         | Opt::PrependFile
         | Opt::AppendFile
         | Opt::AppendHead
@@ -632,8 +634,9 @@ fn opt_matches(opt: Opt, needle: &str) -> bool {
 /// Options the GUI structurally cannot use. The worker converts the document
 /// already on screen with [`EngineConverter::convert_text`](crate::worker), so
 /// a separate input (`--infile`/`--instring`), a second output (`--outfile`),
-/// paragraph-at-a-time streaming (`--stream`), chunked files (`--chunk`) and
-/// the stderr summary (`--report`) have nothing to act on.
+/// paragraph-at-a-time streaming (`--stream`), chunked files (`--chunk`), the
+/// stderr summary (`--report`) and the print-and-exit catalog listing
+/// (`--list_templates`) have nothing to act on.
 ///
 /// They are drawn disabled (never hidden) so the panel still names every engine
 /// option, but [`crate::options_store`] leaves them out of the saved set: a
@@ -642,7 +645,13 @@ fn opt_matches(opt: Opt, needle: &str) -> bool {
 pub(crate) fn gui_ignored(opt: Opt) -> bool {
     matches!(
         opt,
-        Opt::Stream | Opt::Chunk | Opt::Report | Opt::Infile | Opt::Instring | Opt::Outfile
+        Opt::Stream
+            | Opt::Chunk
+            | Opt::Report
+            | Opt::ListTemplates
+            | Opt::Infile
+            | Opt::Instring
+            | Opt::Outfile
     )
 }
 
@@ -796,6 +805,7 @@ fn clear_array(opts: &mut Options, opt: Opt) {
         Opt::Infile => opts.infile.clear(),
         Opt::Instring => opts.instring.clear(),
         Opt::LinksDictionaries => opts.links_dictionaries.clear(),
+        Opt::TemplateDir => opts.template_dir.clear(),
         Opt::Var => opts.vars.clear(),
         _ => {}
     }

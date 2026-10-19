@@ -225,11 +225,24 @@ impl Catalog {
         }
         let mut hits: Vec<&Entry> = self.entries.iter().filter(|e| e.name == spec).collect();
         match hits.len() {
-            0 => Err(format!(
-                "no template named {spec:?} was discovered; {} templates are \
-                 available (see --list_templates)",
-                self.entries.len()
-            )),
+            0 => {
+                // A small catalog (the shipped default is five) names what it
+                // has, as the engine always did; a large one points at the
+                // listing rather than flooding the message.
+                if self.entries.len() <= 10 {
+                    let have: Vec<&str> = self.entries.iter().map(|e| e.name.as_str()).collect();
+                    Err(format!(
+                        "no template named {spec:?} was discovered; available: {}",
+                        have.join(", ")
+                    ))
+                } else {
+                    Err(format!(
+                        "no template named {spec:?} was discovered; {} templates are \
+                         available (see --list_templates)",
+                        self.entries.len()
+                    ))
+                }
+            }
             1 => Ok(hits.pop().expect("one match")),
             n => {
                 hits.sort_by_key(|e| e.address());
@@ -262,6 +275,13 @@ pub fn discover(search: &SearchPath) -> Catalog {
         let mut packs: Vec<PathBuf> = read
             .filter_map(|e| e.ok())
             .map(|e| e.path())
+            .filter(|p| {
+                // Dot directories are never packs: `install` stages into
+                // `.install-*` beside the real destinations, and OS metadata
+                // (.DS_Store and friends) must not surface as broken packs.
+                !p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+            })
             .filter(|p| p.is_dir())
             .collect();
         packs.sort();
@@ -638,6 +658,26 @@ mod tests {
         )]));
         assert!(c.problems.is_empty(), "{:?}", c.problems);
         assert_eq!(c.entries.len(), library::LIBRARY.len());
+    }
+
+    #[test]
+    fn a_dot_directory_under_a_root_is_skipped_not_reported() {
+        // `install` stages into `.install-*` under the same root it installs
+        // into; discovery must pass it by rather than fail to load it.
+        let base = scratch("dotdir");
+        let root = base.join("templates");
+        pack(&root, "org.example.real", "ok");
+        write(
+            &root.join(".install-123-4"),
+            "template.toml",
+            "schema = 1\n",
+        );
+        write(&root.join(".DS_Store"), "junk", "not a directory");
+        let c = discover(&only(&[(&root, Source::Project)]));
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(c.problems.is_empty(), "{:?}", c.problems);
+        assert!(c.resolve("org.example.real:ok").is_ok());
+        assert_eq!(c.entries.len(), 1 + library::LIBRARY.len());
     }
 
     #[test]

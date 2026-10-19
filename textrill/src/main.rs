@@ -11,6 +11,7 @@
 use std::process::ExitCode;
 
 use textrill::cli;
+use textrill::commands;
 use textrill::convert::Converter;
 use textrill::options::{Encoding, Options};
 use textrill::report::Counts;
@@ -45,6 +46,33 @@ fn main() -> ExitCode {
         eprintln!("{PROG}: {e}");
         eprintln!("{PROG}: try `{PROG} --help` for more information");
         return ExitCode::from(1);
+    }
+
+    // --list_templates prints the discovered catalog and exits (roadmap §5.4),
+    // before input defaults to stdin or anything is validated: a listing takes
+    // no document, and a broken pack is a warning on stderr, not a failure.
+    if !opts.list_templates.is_empty() {
+        use std::io::Write;
+        let out = commands::list_templates(&opts);
+        let wrote = {
+            let stdout = std::io::stdout();
+            let mut lock = stdout.lock();
+            match lock.write_all(&out.stdout).and_then(|()| lock.flush()) {
+                Ok(()) => true,
+                // A reader that walked away (a pipe into head) ends quietly.
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => true,
+                Err(e) => {
+                    eprintln!("Error: unable to write the listing: {e}");
+                    false
+                }
+            }
+        };
+        let _ = std::io::stderr().write_all(&out.stderr);
+        return if wrote {
+            ExitCode::from(out.code)
+        } else {
+            ExitCode::from(1)
+        };
     }
 
     // with no input, read standard input
