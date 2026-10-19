@@ -9,6 +9,7 @@
 
 pub mod chars;
 pub mod cli;
+pub mod commands;
 pub mod convert;
 pub mod encode;
 pub mod langdetect;

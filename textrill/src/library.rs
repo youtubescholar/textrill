@@ -15,6 +15,16 @@ pub enum Model {
     Document,
 }
 
+impl Model {
+    /// The model's name, as the pack manifest and the listings spell it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Model::Body => "body",
+            Model::Document => "document",
+        }
+    }
+}
+
 /// One shipped template: its name, model, and embedded markup.
 pub struct Shipped {
     pub name: &'static str,

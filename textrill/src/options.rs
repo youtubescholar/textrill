@@ -229,11 +229,21 @@ pub struct Options {
     /// engine prolog is emitted. Mutually exclusive with [`Options::template`].
     /// Empty by default.
     pub document_template: String,
-    /// A shipped template's name (`article`, `book`, `manpage`, `slide`, `bare`)
-    /// from [`crate::library`]. Exactly one of [`Options::template`],
-    /// [`Options::document_template`] and this may be set; its model decides body
-    /// vs whole document. Uses only the fixed slots. Empty by default.
+    /// `--template_dir` roots added to the pack search path, in flag order.
+    /// Empty by default; also readable from `.textrillrc` (roadmap §5.4).
+    pub template_dir: Vec<String>,
+    /// A template name or `pack-id:name` address: the five shipped names
+    /// (`article`, `book`, `manpage`, `slide`, `bare`) resolve to the
+    /// compiled-in set, and a discovered pack's templates resolve through
+    /// [`crate::pack`]. Exactly one of [`Options::template`],
+    /// [`Options::document_template`] and this may be set; its model decides
+    /// body vs whole document. Uses only the fixed slots. Empty by default.
     pub template_library: String,
+    /// `--list_templates` action: `"text"` or `"json"` when the command line
+    /// asked for a catalog listing (which prints and exits), empty otherwise.
+    /// Not a conversion option; `textrill templates list` prints the same
+    /// listing on demand.
+    pub list_templates: String,
     /// Template parameters, in `--var` order, substituted verbatim for
     /// `{{textrill:var:name}}` in the active template. Empty by default.
     pub vars: Vec<(String, String)>,
@@ -374,7 +384,9 @@ impl Default for Options {
                 .to_string(),
             template: String::new(),
             document_template: String::new(),
+            template_dir: Vec::new(),
             template_library: String::new(),
+            list_templates: String::new(),
             vars: Vec::new(),
             eight_bit_clean: false,
             escape_html_chars: true,
@@ -607,11 +619,25 @@ impl Options {
         Ok(())
     }
 
+    /// The pack search path for this invocation (roadmap §5.4): the roots
+    /// the environment defines, plus every `--template_dir` in flag order.
+    /// Empty `--template_dir` values (the round-trip form of "unset") are
+    /// skipped so an empty root never appears in a message.
+    pub fn search_path(&self) -> crate::pack::SearchPath {
+        let mut search = crate::pack::SearchPath::from_env();
+        for dir in self.template_dir.iter().filter(|d| !d.is_empty()) {
+            search.add_explicit(dir.clone());
+        }
+        search
+    }
+
     /// Resolve which template is active, if any, and its text.
     ///
     /// Returns `(whole_document, template text, flag name)`, where
     /// `whole_document` is 0 for a body wrapper, 1 for a whole-page template, 2
-    /// for none. An unknown library name is an error naming the library.
+    /// for none. A `--template_library` name is resolved through the pack
+    /// catalog, so an unknown, ambiguous or unaddressed name is an error
+    /// naming what was discovered (roadmap §5.1).
     pub fn template_source(&self) -> Result<(u8, String, String), String> {
         let wrapper = !self.template.is_empty();
         let whole = !self.document_template.is_empty();
@@ -636,16 +662,15 @@ impl Options {
                 .map_err(|e| format!("{}: {e}", self.document_template))?;
             return Ok((1, body, "--document_template".to_string()));
         }
-        let shipped = crate::library::get(&self.template_library).ok_or_else(|| {
-            let list = crate::library::names().collect::<Vec<_>>().join(", ");
-            format!(
-                "unknown shipped template {:?}; available: {list}",
-                self.template_library
-            )
-        })?;
-        let whole = matches!(shipped.model, crate::library::Model::Document);
-        let flag = format!("--template_library {}", shipped.name);
-        Ok((u8::from(whole), shipped.html.to_string(), flag))
+        // The name resolves across the shipped set and every discovered pack:
+        // the catalog's bare-name rule decides — a unique name resolves, a
+        // shared one is refused with its full `pack-id:name` addresses.
+        let catalog = crate::pack::discover(&self.search_path());
+        let entry = catalog.resolve(&self.template_library)?;
+        let html = entry.html()?;
+        let whole = matches!(entry.model, crate::library::Model::Document);
+        let flag = format!("--template_library {}", self.template_library);
+        Ok((u8::from(whole), html, flag))
     }
 
     /// The options whose value is a caller-supplied regular expression, as
