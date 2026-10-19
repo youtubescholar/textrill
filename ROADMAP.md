@@ -312,7 +312,7 @@ state:
   fetch.
 
 ### Files
-New `textrill/src/pack/{mod,manifest,catalog,archive}.rs`,
+New `textrill/src/pack/{mod,manifest,validate,catalog,archive}.rs`,
 `textrill/src/library.rs` (merge discovered + shipped), `textrill/src/cli.rs`
 (new options), a `templates` command entry in `main.rs`, GUI
 `templates_window.rs`, `options_panel.rs` (Template source radio gains

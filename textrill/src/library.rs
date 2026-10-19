@@ -5,7 +5,8 @@
 //! Plain HTML under `templates/`, embedded with [`include_str!`] and using only
 //! the fixed slots, so each converts with no arguments; verified by the tests.
 
-/// Which part of the page a shipped template owns.
+/// Which part of the page a template owns. A pack template and a shipped one
+/// are interchangeable; discovery keeps them apart by source, not by kind.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Model {
     /// Wraps the body inside the engine's own prolog and epilog.
