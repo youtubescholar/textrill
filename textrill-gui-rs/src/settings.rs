@@ -470,4 +470,99 @@ impl Density {
             _ => None,
         }
     }
+
+    /// The gap between widgets, `(x, y)`.
+    ///
+    /// The two densities are defined by this one number, kept as a named token
+    /// rather than sprinkled through the draw code. `Comfortable` is exactly
+    /// egui's default spacing, so the out-of-the-box look is unchanged;
+    /// `Compact` tightens both axes, not just the vertical, so "compact"
+    /// means compact everywhere rather than only between rows.
+    pub fn item_spacing(self) -> [f32; 2] {
+        match self {
+            Density::Compact => [4.0, 2.0],
+            Density::Comfortable => [8.0, 4.0],
+        }
+    }
+
+    /// The padding inside a button or field, `(x, y)`.
+    ///
+    /// `Comfortable` is egui's default exactly, so the default look is
+    /// untouched; `Compact` tightens the horizontal padding so a dense row is
+    /// dense across, not only between, rows. The vertical padding stays where
+    /// egui put it — `interact_size` already floors a control's height, so
+    /// squeezing it buys nothing and only crowds the label.
+    pub fn button_padding(self) -> [f32; 2] {
+        match self {
+            Density::Compact => [2.0, 1.0],
+            Density::Comfortable => [4.0, 1.0],
+        }
+    }
+}
+
+#[cfg(test)]
+mod density_tests {
+    use super::*;
+
+    /// The default density must be a no-op against the look the app already
+    /// had: `Comfortable` reproduces egui's button padding and the app's own
+    /// comfortable row gap, so moving these numbers into named tokens changed
+    /// nothing on screen for anyone who never touched the density control.
+    /// Without this, a token refactor can quietly restyle every default user.
+    #[test]
+    fn comfortable_reproduces_the_default_look() {
+        let style = egui::Style::default();
+
+        let [pad_x, pad_y] = Density::Comfortable.button_padding();
+        assert_eq!(
+            (pad_x, pad_y),
+            (
+                style.spacing.button_padding.x,
+                style.spacing.button_padding.y
+            ),
+            "Comfortable button padding should equal egui's default exactly"
+        );
+
+        let [space_x, space_y] = Density::Comfortable.item_spacing();
+        assert_eq!(
+            space_x, style.spacing.item_spacing.x,
+            "the horizontal gap should stay egui's default"
+        );
+        assert_eq!(
+            space_y, 4.0,
+            "the comfortable row gap is the app's own 4pt, unchanged from before the tokens"
+        );
+    }
+
+    /// Compact has to be denser than Comfortable across the row, not only
+    /// between rows, or "Compact" means nothing beyond a tighter line gap.
+    #[test]
+    fn compact_is_denser_than_comfortable_on_both_axes() {
+        let [cx, cy] = Density::Compact.item_spacing();
+        let [ux, uy] = Density::Comfortable.item_spacing();
+        assert!(
+            cx < ux && cy < uy,
+            "the row gap should tighten on both axes: ({cx},{cy}) vs ({ux},{uy})"
+        );
+
+        let [compact_pad_x, compact_pad_y] = Density::Compact.button_padding();
+        let [comfort_pad_x, comfort_pad_y] = Density::Comfortable.button_padding();
+        assert!(
+            compact_pad_x < comfort_pad_x,
+            "horizontal padding should tighten: {compact_pad_x} vs {comfort_pad_x}"
+        );
+        assert_eq!(
+            compact_pad_y, comfort_pad_y,
+            "vertical padding stays put; interact_size already floors a control's height"
+        );
+    }
+
+    #[test]
+    fn density_round_trips_through_the_file() {
+        for density in [Density::Compact, Density::Comfortable] {
+            assert_eq!(Density::from_stored(density.stored()), Some(density));
+        }
+        assert_eq!(Density::from_stored("  COMPACT  "), Some(Density::Compact));
+        assert_eq!(Density::from_stored("cozy"), None);
+    }
 }

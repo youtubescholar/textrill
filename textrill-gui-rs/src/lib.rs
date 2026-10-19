@@ -20,6 +20,7 @@
 
 pub mod app;
 pub mod args;
+mod command_palette;
 mod dialogs;
 pub mod document;
 pub mod file_browser;

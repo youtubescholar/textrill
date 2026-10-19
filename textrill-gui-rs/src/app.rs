@@ -15,6 +15,7 @@ use egui::Ui;
 use textrill::options::Options;
 
 use crate::args::Args;
+use crate::command_palette::Command;
 use crate::dialogs::{self, Chooser, NativeChooser};
 use crate::document::Document;
 use crate::file_browser::{BrowserOutcome, FileBrowser, FileIntent};
@@ -86,6 +87,11 @@ const RESET_WINDOW_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::ne
     },
     egui::Key::Num0,
 );
+/// Open the command palette. `Ctrl/Cmd+K` is the chord editors and browsers
+/// have settled on, and it is the one key that reaches every action from a
+/// single, typeable list when a menu or the toolbar is not on screen.
+const PALETTE_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::K);
 
 /// What a save command wants next.
 ///
@@ -225,6 +231,21 @@ pub struct TextrillApp {
     /// The source editor's caret, as 1-based (line, column); `None` when the
     /// editor has never been focused this run.
     cursor: Option<(usize, usize)>,
+    /// Whether the Ctrl/Cmd+K command palette is open.
+    palette_open: bool,
+    /// What has been typed into the palette's search box.
+    palette_query: String,
+    /// Which row of the filtered palette list is highlighted.
+    palette_selected: usize,
+    /// Set the frame the palette opens so its search box takes the keyboard;
+    /// cleared once it has. Without this the palette opens but the first
+    /// keystroke goes to whatever had focus before it.
+    palette_focus: bool,
+    /// Whether the search box held focus at the end of the previous frame.
+    /// Enter hands focus back on the very frame it is pressed, so the current
+    /// frame's focus would always read `false` and swallow the key; last
+    /// frame's is what actually says the user was typing in the palette.
+    palette_search_focused: bool,
 }
 
 impl Default for TextrillApp {
@@ -283,6 +304,11 @@ impl TextrillApp {
             drag_start: None,
             counts: textrill::report::Counts::default(),
             cursor: None,
+            palette_open: false,
+            palette_query: String::new(),
+            palette_selected: 0,
+            palette_focus: false,
+            palette_search_focused: false,
         };
         app.restore_settings();
         app
@@ -1008,8 +1034,9 @@ impl TextrillApp {
             mut view_split,
             mut view_source,
             mut view_html,
+            mut palette,
         ) = (
-            false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
         );
         ctx.input_mut(|input| {
             new = input.consume_shortcut(&NEW_SHORTCUT);
@@ -1023,7 +1050,11 @@ impl TextrillApp {
             view_split = input.consume_shortcut(&VIEW_SPLIT_SHORTCUT);
             view_source = input.consume_shortcut(&VIEW_SOURCE_SHORTCUT);
             view_html = input.consume_shortcut(&VIEW_HTML_SHORTCUT);
+            palette = input.consume_shortcut(&PALETTE_SHORTCUT);
         });
+        if palette {
+            self.toggle_palette();
+        }
         if reset_window {
             self.reset_window_state(ctx);
         }
@@ -1056,6 +1087,20 @@ impl TextrillApp {
         }
         if quit {
             self.quit(ctx);
+        }
+    }
+
+    /// Open the command palette fresh, or close an open one. Resetting the
+    /// query and row on open is what makes the chord feel like a stateless
+    /// "type a command" box rather than a window that remembers last week's
+    /// filter.
+    pub fn toggle_palette(&mut self) {
+        self.palette_open = !self.palette_open;
+        if self.palette_open {
+            self.palette_query.clear();
+            self.palette_selected = 0;
+            self.palette_focus = true;
+            self.palette_search_focused = false;
         }
     }
 
@@ -1116,6 +1161,15 @@ impl TextrillApp {
                 }
             });
             ui.menu_button("Edit", |ui| {
+                if ui
+                    .button("Command palette…")
+                    .on_hover_text("Ctrl+K")
+                    .clicked()
+                {
+                    self.toggle_palette();
+                    ui.close();
+                }
+                ui.separator();
                 if ui.button("Copy HTML").clicked() {
                     self.copy_html(ui.ctx());
                     ui.close();
@@ -1459,6 +1513,135 @@ impl TextrillApp {
             });
     }
 
+    /// The Ctrl/Cmd+K palette: one search box over every command, with the
+    /// matching rows listed under it.
+    ///
+    /// Follows the [`Self::about_window`] shape — an `egui::Window` gated on a
+    /// bool — so a test that never opens it sees no change at all. The rows
+    /// carry the command's own label as their accessible name (the category
+    /// sits beside it as a separate, inert label) so a query for
+    /// `"Load example"` resolves to exactly one node.
+    fn command_palette(&mut self, ctx: &egui::Context) {
+        if !self.palette_open {
+            return;
+        }
+        // `open` is the window's own close button and the post-draw truth;
+        // `escape` and `run` are what the body reports back. Kept apart
+        // because the builder borrows `open` for the whole `.show` call.
+        let mut open = self.palette_open;
+        let mut escape = false;
+        let mut run: Option<Command> = None;
+        egui::Window::new("Command palette")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(440.0)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut self.palette_query)
+                        .id(egui::Id::new("palette-search"))
+                        .hint_text("Search commands…")
+                        .desired_width(f32::INFINITY),
+                );
+                // Take the keyboard the first frame the palette is up, so the
+                // first keystroke lands in the search box and not wherever
+                // focus was before it opened.
+                if self.palette_focus {
+                    search.request_focus();
+                    self.palette_focus = false;
+                }
+
+                let commands: Vec<Command> = Command::all()
+                    .into_iter()
+                    .filter(|command| command.matches(&self.palette_query))
+                    .collect();
+                if self.palette_selected >= commands.len() {
+                    self.palette_selected = commands.len().saturating_sub(1);
+                }
+
+                // Arrow keys move the selection and Enter runs it, but only
+                // while the search box had the keyboard: the palette is not
+                // modal, so the source editor keeps its own keys once the user
+                // clicks back into it. "Had" not "has" — Enter releases the
+                // box's focus on the same frame it arrives, so this frame's
+                // focus would always read false and swallow the key.
+                let typed_here = search.has_focus() || self.palette_search_focused;
+                if typed_here {
+                    if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                        self.palette_selected =
+                            (self.palette_selected + 1).min(commands.len().saturating_sub(1));
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                        self.palette_selected = self.palette_selected.saturating_sub(1);
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        run = commands.get(self.palette_selected).copied();
+                    }
+                }
+                self.palette_search_focused = search.has_focus();
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    escape = true;
+                }
+
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        for (index, command) in commands.iter().enumerate() {
+                            let selected = index == self.palette_selected;
+                            ui.horizontal(|ui| {
+                                if ui.selectable_label(selected, command.label()).clicked() {
+                                    run = Some(*command);
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(egui::RichText::new(command.category()).weak());
+                                    },
+                                );
+                            });
+                        }
+                        if commands.is_empty() {
+                            ui.label(egui::RichText::new("No matching commands.").weak());
+                        }
+                    });
+            });
+        if escape {
+            open = false;
+        }
+        self.palette_open = open;
+        if let Some(command) = run {
+            self.palette_open = false;
+            self.run_command(command, ctx);
+        }
+    }
+
+    /// What each [`Command`] does. Kept as one `match`, apart from the
+    /// drawing, so the palette's vocabulary and the app's behaviour are
+    /// visibly the same set.
+    fn run_command(&mut self, command: Command, ctx: &egui::Context) {
+        match command {
+            Command::New => self.new_document(),
+            Command::Open => self.open_document(),
+            Command::Save => self.save_document_command(),
+            Command::SaveText => self.save_text_command(),
+            Command::Convert => self.convert_now(),
+            Command::CopyHtml => self.copy_html(ctx),
+            Command::Example => self.load_sample(),
+            Command::ShowOptions => self.show_options = true,
+            Command::FocusMode => self.focus_mode = !self.focus_mode,
+            Command::ViewSplit => self.set_view_mode(crate::settings::ViewMode::Split),
+            Command::ViewSource => self.set_view_mode(crate::settings::ViewMode::Source),
+            Command::ViewHtml => self.set_view_mode(crate::settings::ViewMode::Html),
+            Command::ResetWindow => self.reset_window_state(ctx),
+            Command::Preset(index) => {
+                if let Some(preset) = presets::PRESETS.get(index) {
+                    self.apply_preset(preset);
+                }
+            }
+        }
+    }
+
     /// The modal three-way prompt Qt showed before a command could discard text.
     fn save_prompt_window(&mut self, ctx: &egui::Context) {
         if self.pending.is_none() {
@@ -1529,13 +1712,17 @@ impl TextrillApp {
             self.apply_ui_style(ui.ctx());
             self.applied_style = true;
         }
-        // Pack the whole interface according to the chosen density. This is the
-        // one knob the density control owns; everything else inherits the
-        // theme's spacing.
-        ui.spacing_mut().item_spacing.y = match self.density {
-            crate::settings::Density::Compact => 2.0,
-            crate::settings::Density::Comfortable => 4.0,
-        };
+        // Pack the whole interface according to the chosen density. The three
+        // tokens (gap, padding, corner) all move together, so a compact
+        // density is compact in both axes rather than only between rows.
+        // `Comfortable` reproduces egui's defaults exactly, so the default
+        // look is untouched; `build_style` sets neither, so this cannot fight
+        // the theme.
+        let [space_x, space_y] = self.density.item_spacing();
+        let [pad_x, pad_y] = self.density.button_padding();
+        let spacing = ui.spacing_mut();
+        spacing.item_spacing = egui::vec2(space_x, space_y);
+        spacing.button_padding = egui::vec2(pad_x, pad_y);
         // The worker asks for a redraw when a result lands, so the preview does
         // not wait for the next input event to appear.
         if !self.waker_installed {
@@ -1642,6 +1829,7 @@ impl TextrillApp {
         self.working_area(ui);
         self.status_bar(ui);
 
+        self.command_palette(ui.ctx());
         self.about_window(ui.ctx());
         if self.file_browser.is_some() {
             // The browser covers the prompt it may have been opened from.
@@ -1723,7 +1911,7 @@ impl TextrillApp {
     /// `max_height` bounds the editor so a long document scrolls inside the
     /// pane instead of pushing the rest of the window off the screen.
     fn source_pane(&mut self, ui: &mut Ui, max_height: f32) {
-        ui.label("Input");
+        ui.heading("Input");
         // The hint plus a quick-start row is the empty state: with no text it
         // points a first run at the ways in; once there is text both disappear
         // without the editor ever going away.
@@ -1795,7 +1983,7 @@ impl TextrillApp {
     /// The converted-HTML pane: its label and the read-only editor over
     /// `self.output`.
     fn html_pane(&mut self, ui: &mut Ui) {
-        ui.label("HTML");
+        ui.heading("HTML");
         egui::ScrollArea::vertical()
             .id_salt("html-pane")
             .auto_shrink([false, false])
