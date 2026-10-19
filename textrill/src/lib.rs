@@ -16,6 +16,7 @@ pub mod library;
 pub mod links;
 pub mod notes;
 pub mod options;
+pub mod pack;
 pub mod prefilter;
 pub mod rcfile;
 pub mod report;
