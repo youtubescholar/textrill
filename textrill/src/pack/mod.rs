@@ -9,8 +9,10 @@
 pub mod archive;
 pub mod catalog;
 pub mod manifest;
+pub mod scaffold;
 pub mod validate;
 
 pub use archive::{pack, unpack};
 pub use catalog::{discover, Catalog, Entry, SearchPath, Source, SHIPPED_ID};
+pub use scaffold::{plan as plan_scaffold, sanitize, Scaffold};
 pub use validate::{load, ValidTemplate, Validated, Var, MANIFEST};

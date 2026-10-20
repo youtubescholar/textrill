@@ -138,6 +138,9 @@ pub struct TextrillApp {
     pub show_options: bool,
     /// Whether the About window is open.
     pub about_open: bool,
+    /// The Template Manager, when it is open (roadmap §5.5). Kept in an
+    /// `Option` so a test that never opens it pays nothing and sees no change.
+    pub templates: Option<crate::templates_window::TemplatesWindow>,
     /// The command held back until the unsaved-changes prompt is answered.
     pending: Option<PendingAction>,
     /// Set once the window has been told to close, so an in-flight
@@ -271,6 +274,7 @@ impl TextrillApp {
             panel: OptionsPanel::default(),
             show_options: false,
             about_open: false,
+            templates: None,
             pending: None,
             closing: false,
             output: String::new(),
@@ -414,6 +418,30 @@ impl TextrillApp {
         if let Err(error) = self.settings.set_preset(preset.key) {
             self.status = format!("could not save settings: {error}");
         }
+        self.schedule_convert(Instant::now());
+    }
+
+    /// Open the Template Manager (roadmap §5.5), discovering the catalog fresh
+    /// so a pack dropped into the project since the window was last open shows
+    /// up immediately.
+    pub fn open_templates(&mut self) {
+        match &mut self.templates {
+            Some(window) => window.refresh(&self.opts),
+            None => {
+                let mut window = crate::templates_window::TemplatesWindow::new();
+                window.refresh(&self.opts);
+                self.templates = Some(window);
+            }
+        }
+    }
+
+    /// Select `address` (`pack-id:name`) as the conversion's template: write
+    /// `--template_library`, clear the other two template fields the engine
+    /// refuses to combine with it, and convert.
+    pub fn apply_template(&mut self, address: &str) {
+        self.opts.template_library = address.to_string();
+        self.opts.template.clear();
+        self.opts.document_template.clear();
         self.schedule_convert(Instant::now());
     }
 
@@ -1120,6 +1148,18 @@ impl TextrillApp {
         // Clear them, or the drop fires again on every frame.
         ctx.input_mut(|input| input.raw.dropped_files.clear());
         if let Some(path) = dropped.first() {
+            // A pack folder or `.tar` dropped while the Template Manager is open
+            // installs there (roadmap §5.5); anything else loads as a document.
+            let is_pack = path.is_dir()
+                || path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("tar"));
+            if is_pack {
+                if let Some(window) = self.templates.as_mut() {
+                    window.install_from(path);
+                    return;
+                }
+            }
             if let Err(error) = self.load_file(path) {
                 self.status = error;
             }
@@ -1154,6 +1194,10 @@ impl TextrillApp {
                     self.load_sample();
                     ui.close();
                 }
+                if ui.button("Manage templates…").clicked() {
+                    self.open_templates();
+                    ui.close();
+                }
                 ui.separator();
                 if ui.button("Quit").clicked() {
                     self.quit(ui.ctx());
@@ -1180,6 +1224,24 @@ impl TextrillApp {
                 }
                 if ui.button("Reset options").clicked() {
                     self.reset_options();
+                    ui.close();
+                }
+            });
+            ui.menu_button("Templates", |ui| {
+                if ui
+                    .button("Manage templates…")
+                    .on_hover_text("Browse, filter, preview and apply template packs")
+                    .clicked()
+                {
+                    self.open_templates();
+                    ui.close();
+                }
+                if ui
+                    .button("Refresh")
+                    .on_hover_text("Re-discover packs under the search path")
+                    .clicked()
+                {
+                    self.open_templates();
                     ui.close();
                 }
             });
@@ -1513,6 +1575,26 @@ impl TextrillApp {
             });
     }
 
+    /// Draw the Template Manager (roadmap §5.5) when it is open. The window owns
+    /// its own discovery and filesystem actions; the two decisions that touch
+    /// this app — applying a template and closing — come back as an outcome.
+    fn templates_window(&mut self, ctx: &egui::Context) {
+        let Some(window) = self.templates.as_mut() else {
+            return;
+        };
+        let opts = self.opts.clone();
+        match window.show(ctx, &opts) {
+            crate::templates_window::TemplatesOutcome::Pending => {}
+            crate::templates_window::TemplatesOutcome::Closed => self.templates = None,
+            crate::templates_window::TemplatesOutcome::Apply(address) => {
+                self.apply_template(&address);
+                self.status = format!("template {address}");
+                // Applying a template does not close the window: the user may
+                // want to try another without reopening it.
+            }
+        }
+    }
+
     /// The Ctrl/Cmd+K palette: one search box over every command, with the
     /// matching rows listed under it.
     ///
@@ -1831,6 +1913,7 @@ impl TextrillApp {
 
         self.command_palette(ui.ctx());
         self.about_window(ui.ctx());
+        self.templates_window(ui.ctx());
         if self.file_browser.is_some() {
             // The browser covers the prompt it may have been opened from.
             self.file_browser_window(ui.ctx());
@@ -1971,11 +2054,10 @@ impl TextrillApp {
             }
             if ui
                 .button("Browse templates")
-                .on_hover_text("Pick a template pack — arrives with the template manager")
+                .on_hover_text("Open the Template Manager to pick a template pack")
                 .clicked()
             {
-                self.status =
-                    "Template browser arrives with the template manager (Phase 2).".to_string();
+                self.open_templates();
             }
         });
     }
