@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use egui::{Context, RichText, Ui};
 use textrill::options::Options;
-use textrill::pack::{self, Entry, Source, Validated, MANIFEST, SHIPPED_ID};
+use textrill::pack::{self, CatalogIndex, Entry, Source, Validated, MANIFEST, SHIPPED_ID};
 
 /// What drawing the window decided this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +54,15 @@ impl SortKey {
             SortKey::Source => "Source",
         }
     }
+}
+
+/// Which pane the browse view is showing: the discovered packs, or the
+/// registered offline catalogs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pane {
+    #[default]
+    Packs,
+    Catalogs,
 }
 
 /// One row of the (filtered, sorted) listing, borrowing into the catalog's
@@ -199,6 +208,14 @@ pub struct TemplatesWindow {
     reselect: Option<String>,
     /// Set the frame the window opens so the search box takes the keyboard.
     focus_search: bool,
+    /// Which pane is showing: the packs list or the catalogs list.
+    pane: Pane,
+    /// The registered offline catalogs as last scanned, with any index
+    /// problems; refreshed alongside `catalog`.
+    indexes: Vec<CatalogIndex>,
+    /// The catalog pane's search box contents, matched against pack id,
+    /// name, description and tags.
+    catalog_query: String,
 }
 
 impl Default for TemplatesWindow {
@@ -226,7 +243,20 @@ impl TemplatesWindow {
             installing: false,
             reselect: None,
             focus_search: true,
+            pane: Pane::Packs,
+            indexes: Vec::new(),
+            catalog_query: String::new(),
         }
+    }
+
+    /// The registered offline catalogs as last scanned, for tests.
+    pub fn indexes(&self) -> &[CatalogIndex] {
+        &self.indexes
+    }
+
+    /// Which pane is showing, for tests.
+    pub fn pane(&self) -> Pane {
+        self.pane
     }
 
     /// The catalog as last discovered, for tests.
@@ -256,6 +286,7 @@ impl TemplatesWindow {
         self.data_home = search.data_home.clone();
         let keep = self.reselect.take().or_else(|| self.selected_address());
         self.catalog = pack::discover(&search);
+        self.indexes = pack::load_catalogs(&search);
         self.selected = keep
             .and_then(|address| {
                 self.catalog
@@ -357,6 +388,52 @@ impl TemplatesWindow {
     // ------------------------------------------------------------ browse
 
     fn browse_view(&mut self, ui: &mut Ui, opts: &Options, outcome: &mut TemplatesOutcome) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Show:").small().weak());
+            if ui
+                .selectable_label(self.pane == Pane::Packs, "Packs")
+                .clicked()
+            {
+                self.pane = Pane::Packs;
+            }
+            if ui
+                .selectable_label(self.pane == Pane::Catalogs, "Catalogs")
+                .on_hover_text("Registered offline pack catalogs (fetched from nowhere)")
+                .clicked()
+            {
+                self.pane = Pane::Catalogs;
+            }
+        });
+
+        let mut catalog_install: Option<(usize, usize)> = None;
+        let apply = match self.pane {
+            Pane::Packs => self.packs_view(ui),
+            Pane::Catalogs => {
+                self.catalogs_view(ui, &mut catalog_install);
+                None
+            }
+        };
+
+        if self.installing {
+            self.install_prompt(ui);
+        }
+        self.notice_view(ui);
+
+        if self.needs_refresh {
+            self.needs_refresh = false;
+            self.refresh(opts);
+        }
+        if let Some((ci, ei)) = catalog_install {
+            self.install_from_catalog(ci, ei);
+        }
+        if let Some(address) = apply {
+            *outcome = TemplatesOutcome::Apply(address);
+        }
+    }
+
+    /// The packs pane: search, tag filter, list and detail. Returns the
+    /// chosen template's address, if Apply was pressed.
+    fn packs_view(&mut self, ui: &mut Ui) -> Option<String> {
         ui.horizontal_wrapped(|ui| {
             ui.label("Search");
             let field = ui.add(
@@ -444,17 +521,128 @@ impl TemplatesWindow {
             });
         });
 
-        if self.installing {
-            self.install_prompt(ui);
-        }
-        self.notice_view(ui);
+        apply
+    }
 
-        if self.needs_refresh {
-            self.needs_refresh = false;
-            self.refresh(opts);
+    // ------------------------------------------------------------ catalogs
+
+    /// The catalogs pane: every registered catalog, its index problems, and
+    /// its entries filtered by the search box, each installable with one
+    /// click through the same hash-verified staged install the CLI uses.
+    fn catalogs_view(&mut self, ui: &mut Ui, install: &mut Option<(usize, usize)>) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Search");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.catalog_query)
+                    .hint_text("pack id, name, tag or description")
+                    .desired_width(240.0),
+            );
+            if ui
+                .button("Rescan")
+                .on_hover_text("Reread every registered catalog from disk (fetches nothing)")
+                .clicked()
+            {
+                self.needs_refresh = true;
+            }
+        });
+        if self.indexes.is_empty() {
+            ui.add_space(6.0);
+            ui.weak("No catalogs registered. Pass --catalog_dir DIR (it can live in .textrillrc).");
+            return;
         }
-        if let Some(address) = apply {
-            *outcome = TemplatesOutcome::Apply(address);
+        let needle = self.catalog_query.trim().to_lowercase();
+        let problems = self
+            .indexes
+            .iter()
+            .map(|c| c.problems.clone())
+            .collect::<Vec<_>>();
+        for (ci, cat) in self.indexes.iter().enumerate() {
+            let header = format!(
+                "{} — {} pack(s) {}",
+                cat.path.display(),
+                cat.entries.len(),
+                if problems[ci].is_empty() {
+                    ""
+                } else {
+                    "  (with problems)"
+                }
+            );
+            egui::CollapsingHeader::new(header)
+                .default_open(true)
+                .show(ui, |ui| {
+                    for problem in &problems[ci] {
+                        ui.colored_label(ui.visuals().warn_fg_color, problem);
+                    }
+                    for (ei, entry) in cat.entries.iter().enumerate() {
+                        let matches = needle.is_empty()
+                            || entry.id.to_lowercase().contains(&needle)
+                            || entry.name.to_lowercase().contains(&needle)
+                            || entry.description.to_lowercase().contains(&needle)
+                            || entry
+                                .tags
+                                .iter()
+                                .any(|t| t.to_lowercase().contains(&needle));
+                        if !matches {
+                            continue;
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(&entry.name).strong());
+                            ui.label(
+                                RichText::new(format!("{} v{}", entry.id, entry.version)).weak(),
+                            );
+                            if !entry.tags.is_empty() {
+                                ui.label(RichText::new(entry.tags.join(", ")).weak());
+                            }
+                            if let Some(min) = entry.min_textrill.as_deref() {
+                                if matches!(pack::version_satisfies(pack::VERSION, min), Ok(false))
+                                {
+                                    ui.colored_label(
+                                        ui.visuals().warn_fg_color,
+                                        format!("requires textrill >= {min}"),
+                                    );
+                                }
+                            }
+                            let installed =
+                                self.catalog.entries.iter().any(|e| e.pack_id == entry.id);
+                            if installed {
+                                ui.label(RichText::new("installed").small());
+                            } else if ui
+                                .small_button("Install")
+                                .on_hover_text(
+                                    "Download-free install from this catalog; the archive's \
+                                     sha256 must match the index",
+                                )
+                                .clicked()
+                            {
+                                *install = Some((ci, ei));
+                            }
+                        });
+                        if !entry.description.is_empty() {
+                            ui.weak(&entry.description);
+                        }
+                    }
+                });
+        }
+    }
+
+    /// Install one catalog entry through the engine's hash-verified staged
+    /// install, then refresh so the new pack shows up.
+    fn install_from_catalog(&mut self, ci: usize, ei: usize) {
+        let Some(data_home) = self.data_home.clone() else {
+            self.notice = Some(Notice::error(
+                "no user data directory (set XDG_DATA_HOME or HOME)",
+            ));
+            return;
+        };
+        let Some(entry) = self.indexes.get(ci).and_then(|c| c.entries.get(ei)) else {
+            return;
+        };
+        match pack::from_catalog_entry(entry, &data_home) {
+            Ok(text) => {
+                self.notice = Some(Notice::ok(text.trim_end().to_string()));
+                self.needs_refresh = true;
+            }
+            Err(e) => self.notice = Some(Notice::error(e)),
         }
     }
 
@@ -1319,6 +1507,7 @@ mod tests {
 
     fn search_for(explicit: Option<&Path>, project: &Path, data_home: Option<&Path>) -> SearchPath {
         SearchPath {
+            catalog_dirs: Vec::new(),
             explicit: explicit.map(|p| vec![p.to_path_buf()]).unwrap_or_default(),
             project: project.to_path_buf(),
             data_home: data_home.map(Path::to_path_buf),

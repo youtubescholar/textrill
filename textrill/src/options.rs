@@ -232,6 +232,8 @@ pub struct Options {
     /// `--template_dir` roots added to the pack search path, in flag order.
     /// Empty by default; also readable from `.textrillrc` (roadmap §5.4).
     pub template_dir: Vec<String>,
+    /// `--catalog_dir` directories containing catalog indexes (`catalog.toml`).
+    pub catalog_dir: Vec<String>,
     /// A template name or `pack-id:name` address: the five shipped names
     /// (`article`, `book`, `manpage`, `slide`, `bare`) resolve to the
     /// compiled-in set, and a discovered pack's templates resolve through
@@ -385,6 +387,7 @@ impl Default for Options {
             template: String::new(),
             document_template: String::new(),
             template_dir: Vec::new(),
+            catalog_dir: Vec::new(),
             template_library: String::new(),
             list_templates: String::new(),
             vars: Vec::new(),
@@ -627,6 +630,9 @@ impl Options {
         let mut search = crate::pack::SearchPath::from_env();
         for dir in self.template_dir.iter().filter(|d| !d.is_empty()) {
             search.add_explicit(dir.clone());
+        }
+        for dir in self.catalog_dir.iter().filter(|d| !d.is_empty()) {
+            search.add_catalog_dir(dir.clone());
         }
         search
     }

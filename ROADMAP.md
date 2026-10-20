@@ -357,12 +357,12 @@ obtains it however they move files, and the tool installs from it locally.
    (parsed by our own reader, §5.2) listing packs: `id`, all `version`s,
    `sha256` per archive, `min_textrill`, `license`, `tags`, `description`. No
    server, no JSON dependency.
-2. **Local sources** — `--catalog DIR` (repeatable, option so it can live in
+2. **Local sources** — `--catalog_dir DIR` (repeatable, option so it can live in
    `.textrillrc`) registers a catalog directory. A canonical layout
    (`textrill-templates/` git repo with `catalog.toml` + `packs/`) is documented
    so a community repo is just a clone.
-3. **Commands** — `templates search <query> --catalog DIR`,
-   `templates install <id>[@ver] --catalog DIR` (resolves an archive *already on
+3. **Commands** — `templates search <query> --catalog_dir DIR`,
+   `templates install <id>[@ver] --catalog_dir DIR` (resolves an archive *already on
    disk*), `templates verify <id>` (hash check), `templates sources` (list
    registered catalogs), `templates update` (re-scan catalogs, no fetching).
 4. **Integrity** — SHA-256 of each archive verified against `catalog.toml`;
@@ -373,7 +373,7 @@ obtains it however they move files, and the tool installs from it locally.
 6. **Self-hosting / a "public registry"** — if a central library is wanted, it
    is simply a public git repo of packs and a generated `catalog.toml`. Users
    `git clone` it (or use the optional small companion below) and point
-   `--catalog` at it. The repo is the registry; no service is required.
+   `--catalog_dir` at it. The repo is the registry; no service is required.
 
 ### Optional companion (out of core, not in the engine or the GUI)
 
@@ -584,7 +584,7 @@ asset for auditing), **isolate** it:
 ## 11. Sequencing & dependencies
 
 ```
-Phase 0 (done) ──► Phase 1 (UI shell) ──┬─► Phase 2 (template delivery v1) ──► Phase 3 (sharing/catalog)
+Phase 0 (done) ──► Phase 1 (UI shell) (done) ──┬─► Phase 2 (template delivery v1) (done) ──► Phase 3 (sharing/catalog) (done)
                                         ├─► Phase 4 (preview/editing)
                                         └─► Phase 5 (options/presets) ──► Phase 6 (distribution) ──► Phase 7 (hardening)
 ```
@@ -683,3 +683,14 @@ no network anywhere in the tool (not just the conversion path). See
   `Ctrl+1/2/3`, empty-state quick start, status bar, `Ctrl+K` command palette,
   density spacing tokens and pane headings — with the four-theme WCAG contrast
   staying pinned by the `theme.rs` tests.
+
+- v4 — Phase 3 built. The index is parsed by a shared strict TOML-subset
+  scanner (`pack/tomlsub.rs`) reused by `template.toml`; catalog installs are
+  hash-verified (`sha256` is mandatory in the index — no unverified install),
+  staged, and refuse a manifest-id mismatch, a `min_textrill` outside the
+  running version, and any `archive` path that escapes the catalog directory.
+  `install <PATH>` and `install <id>[@ver]` share one code path
+  (`pack/install.rs`) behind the CLI verbs and the GUI's new **Catalogs** tab.
+  The register flag was named **`--catalog_dir`**, not the `--catalog` written
+  in §6 above, for symmetry with `--template_dir`. Detached signatures remain
+  deferred (hash-only first, per the Risks above).

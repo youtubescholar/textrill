@@ -268,3 +268,110 @@ fn installing_a_pack_directory_adds_it_to_the_catalog() {
     assert!(landed.join("template.toml").is_file());
     assert!(textrill::pack::load(&landed).is_ok());
 }
+
+/// Build an offline catalog under `dir` holding one pack, exactly as
+/// `templates pack` plus a hand-written index would: an archive, its sha256
+/// and a `catalog.toml`. Returns the catalog directory.
+fn make_catalog(dir: &TempDir, id: &str, stem: &str) -> PathBuf {
+    let src = dir.path().join("catalog-src");
+    write_pack(&src, id, stem, &["catalog"]);
+    let bytes = textrill::pack::pack(&src.join(id)).expect("pack the catalog source");
+    let cat = dir.path().join("catalog");
+    std::fs::create_dir_all(cat.join("packs")).expect("catalog packs dir");
+    let archive = format!("packs/{id}-1.0.0.tar");
+    std::fs::write(cat.join(&archive), &bytes).expect("catalog archive");
+    let sha = textrill::pack::sha256::sha256_hex(&bytes);
+    std::fs::write(
+        cat.join("catalog.toml"),
+        format!(
+            "schema = 1\n\n[[packs]]\nid = {id:?}\nname = \"Catalog {id}\"\n\
+             version = \"1.0.0\"\ndescription = \"a shared pack\"\n\
+             tags = [\"catalog\"]\nsha256 = {sha:?}\narchive = {archive:?}\n"
+        ),
+    )
+    .expect("catalog index");
+    cat
+}
+
+/// The Catalogs pane lists a registered catalog's entries with their address
+/// and an Install button, without touching the packs list.
+#[test]
+fn the_catalogs_pane_lists_registered_catalog_entries() {
+    let dir = TempDir::new();
+    let cat = make_catalog(&dir, "org.example.shared", "doc");
+
+    let mut app = app(&dir);
+    app.opts.catalog_dir = vec![cat.to_string_lossy().into_owned()];
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.set_size(egui::vec2(1200.0, 900.0));
+    harness.run();
+
+    harness.get_by_label("Templates").click();
+    harness.run();
+    harness.get_by_label("Manage templates…").click();
+    harness.run();
+
+    harness.get_by_label("Catalogs").click();
+    harness.run();
+
+    assert!(
+        harness
+            .query_all_by_label("Catalog org.example.shared")
+            .count()
+            >= 1,
+        "the catalog entry's name should be listed"
+    );
+    assert!(
+        harness
+            .query_all_by_label("org.example.shared v1.0.0")
+            .count()
+            >= 1,
+        "the entry should show its id and version"
+    );
+    assert!(
+        harness.query_all_by_label("Install").count() >= 1,
+        "an entry that is not installed offers Install"
+    );
+}
+
+/// Clicking Install in the Catalogs pane runs the engine's hash-verified
+/// staged install into the data root, after which the entry reads as
+/// installed and the pack is discoverable.
+#[test]
+fn installing_from_the_catalog_pane_lands_the_pack() {
+    let dir = TempDir::new();
+    let cat = make_catalog(&dir, "org.example.shared", "doc");
+    let data_home = dir.path().join("share");
+
+    let mut app = app(&dir);
+    app.opts.catalog_dir = vec![cat.to_string_lossy().into_owned()];
+    // The window writes installs to `data_home`; discovery in a test cannot
+    // read the real user data root, so the same directory doubles as an
+    // explicit template root and the landed pack is discoverable.
+    app.opts.template_dir = vec![data_home.to_string_lossy().into_owned()];
+    app.open_templates();
+    app.templates.as_mut().unwrap().set_data_home(&data_home);
+
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.set_size(egui::vec2(1200.0, 900.0));
+    harness.run();
+
+    // The window was already opened above, so it is on screen this frame.
+    harness.get_by_label("Template manager");
+    harness.get_by_label("Catalogs").click();
+    harness.run();
+
+    harness.get_by_label("Install").click();
+    harness.run();
+
+    let landed = data_home.join("org.example.shared");
+    assert!(
+        landed.join("template.toml").is_file(),
+        "the install should land the pack in the data root"
+    );
+    assert!(textrill::pack::load(&landed).is_ok());
+    assert!(
+        harness.query_all_by_label("installed").count() >= 1,
+        "the entry should now read as installed"
+    );
+}
