@@ -21,6 +21,18 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // `textrill templates <verb>` is an additive command group (roadmap §5.4),
+    // detected before option parsing so every existing invocation is
+    // untouched: it opens only when the first word is `templates` and the
+    // second is a known verb (or `--help`), so a file that happens to be named
+    // `templates` still converts. Done before `early_action` because that
+    // sweeps the whole line for `--help` and would answer a verb's own
+    // `--help` with the global usage.
+    if commands::opens_command_group(&args) {
+        return run_templates(&args[1..]);
+    }
+
     let mut opts = Options::default();
 
     // --help / --version handled before rc files: a broken rc file cannot get
@@ -225,6 +237,32 @@ fn main() -> ExitCode {
         return ExitCode::from(1);
     }
     ExitCode::SUCCESS
+}
+
+/// Run a `textrill templates` command: `commands::run` returns the two streams
+/// and the exit code, and this writes them, mapping a closed stdout to success
+/// the same way the conversion path does.
+fn run_templates(args: &[String]) -> ExitCode {
+    use std::io::Write;
+    let out = commands::run(args);
+    let wrote = {
+        let stdout = std::io::stdout();
+        let mut lock = stdout.lock();
+        match lock.write_all(&out.stdout).and_then(|()| lock.flush()) {
+            Ok(()) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => true,
+            Err(e) => {
+                eprintln!("Error: unable to write: {e}");
+                false
+            }
+        }
+    };
+    let _ = std::io::stderr().write_all(&out.stderr);
+    if wrote {
+        ExitCode::from(out.code)
+    } else {
+        ExitCode::from(1)
+    }
 }
 
 /// Streaming path for `--stream`: write paragraph by paragraph.

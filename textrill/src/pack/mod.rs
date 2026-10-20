@@ -12,5 +12,5 @@ pub mod manifest;
 pub mod validate;
 
 pub use archive::{pack, unpack};
-pub use catalog::{discover, Catalog, Entry, SearchPath, Source};
-pub use validate::{load, ValidTemplate, Validated, Var};
+pub use catalog::{discover, Catalog, Entry, SearchPath, Source, SHIPPED_ID};
+pub use validate::{load, ValidTemplate, Validated, Var, MANIFEST};
