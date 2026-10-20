@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::tomlsub::{check_key, err, section_name, Value};
 use super::validate::{self, Validated};
 use crate::library::{self, Model};
 
@@ -54,6 +55,8 @@ impl Source {
 /// process environment.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SearchPath {
+    /// `--catalog_dir` directories containing catalog indexes.
+    pub catalog_dirs: Vec<PathBuf>,
     /// `--template_dir` roots, highest priority, in flag order.
     pub explicit: Vec<PathBuf>,
     /// `<cwd>/.textrill/templates`.
@@ -98,6 +101,7 @@ impl SearchPath {
             .map(|d| d.join("textrill").join("templates"))
             .collect();
         SearchPath {
+            catalog_dirs: Vec::new(),
             explicit: Vec::new(),
             project: cwd.join(".textrill").join("templates"),
             data_home,
@@ -108,6 +112,11 @@ impl SearchPath {
     /// Add a `--template_dir` root, in flag order.
     pub fn add_explicit(&mut self, dir: impl Into<PathBuf>) {
         self.explicit.push(dir.into());
+    }
+
+    /// Add a `--catalog_dir` directory containing a catalog index.
+    pub fn add_catalog_dir(&mut self, dir: impl Into<PathBuf>) {
+        self.catalog_dirs.push(dir.into());
     }
 
     /// Every root in precedence order, each paired with the source it
@@ -402,6 +411,7 @@ mod tests {
     /// A search path whose only roots are the ones under `base`.
     fn only(roots: &[(&Path, Source)]) -> SearchPath {
         let mut s = SearchPath {
+            catalog_dirs: Vec::new(),
             project: PathBuf::from("/nonexistent-project-root"),
             data_home: None,
             data_dirs: Vec::new(),
@@ -484,6 +494,7 @@ mod tests {
     #[test]
     fn roots_come_out_in_precedence_order() {
         let s = SearchPath {
+            catalog_dirs: Vec::new(),
             explicit: vec![PathBuf::from("/a"), PathBuf::from("/b")],
             project: PathBuf::from("/p"),
             data_home: Some(PathBuf::from("/u")),
@@ -732,5 +743,581 @@ mod tests {
         let c = discover(&only(&[]));
         let html = c.resolve("book").unwrap().html().unwrap();
         assert_eq!(html, library::get("book").unwrap().html);
+    }
+}
+
+// ------------------------------------------------------- catalog indexes --
+//
+// Roadmap §6: people share *libraries* of packs by moving files around — git,
+// a shared drive, email — and the tool only ever reads what is already on
+// disk. A catalog is a directory with a `catalog.toml` index listing the
+// packs it carries (id, versions, sha256 of each archive, min_textrill,
+// licence, tags, description). The index is read with the same strict TOML
+// subset as a pack manifest, so an index written as full TOML fails loudly
+// with its line number rather than being half-understood.
+
+/// The index file a catalog directory must contain.
+pub const CATALOG_INDEX: &str = "catalog.toml";
+
+/// The engine's own version, the thing `min_textrill` is compared against.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// One pack listed by a catalog index. The archive is a deterministic `.tar`
+/// already on disk; nothing here can name a URL, because the tool never
+/// fetches. `archive` is the resolved path, checked at load time to live
+/// inside the catalog directory.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CatalogIndexEntry {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub authors: Vec<String>,
+    pub license: Option<String>,
+    pub tags: Vec<String>,
+    /// Lowercase hex SHA-256 of the archive, verified on install.
+    pub sha256: Option<String>,
+    /// The oldest engine version this pack supports, `major[.minor[.patch]]`.
+    pub min_textrill: Option<String>,
+    /// The archive's path, already confined to the catalog directory.
+    pub archive: PathBuf,
+    /// The catalog directory this entry came from.
+    pub catalog: PathBuf,
+}
+
+/// One registered catalog directory and everything its index said — good
+/// entries and problems alike. Loading never fails: a broken index is a
+/// problem recorded against its catalog, so one bad file cannot hide the
+/// rest, matching how pack discovery treats a broken pack.
+#[derive(Debug, Clone, Default)]
+pub struct CatalogIndex {
+    pub path: PathBuf,
+    pub entries: Vec<CatalogIndexEntry>,
+    pub problems: Vec<String>,
+}
+
+impl CatalogIndex {
+    /// Resolve one entry by `id` or `id@version`, in index order. A bare id
+    /// with several versions listed takes the first; an exact version pins it,
+    /// and a miss names the versions that *are* listed.
+    pub fn find(&self, spec: &str) -> Result<&CatalogIndexEntry, String> {
+        let (id, want) = match spec.split_once('@') {
+            Some((id, ver)) => (id, Some(ver)),
+            None => (spec, None),
+        };
+        let mut versions = Vec::new();
+        for e in &self.entries {
+            if e.id != id {
+                continue;
+            }
+            match want {
+                Some(v) if v != e.version => versions.push(e.version.as_str()),
+                _ => return Ok(e),
+            }
+        }
+        let listed = if versions.is_empty() {
+            String::new()
+        } else {
+            format!("; it lists {}", versions.join(", "))
+        };
+        match want {
+            Some(v) => Err(format!(
+                "no version {v} of {id} in {}{listed}",
+                self.path.display()
+            )),
+            None => Err(format!("no pack {id} in {}", self.path.display())),
+        }
+    }
+}
+
+/// Load every `--catalog_dir` in the search path. A missing directory or a
+/// missing/unreadable/malformed index becomes a problem on that catalog, and
+/// every other catalog still loads.
+pub fn load_catalogs(sp: &SearchPath) -> Vec<CatalogIndex> {
+    let mut out = Vec::new();
+    for dir in &sp.catalog_dirs {
+        let mut problems = Vec::new();
+        let mut entries = Vec::new();
+        let index_path = dir.join(CATALOG_INDEX);
+        if !dir.is_dir() {
+            problems.push(format!("{}: not a directory", dir.display()));
+        } else if !index_path.is_file() {
+            problems.push(format!("{}: no {CATALOG_INDEX} in it", dir.display()));
+        } else {
+            match fs::read_to_string(&index_path) {
+                Ok(text) => match parse_index(&text, dir) {
+                    Ok(parsed) => entries = parsed,
+                    Err(msg) => problems.push(format!("{}: {msg}", index_path.display())),
+                },
+                Err(e) => problems.push(format!("{}: {e}", index_path.display())),
+            }
+        }
+        out.push(CatalogIndex {
+            path: dir.clone(),
+            entries,
+            problems,
+        });
+    }
+    out
+}
+
+/// The top-level keys the index subset knows.
+const INDEX_TOP_KEYS: &str = "schema";
+
+/// The keys one `[[packs]]` entry knows.
+const PACK_KEYS: &str = "id, name, version, description, authors, license, \
+                         tags, sha256, min_textrill, archive";
+
+/// Parse a `catalog.toml` document against the directory that holds it.
+/// Errors read `line N: message`, exactly like a pack manifest.
+fn parse_index(text: &str, base: &Path) -> Result<Vec<CatalogIndexEntry>, String> {
+    let mut entries: Vec<CatalogIndexEntry> = Vec::new();
+    let mut schema: Option<i64> = None;
+    let mut current: Option<(usize, CatalogIndexEntry)> = None;
+    for (idx, line) in text.lines().enumerate() {
+        let n = idx + 1;
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("[[") {
+            if let Some((header, open)) = current.take() {
+                entries.push(finish_entry(open, header)?);
+            }
+            let name = section_name(rest, n)?;
+            if name != "packs" {
+                return err(
+                    n,
+                    format!(
+                        "unsupported section `[[{name}]]`; a catalog index has \
+                         [[packs]] only"
+                    ),
+                );
+            }
+            current = Some((n, CatalogIndexEntry::default()));
+            continue;
+        }
+        if t.starts_with('[') {
+            return err(
+                n,
+                format!(
+                    "`{t}` is not in the TOML subset: only the [[packs]] \
+                     array-of-table form is allowed in a catalog index"
+                ),
+            );
+        }
+        let Some(eq) = t.find('=') else {
+            return err(n, format!("expected `key = value`, got `{t}`"));
+        };
+        let key = t[..eq].trim();
+        check_key(key, n)?;
+        let value = Value::parse(&t[eq + 1..], n)?;
+        match current.as_mut() {
+            None => set_index_top(&mut schema, key, value, n)?,
+            Some((_, entry)) => set_pack_key(entry, key, value, n, base)?,
+        }
+    }
+    if let Some((header, open)) = current.take() {
+        entries.push(finish_entry(open, header)?);
+    }
+    Ok(entries)
+}
+
+/// Place one `key = value` line above every `[[packs]]` section.
+fn set_index_top(schema: &mut Option<i64>, key: &str, v: Value, n: usize) -> Result<(), String> {
+    match key {
+        "schema" => {
+            if schema.is_some() {
+                return err(n, "duplicate key `schema`");
+            }
+            let Value::Int(i) = v else {
+                return err(n, "`schema` expects an integer value");
+            };
+            if i != 1 {
+                return err(n, format!("unknown schema {i}; this reader knows 1"));
+            }
+            *schema = Some(i);
+        }
+        "packs" => {
+            return err(
+                n,
+                "pack entries belong in a `[[packs]]` section, not a `packs = …` value",
+            )
+        }
+        other => {
+            return err(
+                n,
+                format!("unknown key `{other}`; a catalog index has: {INDEX_TOP_KEYS}"),
+            )
+        }
+    }
+    Ok(())
+}
+
+/// Place one `key = value` line in the current `[[packs]]` entry.
+fn set_pack_key(
+    entry: &mut CatalogIndexEntry,
+    key: &str,
+    v: Value,
+    n: usize,
+    base: &Path,
+) -> Result<(), String> {
+    let want_str = |v: Value| match v {
+        Value::Str(s) => Ok(s),
+        _ => err(n, format!("`{key}` expects a string value")),
+    };
+    let want_strs = |v: Value| match v {
+        Value::Strs(s) => Ok(s),
+        _ => err(
+            n,
+            format!("`{key}` expects an array of strings, like [\"a\", \"b\"]"),
+        ),
+    };
+    match key {
+        "id" | "name" | "version" | "description" => {
+            let slot = match key {
+                "id" => &mut entry.id,
+                "name" => &mut entry.name,
+                "version" => &mut entry.version,
+                _ => &mut entry.description,
+            };
+            if !slot.is_empty() {
+                return err(n, format!("duplicate key `{key}`"));
+            }
+            *slot = want_str(v)?;
+        }
+        "authors" | "tags" => {
+            let slot = if key == "authors" {
+                &mut entry.authors
+            } else {
+                &mut entry.tags
+            };
+            if !slot.is_empty() {
+                return err(n, format!("duplicate key `{key}`"));
+            }
+            *slot = want_strs(v)?;
+        }
+        "license" | "sha256" | "min_textrill" => {
+            let slot = match key {
+                "license" => &mut entry.license,
+                "sha256" => &mut entry.sha256,
+                _ => &mut entry.min_textrill,
+            };
+            if slot.is_some() {
+                return err(n, format!("duplicate key `{key}`"));
+            }
+            *slot = Some(want_str(v)?);
+        }
+        "archive" => {
+            if !entry.archive.as_os_str().is_empty() {
+                return err(n, "duplicate key `archive`");
+            }
+            // Confine the path now, while the line number is still in hand.
+            entry.archive = safe_archive(&want_str(v)?, n, base)?;
+        }
+        other => {
+            return err(
+                n,
+                format!("unknown key `{other}`; a [[packs]] entry has: {PACK_KEYS}"),
+            )
+        }
+    }
+    Ok(())
+}
+
+/// Close a `[[packs]]` entry: every field the schema requires must be there,
+/// and the values that have a shape (sha256, min_textrill) must have it. The
+/// error names the entry's own `[[packs]]` header line.
+fn finish_entry(entry: CatalogIndexEntry, header: usize) -> Result<CatalogIndexEntry, String> {
+    for (field, value) in [
+        ("id", &entry.id),
+        ("name", &entry.name),
+        ("version", &entry.version),
+    ] {
+        if value.is_empty() {
+            return err(header, format!("this [[packs]] entry is missing `{field}`"));
+        }
+    }
+    if entry.archive.as_os_str().is_empty() {
+        return err(
+            header,
+            "this [[packs]] entry is missing `archive` (a catalog always \
+             points at a file it carries; the tool never fetches)",
+        );
+    }
+    if let Some(hash) = &entry.sha256 {
+        if !is_sha256_hex(hash) {
+            return err(
+                header,
+                format!("`sha256` must be 64 hexadecimal digits, got {hash:?}"),
+            );
+        }
+    }
+    if let Some(min) = &entry.min_textrill {
+        if let Err(e) = parse_version(min) {
+            return err(header, format!("`min_textrill`: {e}"));
+        }
+    }
+    Ok(entry)
+}
+
+/// Confine an `archive` value to the catalog directory: a plain relative path
+/// with no `..`, no absolute root, no Windows-style separators. The resolved
+/// path is stored, so later use cannot re-widen it.
+fn safe_archive(rel: &str, n: usize, base: &Path) -> Result<PathBuf, String> {
+    use std::path::Component;
+    if rel.contains('\\') {
+        return err(n, "`archive` must use `/` separators");
+    }
+    let p = Path::new(rel);
+    if p.is_absolute() {
+        return err(n, "`archive` must be relative to the catalog directory");
+    }
+    for c in p.components() {
+        if !matches!(c, Component::Normal(_)) {
+            return err(
+                n,
+                format!("`archive` {rel:?} escapes the catalog directory"),
+            );
+        }
+    }
+    Ok(base.join(p))
+}
+
+/// A 64-digit hex string: a SHA-256 as written by catalog tooling.
+fn is_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Parse the leading `major[.minor[.patch]]` of a version for comparison.
+/// A component that is not a number is refused, loudly: a `min_textrill`
+/// that cannot be compared must not be compared silently.
+pub fn parse_version(v: &str) -> Result<[u64; 3], String> {
+    let bad = || format!("{v:?} is not a major[.minor[.patch]] version");
+    let mut out = [0u64; 3];
+    let mut parts = v.trim().split('.');
+    for slot in out.iter_mut() {
+        let Some(p) = parts.next() else { break };
+        if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(bad());
+        }
+        *slot = p.parse().map_err(|_| bad())?;
+    }
+    if let Some(rest) = parts.next() {
+        if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(bad());
+        }
+    }
+    Ok(out)
+}
+
+/// Whether the engine `have` satisfies a `min_textrill` requirement.
+pub fn version_satisfies(have: &str, min: &str) -> Result<bool, String> {
+    Ok(parse_version(have)? >= parse_version(min)?)
+}
+
+#[cfg(test)]
+mod index_tests {
+    use super::*;
+
+    fn base() -> PathBuf {
+        PathBuf::from("/cat")
+    }
+
+    fn parse(text: &str) -> Result<Vec<CatalogIndexEntry>, String> {
+        parse_index(text, &base())
+    }
+
+    fn rejects(text: &str, line: usize, fragments: &[&str]) {
+        let got = parse(text).expect_err("expected a hard error");
+        assert!(
+            got.contains(&format!("line {line}:")),
+            "expected `line {line}:`, got: {got}"
+        );
+        for f in fragments {
+            assert!(got.contains(f), "expected `{f}` in: {got}");
+        }
+    }
+
+    const GOOD: &str = "\
+schema = 1
+
+[[packs]]
+id = \"org.example.book\"
+name = \"Academic Book\"
+version = \"1.2.0\"
+description = \"A print-ready skeleton.\"
+authors = [\"A. Scholar <a@example.org>\"]
+license = \"CC0-1.0\"
+tags = [\"book\", \"print\"]
+sha256 = \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"
+min_textrill = \"0.1.0\"
+archive = \"packs/book-1.2.0.tar\"
+";
+
+    #[test]
+    fn reads_the_documented_index() {
+        let list = parse(GOOD).unwrap();
+        assert_eq!(list.len(), 1);
+        let e = &list[0];
+        assert_eq!(e.id, "org.example.book");
+        assert_eq!(e.name, "Academic Book");
+        assert_eq!(e.version, "1.2.0");
+        assert_eq!(e.description, "A print-ready skeleton.");
+        assert_eq!(e.authors, vec!["A. Scholar <a@example.org>"]);
+        assert_eq!(e.license.as_deref(), Some("CC0-1.0"));
+        assert_eq!(e.tags, vec!["book", "print"]);
+        assert_eq!(
+            e.sha256.as_deref(),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+        assert_eq!(e.min_textrill.as_deref(), Some("0.1.0"));
+        assert_eq!(e.archive, PathBuf::from("/cat/packs/book-1.2.0.tar"));
+    }
+
+    #[test]
+    fn the_empty_index_lists_nothing() {
+        assert!(parse("").unwrap().is_empty());
+        assert!(parse("# nothing\n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_hash_inside_a_string_is_content() {
+        let list = parse(
+            "[[packs]]\nid = \"x.y\"\nname = \"X\"\ndescription = \"a # b\"\n\
+             version = \"1.0.0\"\narchive = \"a.tar\"\n",
+        )
+        .unwrap();
+        assert_eq!(list[0].description, "a # b");
+    }
+
+    #[test]
+    fn rejects_an_unknown_top_level_key() {
+        rejects(
+            "colour = \"red\"\n",
+            1,
+            &["colour", "unknown key", INDEX_TOP_KEYS],
+        );
+    }
+
+    #[test]
+    fn rejects_an_unknown_pack_key() {
+        rejects(
+            "[[packs]]\nid = \"x.y\"\ncolour = \"red\"\n",
+            3,
+            &["colour", "unknown key", PACK_KEYS],
+        );
+    }
+
+    #[test]
+    fn rejects_a_table_and_an_unsupported_section() {
+        rejects("[packs]\n", 1, &["[packs]", "subset"]);
+        rejects("[[notes]]\n", 1, &["[[notes]]", "unsupported section"]);
+    }
+
+    #[test]
+    fn rejects_a_duplicate_key() {
+        rejects(
+            "[[packs]]\nid = \"x.y\"\nid = \"a.b\"\n",
+            3,
+            &["duplicate key `id`"],
+        );
+    }
+
+    #[test]
+    fn a_missing_required_field_names_the_header_line() {
+        rejects(
+            "[[packs]]\nid = \"x.y\"\nname = \"X\"\nversion = \"1.0.0\"\n",
+            1,
+            &["line 1:", "missing `archive`"],
+        );
+        rejects(
+            "[[packs]]\nname = \"X\"\narchive = \"a.tar\"\n",
+            1,
+            &["missing `id`"],
+        );
+    }
+
+    #[test]
+    fn an_absolute_or_escaping_archive_is_refused() {
+        rejects(
+            "[[packs]]\nid = \"x.y\"\nname = \"X\"\nversion = \"1.0.0\"\n\
+             archive = \"/etc/passwd\"\n",
+            5,
+            &["relative to the catalog"],
+        );
+        rejects(
+            "[[packs]]\nid = \"x.y\"\nname = \"X\"\nversion = \"1.0.0\"\n\
+             archive = \"../outside.tar\"\n",
+            5,
+            &["escapes the catalog"],
+        );
+    }
+
+    #[test]
+    fn a_bad_sha256_or_min_textrill_is_refused() {
+        rejects(
+            "[[packs]]\nid = \"x.y\"\nname = \"X\"\nversion = \"1.0.0\"\n\
+             sha256 = \"beef\"\narchive = \"a.tar\"\n",
+            1,
+            &["64 hexadecimal"],
+        );
+        rejects(
+            "[[packs]]\nid = \"x.y\"\nname = \"X\"\nversion = \"1.0.0\"\n\
+             min_textrill = \"one\"\narchive = \"a.tar\"\n",
+            1,
+            &["min_textrill"],
+        );
+    }
+
+    #[test]
+    fn an_unknown_schema_is_refused() {
+        rejects("schema = 2\n", 1, &["schema 2"]);
+        rejects("schema = \"1\"\n", 1, &["`schema` expects an integer"]);
+    }
+
+    #[test]
+    fn find_pins_a_version_and_names_what_is_listed() {
+        let two = GOOD.to_string()
+            + "\n[[packs]]\nid = \"org.example.book\"\nname = \"Academic Book\"\n\
+               version = \"2.0.0\"\narchive = \"packs/book-2.0.0.tar\"\n";
+        let idx = CatalogIndex {
+            path: base(),
+            entries: parse(&two).unwrap(),
+            problems: Vec::new(),
+        };
+        assert_eq!(idx.find("org.example.book").unwrap().version, "1.2.0");
+        assert_eq!(
+            idx.find("org.example.book@2.0.0").unwrap().archive,
+            PathBuf::from("/cat/packs/book-2.0.0.tar")
+        );
+        let e = idx.find("org.example.book@3.0.0").unwrap_err();
+        assert!(e.contains("no version 3.0.0"), "{e}");
+        assert!(e.contains("1.2.0") && e.contains("2.0.0"), "{e}");
+        assert!(idx
+            .find("org.example.missing")
+            .unwrap_err()
+            .contains("no pack"));
+    }
+
+    #[test]
+    fn versions_compare_by_their_leading_triple() {
+        assert!(version_satisfies("0.1.0", "0.1.0").unwrap());
+        assert!(version_satisfies("0.1.1", "0.1").unwrap());
+        assert!(version_satisfies("1.0.0", "0.9.9").unwrap());
+        assert!(!version_satisfies("0.1.0", "99.0.0").unwrap());
+        assert!(parse_version("1.2").is_ok());
+        assert!(parse_version("1.2.3.4").is_ok());
+        assert!(parse_version("").is_err());
+        assert!(parse_version("1.x").is_err());
+        assert!(parse_version("v1.0").is_err());
+    }
+
+    #[test]
+    fn sha256_shapes_are_recognised() {
+        assert!(is_sha256_hex(&"a".repeat(64)));
+        assert!(is_sha256_hex(&"AB01".repeat(16)));
+        assert!(!is_sha256_hex("beef"));
+        assert!(!is_sha256_hex(&"g".repeat(64)));
     }
 }

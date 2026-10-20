@@ -8,11 +8,18 @@
 
 pub mod archive;
 pub mod catalog;
+pub mod install;
 pub mod manifest;
 pub mod scaffold;
+pub mod sha256;
+pub mod tomlsub;
 pub mod validate;
 
 pub use archive::{pack, unpack};
-pub use catalog::{discover, Catalog, Entry, SearchPath, Source, SHIPPED_ID};
+pub use catalog::{
+    discover, load_catalogs, parse_version, version_satisfies, Catalog, CatalogIndex,
+    CatalogIndexEntry, Entry, SearchPath, Source, CATALOG_INDEX, SHIPPED_ID, VERSION,
+};
+pub use install::{from_archive, from_catalog_entry, from_dir};
 pub use scaffold::{plan as plan_scaffold, sanitize, Scaffold};
 pub use validate::{load, ValidTemplate, Validated, Var, MANIFEST};

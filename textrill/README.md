@@ -153,7 +153,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **74 options** with **132 accepted spellings** including short
+There are **75 options** with **133 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names are the upstream ones, unchanged, so a document converts the

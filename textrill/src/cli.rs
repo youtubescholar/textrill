@@ -141,6 +141,7 @@ option_table![
     TableType, TableType, "Enable one table type, e.g. ALIGN=0.", ["table_type"];
     BodyTemplate, Str, "Wrap the body in a template file; the whole-document counterpart is --document_template. The old name --template still works but is deprecated.", ["body_template", "template"];
     TemplateDir, StrArray, "Directory to search for template packs; repeat for several.", ["template_dir"];
+    CatalogDir, StrArray, "Directory containing a catalog index (catalog.toml) to search/install from; repeat for several.", ["catalog_dir"];
     TemplateLibrary, Str, "Use a template by name: article, book, manpage, slide, bare, or pack-id:name from a discovered pack.", ["template_library"];
     Title, Str, "Document title.", ["title", "t"];
     Titlefirst, Flag, "Use the first line of the text as the title.", ["titlefirst", "tf"];
@@ -159,7 +160,7 @@ option_table![
 /// The README quotes the option count; binding it here makes an addition a
 /// deliberate, compile-time act rather than a silent prose drift.
 const _: () = assert!(
-    Opt::ALL.len() == 74,
+    Opt::ALL.len() == 75,
     "option count changed; update this assertion and README.md"
 );
 
@@ -324,6 +325,8 @@ pub fn set_opt(opts: &mut Options, opt: Opt, value: &str) -> Result<(), String> 
         Opt::PrependFile => opts.prepend_file = value.to_string(),
         Opt::StyleUrl => opts.style_url = value.to_string(),
         Opt::BodyTemplate => opts.template = value.to_string(),
+        Opt::TemplateDir => opts.template_dir.push(value.to_string()),
+        Opt::CatalogDir => opts.catalog_dir.push(value.to_string()),
         Opt::TemplateLibrary => opts.template_library = value.to_string(),
         Opt::Title => opts.title = value.to_string(),
         Opt::UnderlineDelimiter => opts.underline_delimiter = value.to_string(),
@@ -356,7 +359,6 @@ pub fn set_opt(opts: &mut Options, opt: Opt, value: &str) -> Result<(), String> 
         Opt::Infile => opts.infile.push(value.to_string()),
         Opt::Instring => opts.instring.push(value.to_string()),
         Opt::LinksDictionaries => opts.links_dictionaries.push(value.to_string()),
-        Opt::TemplateDir => opts.template_dir.push(value.to_string()),
         // Parse name=value eagerly; values may include `=` and newlines. One per occurrence.
         Opt::Var => {
             if value.is_empty() {
@@ -472,6 +474,7 @@ pub fn get_opt(opts: &Options, opt: Opt) -> String {
         Opt::Instring => opts.instring.join("\n"),
         Opt::LinksDictionaries => opts.links_dictionaries.join("\n"),
         Opt::TemplateDir => opts.template_dir.join("\n"),
+        Opt::CatalogDir => opts.catalog_dir.join("\n"),
         Opt::Var => opts
             .vars
             .iter()

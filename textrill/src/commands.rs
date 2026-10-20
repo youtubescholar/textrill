@@ -161,7 +161,8 @@ fn jstr(s: &str) -> String {
 /// `templates` is an ordinary filename and the conversion path runs, so an
 /// existing invocation that happens to name a file `templates` is unchanged.
 pub const VERBS: &[&str] = &[
-    "list", "inspect", "new", "install", "remove", "pack", "unpack", "validate",
+    "list", "inspect", "new", "install", "remove", "pack", "unpack", "validate", "search",
+    "verify", "sources", "update",
 ];
 
 /// Whether a `textrill ...` command line opens the `templates` command group.
@@ -189,6 +190,10 @@ pub fn run(args: &[String]) -> Outcome {
         "pack" => verb_pack(rest),
         "unpack" => verb_unpack(rest),
         "validate" => verb_validate(rest),
+        "search" => verb_search(rest),
+        "verify" => verb_verify(rest),
+        "sources" => verb_sources(rest),
+        "update" => verb_update(rest),
         "--help" | "-h" | "help" | "" => Outcome {
             stdout: verb_usage().into_bytes(),
             stderr: Vec::new(),
@@ -203,15 +208,20 @@ pub fn verb_usage() -> String {
     "Usage: textrill templates <command> [args]\n\
      \n\
      \x20 list [--tag TAG] [--json]      list discovered templates\n\
+     \x20 search <query>                 search registered catalog indexes\n\
      \x20 inspect <id>[:<template>]      show a pack's manifest, slots and vars\n\
      \x20 new <name>                     scaffold a pack under ./.textrill/templates\n\
      \x20 install <PATH>                 install a pack directory or a .tar\n\
+     \x20 install <id>[@ver]             install from a registered catalog\n\
      \x20 remove <id>                    remove a user-installed pack\n\
      \x20 pack <dir>                     write a deterministic .tar on stdout\n\
      \x20 unpack <archive> [DEST]        extract a .tar into DEST (or its stem)\n\
      \x20 validate <dir|archive>         run the pack checks and report\n\
+     \x20 verify <id>                    verify an installed pack against catalog hashes\n\
+     \x20 sources                        list registered catalog directories\n\
+     \x20 update                         rescan catalogs (fetches nothing)\n\
      \n\
-     Every command also accepts --template_dir DIR (repeatable).\n"
+     Every command also accepts --template_dir DIR and --catalog_dir DIR (repeatable).\n"
         .to_string()
 }
 
@@ -420,64 +430,93 @@ fn verb_new(args: &[String]) -> Outcome {
     }
 }
 
-/// `install <PATH>` — a pack directory or a `.tar`, staged beside its
-/// destination and renamed into place only after it validates, so a refused or
-/// half-copied pack never appears in the catalog.
+/// `install <PATH>` or `install <id>[@version]` from a registered catalog.
+/// A path that exists on disk is a pack directory or a `.tar`, installed
+/// directly; anything else is a catalog address, resolved across every
+/// `--catalog_dir`, and installed only through the verified catalog path
+/// (hash, `min_textrill`, manifest id). Both paths land in the user data
+/// home via the engine's one staged install.
 fn verb_install(args: &[String]) -> Outcome {
     let p = match parse_verb("install", args) {
         Ok(p) => p,
         Err(e) => return usage_error(&e),
     };
-    let path = match expect_one("install", &p, "<PATH>") {
+    let source = match expect_one("install", &p, "<PATH> or <id>[@version>") {
         Ok(s) => s,
         Err(e) => return usage_error(&e),
     };
-    let data_home = match p.opts.search_path().data_home {
-        Some(dir) => dir,
+    let search = p.opts.search_path();
+    let data_home = match &search.data_home {
+        Some(dir) => dir.clone(),
         None => return failure("install: no user data directory (set XDG_DATA_HOME or HOME)"),
     };
-    let source = std::path::Path::new(&path);
-    let meta = match std::fs::metadata(source) {
-        Ok(m) => m,
-        Err(e) => return failure(&format!("install: {path}: {e}")),
-    };
-
-    let staging = data_home.join(format!(".install-{}-{}", std::process::id(), next_seq()));
-    let result = (|| -> Result<String, String> {
-        std::fs::create_dir_all(&staging).map_err(|e| format!("{}: {e}", staging.display()))?;
+    let path = std::path::Path::new(&source);
+    let mut problems = String::new();
+    let result = if path.exists() {
+        let meta = match std::fs::metadata(path) {
+            Ok(m) => m,
+            Err(e) => return failure(&format!("install: {source}: {e}")),
+        };
         if meta.is_dir() {
-            copy_tree(source, &staging)?;
+            pack::from_dir(path, &data_home)
         } else {
-            let bytes = std::fs::read(source).map_err(|e| format!("{}: {e}", source.display()))?;
-            pack::unpack(&bytes, &staging)?;
+            match std::fs::read(path) {
+                Ok(bytes) => pack::from_archive(&bytes, &data_home),
+                Err(e) => Err(format!("install: {source}: {e}")),
+            }
         }
-        let validated = pack::load(&staging)?;
-        let dest = data_home.join(&validated.id);
-        if dest.exists() {
-            return Err(format!(
-                "install: {} is already installed at {}; remove it first",
-                validated.id,
-                dest.display()
-            ));
+    } else {
+        let catalogs = pack::load_catalogs(&search);
+        for cat in &catalogs {
+            for problem in &cat.problems {
+                problems.push_str(problem);
+                problems.push('\n');
+            }
         }
-        std::fs::rename(&staging, &dest)
-            .map_err(|e| format!("install: could not move {} into place: {e}", validated.id))?;
-        Ok(format!(
-            "installed {} at {}\n",
-            validated.id,
-            dest.display()
-        ))
-    })();
-
-    let _ = std::fs::remove_dir_all(&staging);
+        match resolve_catalog_entry(&catalogs, &source) {
+            Ok(entry) => pack::from_catalog_entry(entry, &data_home),
+            Err(e) => Err(e),
+        }
+    };
     match result {
         Ok(text) => Outcome {
             stdout: text.into_bytes(),
-            stderr: Vec::new(),
+            stderr: problems.into_bytes(),
             code: 0,
         },
-        Err(e) => failure(&e),
+        Err(e) => {
+            let mut stderr = problems.into_bytes();
+            let _ = std::io::Write::write_all(&mut stderr, format!("textrill: {e}\n").as_bytes());
+            Outcome {
+                stdout: Vec::new(),
+                stderr,
+                code: 1,
+            }
+        }
     }
+}
+
+/// Resolve `id[@version]` across every registered catalog, in
+/// `--catalog_dir` order. A miss names what was searched rather than
+/// silently falling through to a path error.
+fn resolve_catalog_entry<'a>(
+    catalogs: &'a [pack::CatalogIndex],
+    spec: &str,
+) -> Result<&'a pack::CatalogIndexEntry, String> {
+    if catalogs.is_empty() {
+        return Err(format!(
+            "{spec} is not a path on disk and no catalogs are registered \
+             (pass --catalog_dir DIR)"
+        ));
+    }
+    let mut tried = Vec::new();
+    for cat in catalogs {
+        match cat.find(spec) {
+            Ok(e) => return Ok(e),
+            Err(e) => tried.push(e),
+        }
+    }
+    Err(tried.join("\n"))
 }
 
 /// `remove <id>` — user-installed packs only. The id must be a single plain
@@ -683,43 +722,214 @@ fn default_dest(archive: &std::path::Path) -> Option<std::path::PathBuf> {
     Some(archive.with_file_name(stem))
 }
 
-/// Copy a directory tree into `dest`, refusing symlinks: a pack is regular
-/// files and directories only (§5.3), and a copy that carried a symlink out of
-/// the tree would defeat the containment the validation then checks for.
-fn copy_tree(src: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
-    for entry in std::fs::read_dir(src).map_err(|e| format!("{}: {e}", src.display()))? {
-        let entry = entry.map_err(|e| format!("{}: {e}", src.display()))?;
-        let from = entry.path();
-        let to = dest.join(entry.file_name());
-        let meta =
-            std::fs::symlink_metadata(&from).map_err(|e| format!("{}: {e}", from.display()))?;
-        let ft = meta.file_type();
-        if ft.is_symlink() {
-            return Err(format!(
-                "install: {} is a symlink; a pack must be regular files and \
-                 directories",
-                from.display()
-            ));
-        }
-        if ft.is_dir() {
-            std::fs::create_dir_all(&to).map_err(|e| format!("{}: {e}", to.display()))?;
-            copy_tree(&from, &to)?;
-        } else if ft.is_file() {
-            std::fs::copy(&from, &to).map_err(|e| format!("{}: {e}", to.display()))?;
-        } else {
-            return Err(format!(
-                "install: {} is not a regular file or directory",
-                from.display()
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// A process-wide sequence for staging directory names, so two runs in the same
-/// process (a test harness) never collide on a path.
+/// A process-wide sequence for scratch directory names, so two runs in the
+/// same process (a test harness) never collide on a path.
 fn next_seq() -> usize {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static SEQ: AtomicUsize = AtomicUsize::new(0);
     SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+/// `search <query>` over every registered catalog index. Matching is
+/// case-insensitive over id, name, description and tags. An entry whose
+/// `min_textrill` this build does not satisfy is still listed — with the
+/// requirement named, never hidden (roadmap §6, workstream 5).
+fn verb_search(args: &[String]) -> Outcome {
+    let p = match parse_verb("search", args) {
+        Ok(p) => p,
+        Err(e) => return usage_error(&e),
+    };
+    if p.positionals.is_empty() {
+        return usage_error("search needs a query");
+    }
+    let query = p.positionals.join(" ").to_lowercase();
+    let catalogs = pack::load_catalogs(&p.opts.search_path());
+    if catalogs.is_empty() {
+        return failure("search: no catalog indexes registered (pass --catalog_dir DIR)");
+    }
+    let mut problems = String::new();
+    let mut out = String::new();
+    let mut hits = 0usize;
+    for cat in &catalogs {
+        for problem in &cat.problems {
+            problems.push_str(problem);
+            problems.push('\n');
+        }
+        for e in &cat.entries {
+            let matches = e.id.to_lowercase().contains(&query)
+                || e.name.to_lowercase().contains(&query)
+                || e.description.to_lowercase().contains(&query)
+                || e.tags.iter().any(|t| t.to_lowercase().contains(&query));
+            if !matches {
+                continue;
+            }
+            hits += 1;
+            let mut line = format!(
+                "{} \u{b7} {} \u{b7} {} \u{b7} {}",
+                e.id,
+                e.name,
+                e.version,
+                cat.path.display()
+            );
+            if let Some(min) = e.min_textrill.as_deref() {
+                if matches!(pack::version_satisfies(pack::VERSION, min), Ok(false)) {
+                    line.push_str(&format!(" (requires textrill >= {min})"));
+                }
+            }
+            let _ = writeln!(out, "{line}");
+        }
+    }
+    if hits == 0 {
+        out.push_str("(no matches)\n");
+    }
+    Outcome {
+        stdout: out.into_bytes(),
+        stderr: problems.into_bytes(),
+        code: 0,
+    }
+}
+
+/// `sources` — the registered catalog directories, in `--catalog_dir` order,
+/// each marked when it is missing its index file.
+fn verb_sources(args: &[String]) -> Outcome {
+    let p = match parse_verb("sources", args) {
+        Ok(p) => p,
+        Err(e) => return usage_error(&e),
+    };
+    let sp = p.opts.search_path();
+    let mut out = String::new();
+    if sp.catalog_dirs.is_empty() {
+        out.push_str("(none; pass --catalog_dir DIR)\n");
+    }
+    for (i, dir) in sp.catalog_dirs.iter().enumerate() {
+        let mark = if dir.join(pack::CATALOG_INDEX).is_file() {
+            ""
+        } else {
+            "  (no catalog.toml)"
+        };
+        let _ = writeln!(out, "[{i}] {}{mark}", dir.display());
+    }
+    Outcome {
+        stdout: out.into_bytes(),
+        stderr: Vec::new(),
+        code: 0,
+    }
+}
+
+/// `update` — rescan every registered catalog. Nothing is fetched: the point
+/// of the offline model is that re-running this sees whatever files arrived
+/// since the last look, from whatever mechanism moved them there.
+fn verb_update(args: &[String]) -> Outcome {
+    let p = match parse_verb("update", args) {
+        Ok(p) => p,
+        Err(e) => return usage_error(&e),
+    };
+    let catalogs = pack::load_catalogs(&p.opts.search_path());
+    let mut problems = String::new();
+    let mut out = format!("rescanned {} catalog(s)\n", catalogs.len());
+    for cat in &catalogs {
+        let _ = writeln!(
+            out,
+            "{} \u{b7} {} pack(s)",
+            cat.path.display(),
+            cat.entries.len()
+        );
+        for problem in &cat.problems {
+            problems.push_str(problem);
+            problems.push('\n');
+        }
+    }
+    Outcome {
+        stdout: out.into_bytes(),
+        stderr: problems.into_bytes(),
+        code: 0,
+    }
+}
+
+/// `verify <id>` — repack the installed directory with the deterministic
+/// archive writer and compare against the `sha256` the catalog records. The
+/// archive format is byte-stable by construction (§5.4), so a pack that is
+/// byte-identical to what was installed hashes identically; any edit, added
+/// file or removed file changes the hash. An entry with no recorded hash
+/// cannot be verified and says so rather than passing vacuously.
+fn verb_verify(args: &[String]) -> Outcome {
+    let p = match parse_verb("verify", args) {
+        Ok(p) => p,
+        Err(e) => return usage_error(&e),
+    };
+    let id = match expect_one("verify", &p, "<id>") {
+        Ok(s) => s,
+        Err(e) => return usage_error(&e),
+    };
+    if !is_plain_component(&id) {
+        return failure(&format!("verify: {id:?} is not a valid pack id"));
+    }
+    let search = p.opts.search_path();
+    let pack_dir = match &search.data_home {
+        Some(dir) => dir.join(&id),
+        None => return failure("verify: no user data directory (set XDG_DATA_HOME or HOME)"),
+    };
+    if !pack_dir.is_dir() {
+        return failure(&format!(
+            "verify: {id} is not installed under {}",
+            search.data_home.as_ref().unwrap().display()
+        ));
+    }
+    let catalogs = pack::load_catalogs(&search);
+    let mut problems = String::new();
+    for cat in &catalogs {
+        for problem in &cat.problems {
+            problems.push_str(problem);
+            problems.push('\n');
+        }
+    }
+    let mut matched: Option<&pack::CatalogIndexEntry> = None;
+    for cat in &catalogs {
+        if let Ok(e) = cat.find(&id) {
+            matched = Some(e);
+            break;
+        }
+    }
+    let entry = match matched {
+        Some(e) => e,
+        None => {
+            let mut err = problems.clone();
+            let _ = writeln!(
+                err,
+                "verify: no catalog lists {id}; pass --catalog_dir DIR to the \
+                 catalog it came from"
+            );
+            return Outcome {
+                stdout: Vec::new(),
+                stderr: err.into_bytes(),
+                code: 1,
+            };
+        }
+    };
+    let Some(expect) = entry.sha256.as_deref() else {
+        return failure(&format!(
+            "verify: the catalog entry for {id} carries no sha256; there is \
+             nothing to check against"
+        ));
+    };
+    let bytes = match pack::pack(&pack_dir) {
+        Ok(b) => b,
+        Err(e) => return failure(&format!("verify: {e}")),
+    };
+    let got = crate::pack::sha256::sha256_hex(&bytes);
+    if expect.eq_ignore_ascii_case(&got) {
+        let mut out = format!("{id} {} OK\n", entry.version);
+        out.insert_str(0, &problems);
+        Outcome {
+            stdout: out.into_bytes(),
+            stderr: Vec::new(),
+            code: 0,
+        }
+    } else {
+        failure(&format!(
+            "verify: hash mismatch for {id} {}: the catalog says {expect}, \
+             the installed pack hashes to {got}",
+            entry.version
+        ))
+    }
 }

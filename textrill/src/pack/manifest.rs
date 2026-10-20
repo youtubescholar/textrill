@@ -1,21 +1,21 @@
-//! Pack manifests (`template.toml`): a reader for a documented strict subset
-//! of TOML, written by hand because the engine stays dependency-free.
+//! Pack manifests (`template.toml`): this schema over the strict TOML subset
+//! in [`super::tomlsub`], written by hand because the engine stays
+//! dependency-free.
 //!
-//! The subset is deliberately narrow so this reader can fail loudly rather
-//! than half-understand a file: flat `key = value` lines at the top level,
-//! exactly two array-of-table forms (`[[templates]]` and `[[templates.vars]]`),
-//! and string / integer / boolean / string-array values. Everything a real
-//! TOML document can carry that the subset does not — a table `[x]`, an inline
-//! table `{…}`, a multi-line string, a date, a dotted key `a.b`, a float, an
-//! unknown key, a duplicate key — is a hard error naming the line, so a
-//! manifest written as full TOML fails with a precise message instead of being
-//! silently misread.
+//! The syntax rules — and every loud refusal of a file written as full TOML —
+//! live in the shared scanner; this module owns only the manifest's keys and
+//! sections: top-level `key = value` plus exactly two array-of-table forms,
+//! `[[templates]]` and `[[templates.vars]]`. Unknown keys and sections are
+//! hard errors naming the line, so a manifest written as full TOML fails with
+//! a precise message instead of being silently misread.
 //!
 //! This module answers only "was the file understood?"; the semantics
 //! (known `schema`, reverse-DNS `id`, semver `version`, required fields) are
 //! checked by pack validation once the syntax is known good. An empty or
 //! partial document therefore parses and is rejected later with a message
 //! about the missing field. Covered by the tests below.
+
+use super::tomlsub::{check_key, err, section_name, Value};
 
 /// A parsed `template.toml`. Every field the subset can carry is optional at
 /// parse time; validation decides which the schema requires.
@@ -66,14 +66,6 @@ enum Section {
     Top,
     Template,
     Vars,
-}
-
-/// One parsed value, by the only four shapes the subset allows.
-enum Value {
-    Str(String),
-    Int(i64),
-    Bool(bool),
-    Strs(Vec<String>),
 }
 
 /// Parse a `template.toml` document.
@@ -132,43 +124,10 @@ pub fn parse(input: &str) -> Result<Manifest, String> {
     Ok(manifest)
 }
 
-/// Fail with a `line N:` prefix, the one diagnostic shape this reader emits.
-fn err<T>(n: usize, message: impl std::fmt::Display) -> Result<T, String> {
-    Err(format!("line {n}: {message}"))
-}
-
-/// Reject anything that is not a bare key: the subset has no dotted keys
-/// (`a.b = …`) and no quoted keys, so both are a hard error.
-fn check_key(key: &str, n: usize) -> Result<(), String> {
-    if key.is_empty() {
-        return err(n, "missing key before `=`");
-    }
-    if !key
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return err(
-            n,
-            format!(
-                "`{key}` is not a bare key (the subset allows letters, digits, \
-                 `-` and `_` only; dotted and quoted keys are not in it)"
-            ),
-        );
-    }
-    Ok(())
-}
-
 /// Recognise a `[[…]]` header (its leading `[[` already stripped) and push
 /// the entry the section introduces, so later keys land in the right place.
 fn start_section(manifest: &mut Manifest, rest: &str, n: usize) -> Result<Section, String> {
-    let Some(end) = rest.find("]]") else {
-        return err(n, "unterminated `[[section]]` header (missing `]]`)");
-    };
-    let name = rest[..end].trim();
-    let after = rest[end + 2..].trim();
-    if !(after.is_empty() || after.starts_with('#')) {
-        return err(n, format!("unexpected text after `]]`: `{after}`"));
-    }
+    let name = section_name(rest, n)?;
     match name {
         "templates" => {
             manifest.templates.push(TemplateEntry::default());
@@ -337,171 +296,6 @@ fn want_strs(key: &str, v: Value, n: usize) -> Result<Vec<String>, String> {
             format!("`{key}` expects an array of strings, like [\"a\", \"b\"]"),
         ),
     }
-}
-
-impl Value {
-    /// Parse the text after a `=` into one of the four allowed shapes,
-    /// refusing trailing text so `x = "a" b` cannot slip through.
-    fn parse(text: &str, n: usize) -> Result<Value, String> {
-        let b = text.as_bytes();
-        let mut i = 0;
-        while i < b.len() && b[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        match b.get(i) {
-            None => err(n, "missing value after `=`"),
-            Some(b'"') => {
-                let (s, next) = scan_string(text, i, n)?;
-                end_of_value(text, next, n)?;
-                Ok(Value::Str(s))
-            }
-            Some(b'[') => {
-                let (v, next) = scan_str_array(text, i, n)?;
-                end_of_value(text, next, n)?;
-                Ok(Value::Strs(v))
-            }
-            Some(_) => {
-                let start = i;
-                while i < b.len() && !b[i].is_ascii_whitespace() && b[i] != b'#' {
-                    i += 1;
-                }
-                let tok = &text[start..i];
-                let value = match tok {
-                    "true" => Value::Bool(true),
-                    "false" => Value::Bool(false),
-                    _ => match tok.parse::<i64>() {
-                        Ok(v) => Value::Int(v),
-                        // Naming the offending token before any trailing-text
-                        // check is what makes an inline table `{ a = 1 }`
-                        // read as "`{` is not a value shape", not as stray
-                        // text after a value the reader never saw.
-                        Err(_) => {
-                            return err(
-                                n,
-                                format!(
-                                    "`{tok}` is not in the manifest subset (expected a \
-                                     string, an integer, true or false, or a [\"…\"] \
-                                     array of strings; floats are not allowed)"
-                                ),
-                            );
-                        }
-                    },
-                };
-                end_of_value(text, i, n)?;
-                Ok(value)
-            }
-        }
-    }
-}
-
-/// After a complete value only whitespace or a comment may follow.
-fn end_of_value(text: &str, i: usize, n: usize) -> Result<(), String> {
-    let rest = text[i..].trim_start();
-    if rest.is_empty() || rest.starts_with('#') {
-        Ok(())
-    } else {
-        err(n, format!("unexpected text after the value: `{rest}`"))
-    }
-}
-
-/// Scan one basic string starting at `text[i] == '"'`, honouring the escapes
-/// a manifest may need, and return the index just past its closing quote.
-fn scan_string(text: &str, i: usize, n: usize) -> Result<(String, usize), String> {
-    let b = text.as_bytes();
-    let mut out = String::new();
-    let mut j = i + 1;
-    while j < b.len() {
-        match b[j] {
-            b'"' => return Ok((out, j + 1)),
-            b'\\' => {
-                j += 1;
-                let Some(&e) = b.get(j) else {
-                    return err(n, "string ends with a dangling `\\`");
-                };
-                match e {
-                    b'n' => out.push('\n'),
-                    b't' => out.push('\t'),
-                    b'r' => out.push('\r'),
-                    b'b' => out.push('\u{8}'),
-                    b'f' => out.push('\u{c}'),
-                    b'"' => out.push('"'),
-                    b'\\' => out.push('\\'),
-                    b'u' | b'U' => {
-                        let digits = if e == b'u' { 4 } else { 8 };
-                        if j + digits >= b.len() {
-                            return err(n, format!("truncated `\\{}…` escape", e as char));
-                        }
-                        let hex = &b[j + 1..j + 1 + digits];
-                        if !hex.iter().all(u8::is_ascii_hexdigit) {
-                            return err(
-                                n,
-                                format!("`\\{}…` needs {digits} hexadecimal digits", e as char),
-                            );
-                        }
-                        let hex = std::str::from_utf8(hex).expect("checked ASCII above");
-                        let cp = u32::from_str_radix(hex, 16)
-                            .map_err(|_| format!("line {n}: `\\{hex}` is not a code point"))?;
-                        let ch = char::from_u32(cp).ok_or_else(|| {
-                            format!("line {n}: `\\{hex}` is not a Unicode scalar value")
-                        })?;
-                        out.push(ch);
-                        j += digits;
-                    }
-                    other => {
-                        return err(n, format!("unknown escape `\\{}` in string", other as char));
-                    }
-                }
-                j += 1;
-            }
-            _ => {
-                let ch = text[j..].chars().next().expect("j is in bounds");
-                out.push(ch);
-                j += ch.len_utf8();
-            }
-        }
-    }
-    err(n, "unterminated string (missing the closing `\"`)")
-}
-
-/// Scan one `[\"a\", \"b\"]` array of strings starting at `text[i] == '['`,
-/// honouring TOML's trailing comma, and return the index past its `]`.
-fn scan_str_array(text: &str, i: usize, n: usize) -> Result<(Vec<String>, usize), String> {
-    let b = text.as_bytes();
-    let mut out = Vec::new();
-    let mut j = i + 1;
-    loop {
-        j = skip_ws(b, j);
-        match b.get(j) {
-            None => return err(n, "unterminated array (missing `]`)"),
-            Some(b']') => return Ok((out, j + 1)),
-            Some(b'"') => {
-                let (s, next) = scan_string(text, j, n)?;
-                out.push(s);
-                j = next;
-            }
-            Some(_) => {
-                return err(
-                    n,
-                    "only \"strings\" are allowed inside an array (the subset has \
-                     string arrays only)",
-                );
-            }
-        }
-        j = skip_ws(b, j);
-        match b.get(j) {
-            Some(b',') => j += 1,
-            Some(b']') => return Ok((out, j + 1)),
-            None => return err(n, "unterminated array (missing `]`)"),
-            Some(_) => err(n, "expected `,` or `]` between array elements")?,
-        }
-    }
-}
-
-fn skip_ws(b: &[u8], mut i: usize) -> usize {
-    while i < b.len() && b[i].is_ascii_whitespace() {
-        i += 1;
-    }
-    i
 }
 
 /// The manifest from the roadmap (§5.2), which every reader must keep reading.
@@ -722,7 +516,7 @@ mod tests {
         rejects(
             "description = { a = 1 }\n",
             1,
-            &["`{`", "not in the manifest subset"],
+            &["`{`", "not in the TOML subset"],
         );
     }
 

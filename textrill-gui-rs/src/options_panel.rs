@@ -152,7 +152,7 @@ fn category(opt: Opt) -> &'static str {
         | Opt::PreformatWhitespaceMin
         | Opt::UsePreformatMarker => "Preformatting",
         Opt::MakeTables | Opt::TableType => "Tables",
-        Opt::TabWidth | Opt::HruleMin => "Layout & Spacing",
+        Opt::TabWidth | Opt::HruleMin | Opt::CatalogDir => "Layout & Spacing",
     }
 }
 
@@ -886,6 +886,7 @@ fn clear_array(opts: &mut Options, opt: Opt) {
         Opt::Instring => opts.instring.clear(),
         Opt::LinksDictionaries => opts.links_dictionaries.clear(),
         Opt::TemplateDir => opts.template_dir.clear(),
+        Opt::CatalogDir => opts.catalog_dir.clear(),
         Opt::Var => opts.vars.clear(),
         _ => {}
     }

@@ -719,3 +719,387 @@ fn the_global_help_mentions_templates() {
     assert_eq!(out.code, 0);
     assert!(out.out().contains("templates"), "{}", out.out());
 }
+
+// ------------------------------------------------------------- catalogs --
+//
+// Roadmap §6: sharing whole libraries of packs without the tool ever
+// touching the network. A catalog is a directory with a `catalog.toml`
+// index; these tests drive the real binary against a scratch tree, exactly
+// as a user with a cloned catalog repo would.
+
+/// Build a catalog directory at `<scratch>/catalog` carrying one pack: the
+/// pack is packed to a `.tar` under `catalog/packs/`, and the index records
+/// the archive's real sha256. `extra` is extra index text (a `min_textrill`,
+/// a second entry) appended before the entry is closed. Returns the catalog
+/// path and the archive bytes.
+fn make_catalog(s: &Scratch, id: &str, version: &str, extra: &str) -> (PathBuf, Vec<u8>) {
+    let src = s.root.join("catalog-src");
+    write_pack(&src, id, "doc", Some("\"catalog\""));
+    let packed = s.run(&["templates", "pack", src.join(id).to_str().unwrap()], b"");
+    assert_eq!(packed.code, 0, "{}", packed.err());
+    let bytes = packed.stdout;
+
+    let cat = s.root.join("catalog");
+    std::fs::create_dir_all(cat.join("packs")).unwrap();
+    let archive_name = format!("{id}-{version}.tar");
+    std::fs::write(cat.join("packs").join(&archive_name), &bytes).unwrap();
+    let sha = textrill::pack::sha256::sha256_hex(&bytes);
+    let index = format!(
+        "schema = 1\n\n[[packs]]\nid = {id:?}\nname = \"Catalog {id}\"\n\
+         version = {version:?}\ndescription = \"a shared pack\"\n\
+         tags = [\"catalog\", \"shared\"]\nsha256 = {sha:?}\n{extra}\
+         archive = {archive:?}\n",
+        archive = format!("packs/{archive_name}")
+    );
+    std::fs::write(cat.join("catalog.toml"), index).unwrap();
+    (cat, bytes)
+}
+
+/// The flag that registers a catalog directory.
+fn cat_flag() -> &'static str {
+    "--catalog_dir"
+}
+
+#[test]
+fn catalog_search_install_and_verify_work_offline() {
+    let s = Scratch::new("catalog-offline");
+    let (cat, _) = make_catalog(&s, "org.example.shared", "1.0.0", "");
+
+    // Search finds it by id, by name and by tag — all from disk, no network.
+    for query in ["org.example.shared", "catalog", "shared"] {
+        let found = s.run(&["templates", "search", query], b"");
+        // no --catalog_dir yet: nothing registered
+        assert_eq!(found.code, 1, "{query}: {}", found.err());
+        let found = s.run(
+            &[
+                "templates",
+                "search",
+                query,
+                cat_flag(),
+                cat.to_str().unwrap(),
+            ],
+            b"",
+        );
+        assert_eq!(found.code, 0, "{query}: {}", found.err());
+        assert!(
+            found.out().contains("org.example.shared"),
+            "{query}: {}",
+            found.out()
+        );
+    }
+
+    // Install by id from the catalog.
+    let installed = s.run(
+        &[
+            "templates",
+            "install",
+            "org.example.shared",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(installed.code, 0, "{}", installed.err());
+    assert!(installed.out().contains("installed org.example.shared"));
+    assert!(s.installed_root().join("org.example.shared").is_dir());
+
+    // The installed pack is a normal discovered pack.
+    let listed = s.run(&["templates", "list"], b"");
+    assert!(listed.out().contains("org.example.shared"));
+
+    // Verify passes against the catalog hash.
+    let verified = s.run(
+        &[
+            "templates",
+            "verify",
+            "org.example.shared",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(verified.code, 0, "{}", verified.err());
+    assert!(verified.out().contains("OK"), "{}", verified.out());
+}
+
+#[test]
+fn catalog_install_refuses_a_tampered_archive() {
+    let s = Scratch::new("catalog-tamper");
+    let (cat, bytes) = make_catalog(&s, "org.example.tampered", "1.0.0", "");
+    // Flip one byte of the archive; the recorded hash no longer matches.
+    let archive = cat.join("packs").join("org.example.tampered-1.0.0.tar");
+    let mut flipped = bytes.clone();
+    let at = flipped.len() / 2;
+    flipped[at] ^= 0x01;
+    assert_ne!(flipped, bytes);
+    std::fs::write(&archive, &flipped).unwrap();
+
+    let refused = s.run(
+        &[
+            "templates",
+            "install",
+            "org.example.tampered",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(refused.code, 1);
+    assert!(refused.err().contains("hash mismatch"), "{}", refused.err());
+    assert!(
+        !s.installed_root().join("org.example.tampered").exists(),
+        "a refused install must leave nothing behind"
+    );
+}
+
+#[test]
+fn catalog_install_refuses_an_unmet_min_textrill_naming_the_reason() {
+    let s = Scratch::new("catalog-minver");
+    let (cat, _) = make_catalog(
+        &s,
+        "org.example.future",
+        "1.0.0",
+        "min_textrill = \"99.0.0\"\n",
+    );
+
+    let refused = s.run(
+        &[
+            "templates",
+            "install",
+            "org.example.future",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(refused.code, 1);
+    assert!(
+        refused.err().contains("requires textrill >= 99.0.0"),
+        "{}",
+        refused.err()
+    );
+    assert!(!s.installed_root().join("org.example.future").exists());
+
+    // And search still lists it, with the requirement named (never hidden).
+    let found = s.run(
+        &[
+            "templates",
+            "search",
+            "future",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert!(
+        found.out().contains("(requires textrill >= 99.0.0)"),
+        "{}",
+        found.out()
+    );
+}
+
+#[test]
+fn catalog_verify_detects_an_edited_installed_pack() {
+    let s = Scratch::new("catalog-verify");
+    let (cat, _) = make_catalog(&s, "org.example.guarded", "1.0.0", "");
+    let installed = s.run(
+        &[
+            "templates",
+            "install",
+            "org.example.guarded",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(installed.code, 0, "{}", installed.err());
+
+    // Edit one byte of the installed template: the repacked hash changes.
+    let file = s
+        .installed_root()
+        .join("org.example.guarded")
+        .join("doc.html");
+    let mut html = std::fs::read_to_string(&file).unwrap();
+    html.push(' ');
+    std::fs::write(&file, html).unwrap();
+
+    let verified = s.run(
+        &[
+            "templates",
+            "verify",
+            "org.example.guarded",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(verified.code, 1);
+    assert!(
+        verified.err().contains("hash mismatch"),
+        "{}",
+        verified.err()
+    );
+}
+
+#[test]
+fn catalog_install_pins_a_version_and_names_the_others_on_a_miss() {
+    let s = Scratch::new("catalog-versions");
+    // Two versions of the same id in one index.
+    let (cat, _) = make_catalog(&s, "org.example.multi", "1.0.0", "");
+    let second = s.root.join("catalog-src-2");
+    write_pack(&second, "org.example.multi", "doc", Some("\"catalog\""));
+    let packed = s.run(
+        &[
+            "templates",
+            "pack",
+            second.join("org.example.multi").to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(packed.code, 0, "{}", packed.err());
+    let sha = textrill::pack::sha256::sha256_hex(&packed.stdout);
+    std::fs::write(
+        cat.join("packs").join("org.example.multi-2.0.0.tar"),
+        &packed.stdout,
+    )
+    .unwrap();
+    let mut index = std::fs::read_to_string(cat.join("catalog.toml")).unwrap();
+    index.push_str(&format!(
+        "\n[[packs]]\nid = \"org.example.multi\"\nname = \"Catalog org.example.multi\"\n\
+         version = \"2.0.0\"\nsha256 = {sha:?}\n\
+         archive = \"packs/org.example.multi-2.0.0.tar\"\n"
+    ));
+    std::fs::write(cat.join("catalog.toml"), index).unwrap();
+
+    // A bare id takes the first listed version; an exact pin takes that one.
+    let pinned = s.run(
+        &[
+            "templates",
+            "install",
+            "org.example.multi@2.0.0",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(pinned.code, 0, "{}", pinned.err());
+
+    // A version that is not listed is refused, naming what is.
+    let miss = s.run(
+        &[
+            "templates",
+            "install",
+            "org.example.multi@3.0.0",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(miss.code, 1);
+    assert!(miss.err().contains("no version 3.0.0"), "{}", miss.err());
+    assert!(miss.err().contains("1.0.0"), "{}", miss.err());
+}
+
+#[test]
+fn catalog_install_refuses_an_archive_that_installs_a_different_id() {
+    let s = Scratch::new("catalog-idmismatch");
+    let (cat, _) = make_catalog(&s, "org.example.real", "1.0.0", "");
+    // Relist the same archive under a different id.
+    let index_path = cat.join("catalog.toml");
+    let index = std::fs::read_to_string(&index_path).unwrap();
+    std::fs::write(
+        &index_path,
+        index.replace("id = \"org.example.real\"", "id = \"org.example.other\""),
+    )
+    .unwrap();
+
+    let refused = s.run(
+        &[
+            "templates",
+            "install",
+            "org.example.other",
+            cat_flag(),
+            cat.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(refused.code, 1);
+    assert!(
+        refused.err().contains("org.example.real"),
+        "{}",
+        refused.err()
+    );
+    assert!(
+        refused.err().contains("org.example.other"),
+        "{}",
+        refused.err()
+    );
+    assert!(!s.installed_root().join("org.example.other").exists());
+}
+
+#[test]
+fn a_malformed_catalog_index_is_reported_with_its_line_and_hides_nothing_else() {
+    let s = Scratch::new("catalog-broken");
+    let (good, _) = make_catalog(&s, "org.example.good", "1.0.0", "");
+    // A second catalog whose index is written as full TOML.
+    let bad = s.root.join("bad-catalog");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("catalog.toml"), "[[packs]]\ncolour = \"red\"\n").unwrap();
+
+    let args = [
+        "templates",
+        "search",
+        "good",
+        cat_flag(),
+        good.to_str().unwrap(),
+        cat_flag(),
+        bad.to_str().unwrap(),
+    ];
+    let found = s.run(&args, b"");
+    assert_eq!(found.code, 0, "{}", found.err());
+    // The good catalog still answers.
+    assert!(found.out().contains("org.example.good"), "{}", found.out());
+    // The broken one is named, with its line.
+    assert!(found.err().contains("line 2:"), "{}", found.err());
+    assert!(found.err().contains("colour"), "{}", found.err());
+}
+
+#[test]
+fn sources_and_update_report_the_registered_catalogs() {
+    let s = Scratch::new("catalog-sources");
+    let (cat, _) = make_catalog(&s, "org.example.listed", "1.0.0", "");
+
+    let none = s.run(&["templates", "sources"], b"");
+    assert_eq!(none.code, 0);
+    assert!(none.out().contains("(none"), "{}", none.out());
+
+    let listed = s.run(
+        &["templates", "sources", cat_flag(), cat.to_str().unwrap()],
+        b"",
+    );
+    assert!(
+        listed.out().contains(cat.to_str().unwrap()),
+        "{}",
+        listed.out()
+    );
+
+    let updated = s.run(
+        &["templates", "update", cat_flag(), cat.to_str().unwrap()],
+        b"",
+    );
+    assert_eq!(updated.code, 0, "{}", updated.err());
+    assert!(
+        updated.out().contains("rescanned 1 catalog(s)"),
+        "{}",
+        updated.out()
+    );
+    assert!(updated.out().contains("1 pack(s)"), "{}", updated.out());
+}
+
+#[test]
+fn install_by_id_without_any_catalog_says_what_to_pass() {
+    let s = Scratch::new("catalog-none");
+    let refused = s.run(&["templates", "install", "org.example.nowhere"], b"");
+    assert_eq!(refused.code, 1);
+    assert!(refused.err().contains("--catalog_dir"), "{}", refused.err());
+}
