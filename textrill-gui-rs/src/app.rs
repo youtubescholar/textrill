@@ -7,7 +7,7 @@
 
 //! Application state and layout.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -75,6 +75,17 @@ const VIEW_SOURCE_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num2);
 const VIEW_HTML_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num3);
+/// `Ctrl+4` shows the native rendered preview (roadmap §7), the view that
+/// answers "what does this look like?" without leaving the app.
+const VIEW_PREVIEW_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num4);
+/// `Ctrl+5` shows the outline (roadmap §7, workstream 2).
+const VIEW_OUTLINE_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num5);
+/// `Ctrl+6` shows the rendered current/previous comparison (roadmap §7,
+/// workstream 3).
+const VIEW_DIFF_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Num6);
 /// The reset command needs a route that does not depend on any widget being
 /// on screen, because the whole point of it is recovering a layout that is
 /// off-screen or folded away. `Ctrl/Cmd+Alt+0` is outside the set egui's own
@@ -117,10 +128,11 @@ pub enum SaveAnswer {
 }
 
 /// The command waiting behind the unsaved-changes prompt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingAction {
     New,
     Open,
+    OpenRecent(PathBuf),
     LoadSample,
     Quit,
 }
@@ -234,6 +246,19 @@ pub struct TextrillApp {
     /// The source editor's caret, as 1-based (line, column); `None` when the
     /// editor has never been focused this run.
     cursor: Option<(usize, usize)>,
+    /// The output before the most recent successful conversion, for the
+    /// rendered diff. Reset when a different document is loaded.
+    previous_output: Option<String>,
+    /// The problems from the last failed conversion (roadmap §7, workstream
+    /// 4). Empty after a successful one.
+    problems: Vec<crate::problems::Problem>,
+    /// Recently opened files, most recent first (roadmap §7, workstream 5).
+    recent: Vec<PathBuf>,
+    /// Whether the last document is reopened on launch. Opt-in.
+    restore_session: bool,
+    /// A caret position requested by the outline, applied the next time the
+    /// source editor draws (an outline click switches to that view).
+    pending_caret: Option<usize>,
     /// Whether the Ctrl/Cmd+K command palette is open.
     palette_open: bool,
     /// What has been typed into the palette's search box.
@@ -308,6 +333,11 @@ impl TextrillApp {
             drag_start: None,
             counts: textrill::report::Counts::default(),
             cursor: None,
+            previous_output: None,
+            problems: Vec::new(),
+            recent: Vec::new(),
+            restore_session: false,
+            pending_caret: None,
             palette_open: false,
             palette_query: String::new(),
             palette_selected: 0,
@@ -315,6 +345,7 @@ impl TextrillApp {
             palette_search_focused: false,
         };
         app.restore_settings();
+        app.restore_last_document();
         app
     }
 
@@ -503,6 +534,29 @@ impl TextrillApp {
         if let Some(density) = self.settings.density() {
             self.density = density;
         }
+        self.recent = self.settings.recent_files();
+        self.restore_session = self.settings.restore_session().unwrap_or(false);
+    }
+
+    /// Reopen the document from the previous run, when the user opted in.
+    ///
+    /// This runs once, on an empty fresh buffer: there is no unsaved text to
+    /// clobber, and a missing file is a status note rather than a failure.
+    fn restore_last_document(&mut self) {
+        if !self.restore_session || !self.doc.text.is_empty() || self.doc.dirty {
+            return;
+        }
+        let Some(path) = self.settings.session_document() else {
+            return;
+        };
+        if !path.is_file() {
+            self.status = format!("the last document is gone: {}", path.display());
+            return;
+        }
+        match self.load_file(&path) {
+            Ok(()) => self.status = format!("restored {}", path.display()),
+            Err(error) => self.status = error,
+        }
     }
 
     /// Persist the layout choices the main panes own (split ratio, view mode,
@@ -666,16 +720,32 @@ impl TextrillApp {
             self.completed = outcome.generation;
             match outcome.error {
                 Some(error) => {
+                    self.problems = crate::problems::parse(&error);
                     self.output = error;
                     self.status = "error".to_string();
                 }
                 None => {
+                    if let Some(problem) = outcome.problem {
+                        // The engine refused the document: no output is a
+                        // result. Keep the last good output out of the way and
+                        // let the problems panel explain why.
+                        self.problems = crate::problems::parse(&problem);
+                        self.output.clear();
+                        self.status = "error".to_string();
+                        continue;
+                    }
+                    self.problems.clear();
                     let lines = if outcome.html.is_empty() {
                         0
                     } else {
                         outcome.html.matches('\n').count() + 1
                     };
-                    self.output = outcome.html;
+                    if !self.output.is_empty() && self.output != outcome.html {
+                        self.previous_output =
+                            Some(std::mem::replace(&mut self.output, outcome.html));
+                    } else {
+                        self.output = outcome.html;
+                    }
                     self.doc.note_converted(&self.output);
                     self.counts = textrill::report::Counts::of(&self.output);
                     self.status = format!("{lines} lines · {:.0} ms", outcome.seconds * 1000.0);
@@ -697,6 +767,7 @@ impl TextrillApp {
 
     fn do_new(&mut self) {
         self.doc.reset();
+        self.previous_output = None;
         self.convert_now();
     }
 
@@ -711,6 +782,7 @@ impl TextrillApp {
 
     fn do_load_sample(&mut self) {
         self.doc.load_sample();
+        self.previous_output = None;
         self.convert_now();
     }
 
@@ -718,6 +790,8 @@ impl TextrillApp {
     /// failure.
     pub fn load_file(&mut self, path: &std::path::Path) -> Result<(), String> {
         self.doc.load(path)?;
+        self.previous_output = None;
+        self.remember_recent(path);
         self.convert_now();
         Ok(())
     }
@@ -727,6 +801,7 @@ impl TextrillApp {
         match self.doc.path.clone() {
             Some(path) => {
                 self.doc.save_text_to(&path)?;
+                self.remember_recent(&path);
                 Ok(SaveRequest::Saved(path))
             }
             None => Ok(SaveRequest::NeedsName(self.doc.suggested_text_name())),
@@ -771,6 +846,40 @@ impl TextrillApp {
     pub fn copy_html(&mut self, ctx: &egui::Context) {
         ctx.copy_text(self.output.clone());
         self.status = "HTML copied to the clipboard".to_string();
+    }
+
+    /// The recent-files list, most recent first.
+    pub fn recent_files(&self) -> &[PathBuf] {
+        &self.recent
+    }
+
+    /// Open the `index`th recent file, asking about unsaved text first.
+    pub fn open_recent(&mut self, index: usize) {
+        let Some(path) = self.recent.get(index).cloned() else {
+            return;
+        };
+        if self.doc.dirty {
+            self.pending = Some(PendingAction::OpenRecent(path));
+        } else {
+            self.load_or_report(path);
+        }
+    }
+
+    /// Move `path` to the front of the recent list (bounded) and remember it as
+    /// the session document. Settings failures are status notes, not errors:
+    /// the document itself opened or saved fine.
+    fn remember_recent(&mut self, path: &std::path::Path) {
+        let path = path.to_path_buf();
+        self.recent.retain(|recent| recent != &path);
+        self.recent.insert(0, path.clone());
+        self.recent.truncate(10);
+        let mut stored = self.settings.set_recent_files(&self.recent);
+        if stored.is_ok() {
+            stored = self.settings.set_session_document(&path);
+        }
+        if let Err(error) = stored {
+            self.status = format!("could not save settings: {error}");
+        }
     }
 
     /// `File → Open…`: ask about unsaved text, then choose a file.
@@ -979,7 +1088,7 @@ impl TextrillApp {
     /// `Save` that has nowhere to write is the same as the Python dialog being
     /// cancelled: the command is dropped, not the edits.
     pub fn resolve_save_prompt(&mut self, answer: SaveAnswer, ctx: &egui::Context) {
-        let Some(action) = self.pending else {
+        let Some(action) = self.pending.clone() else {
             return;
         };
         match answer {
@@ -1007,6 +1116,7 @@ impl TextrillApp {
         match action {
             PendingAction::New => self.do_new(),
             PendingAction::Open => self.do_open(),
+            PendingAction::OpenRecent(path) => self.load_or_report(path),
             PendingAction::LoadSample => self.do_load_sample(),
             PendingAction::Quit => {
                 self.persist();
@@ -1062,9 +1172,13 @@ impl TextrillApp {
             mut view_split,
             mut view_source,
             mut view_html,
+            mut view_preview,
+            mut view_outline,
+            mut view_diff,
             mut palette,
         ) = (
             false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false,
         );
         ctx.input_mut(|input| {
             new = input.consume_shortcut(&NEW_SHORTCUT);
@@ -1078,6 +1192,9 @@ impl TextrillApp {
             view_split = input.consume_shortcut(&VIEW_SPLIT_SHORTCUT);
             view_source = input.consume_shortcut(&VIEW_SOURCE_SHORTCUT);
             view_html = input.consume_shortcut(&VIEW_HTML_SHORTCUT);
+            view_preview = input.consume_shortcut(&VIEW_PREVIEW_SHORTCUT);
+            view_outline = input.consume_shortcut(&VIEW_OUTLINE_SHORTCUT);
+            view_diff = input.consume_shortcut(&VIEW_DIFF_SHORTCUT);
             palette = input.consume_shortcut(&PALETTE_SHORTCUT);
         });
         if palette {
@@ -1097,6 +1214,15 @@ impl TextrillApp {
         }
         if view_html {
             self.set_view_mode(crate::settings::ViewMode::Html);
+        }
+        if view_preview {
+            self.set_view_mode(crate::settings::ViewMode::Preview);
+        }
+        if view_outline {
+            self.set_view_mode(crate::settings::ViewMode::Outline);
+        }
+        if view_diff {
+            self.set_view_mode(crate::settings::ViewMode::Diff);
         }
         if new {
             self.new_document();
@@ -1176,6 +1302,46 @@ impl TextrillApp {
                 if ui.button("Open…").clicked() {
                     self.open_document();
                     ui.close();
+                }
+                let mut chosen = None;
+                ui.menu_button("Recent files", |ui| {
+                    if self.recent.is_empty() {
+                        ui.weak("No recent files yet.");
+                    }
+                    for (index, path) in self.recent.iter().enumerate() {
+                        let label = format!("{}", path.display());
+                        if ui.button(label).clicked() {
+                            chosen = Some(index);
+                            ui.close();
+                        }
+                    }
+                    if !self.recent.is_empty() {
+                        ui.separator();
+                        if ui.button("Clear recent files").clicked() {
+                            self.recent.clear();
+                            if let Err(error) = self.settings.set_recent_files(&self.recent) {
+                                self.status = format!("could not save settings: {error}");
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+                if let Some(index) = chosen {
+                    self.open_recent(index);
+                    ui.close();
+                }
+                let mut restore = self.restore_session;
+                if ui
+                    .checkbox(&mut restore, "Restore the last document on launch")
+                    .on_hover_text(
+                        "Opt-in. On the next launch the last opened file is reopened                          before there is any unsaved text to overwrite.",
+                    )
+                    .changed()
+                {
+                    self.restore_session = restore;
+                    if let Err(error) = self.settings.set_restore_session(restore) {
+                        self.status = format!("could not save settings: {error}");
+                    }
                 }
                 if ui.button("Save").clicked() {
                     self.save_document_command();
@@ -1257,6 +1423,9 @@ impl TextrillApp {
                     ("Source and HTML", crate::settings::ViewMode::Split),
                     ("Source only", crate::settings::ViewMode::Source),
                     ("HTML only", crate::settings::ViewMode::Html),
+                    ("Preview (rendered)", crate::settings::ViewMode::Preview),
+                    ("Outline", crate::settings::ViewMode::Outline),
+                    ("Diff (rendered vs. previous)", crate::settings::ViewMode::Diff),
                 ] {
                     if ui
                         .selectable_label(mode == want, label)
@@ -1633,9 +1802,11 @@ impl TextrillApp {
                     self.palette_focus = false;
                 }
 
-                let commands: Vec<Command> = Command::all()
+                let mut all = Command::all();
+                all.extend((0..self.recent.len()).map(Command::OpenRecent));
+                let commands: Vec<Command> = all
                     .into_iter()
-                    .filter(|command| command.matches(&self.palette_query))
+                    .filter(|command| command.matches_with(&self.palette_query, &self.recent))
                     .collect();
                 if self.palette_selected >= commands.len() {
                     self.palette_selected = commands.len().saturating_sub(1);
@@ -1672,7 +1843,10 @@ impl TextrillApp {
                         for (index, command) in commands.iter().enumerate() {
                             let selected = index == self.palette_selected;
                             ui.horizontal(|ui| {
-                                if ui.selectable_label(selected, command.label()).clicked() {
+                                if ui
+                                    .selectable_label(selected, command.label_with(&self.recent))
+                                    .clicked()
+                                {
                                     run = Some(*command);
                                 }
                                 ui.with_layout(
@@ -1715,7 +1889,11 @@ impl TextrillApp {
             Command::ViewSplit => self.set_view_mode(crate::settings::ViewMode::Split),
             Command::ViewSource => self.set_view_mode(crate::settings::ViewMode::Source),
             Command::ViewHtml => self.set_view_mode(crate::settings::ViewMode::Html),
+            Command::ViewPreview => self.set_view_mode(crate::settings::ViewMode::Preview),
+            Command::ViewOutline => self.set_view_mode(crate::settings::ViewMode::Outline),
+            Command::ViewDiff => self.set_view_mode(crate::settings::ViewMode::Diff),
             Command::ResetWindow => self.reset_window_state(ctx),
+            Command::OpenRecent(index) => self.open_recent(index),
             Command::Preset(index) => {
                 if let Some(preset) = presets::PRESETS.get(index) {
                     self.apply_preset(preset);
@@ -1909,6 +2087,7 @@ impl TextrillApp {
         }
 
         self.working_area(ui);
+        self.problems_panel(ui);
         self.status_bar(ui);
 
         self.command_palette(ui.ctx());
@@ -1984,8 +2163,14 @@ impl TextrillApp {
             crate::settings::ViewMode::Html => {
                 self.html_pane(ui);
             }
-            crate::settings::ViewMode::Preview | crate::settings::ViewMode::Outline => {
-                self.pending_view(ui);
+            crate::settings::ViewMode::Preview => {
+                self.preview_pane(ui);
+            }
+            crate::settings::ViewMode::Outline => {
+                self.outline_pane(ui);
+            }
+            crate::settings::ViewMode::Diff => {
+                self.diff_pane(ui);
             }
         }
     }
@@ -2009,7 +2194,16 @@ impl TextrillApp {
                 if empty {
                     editor = editor.hint_text("Type here, or use the shortcuts below to start.");
                 }
-                let output = editor.show(ui);
+                let mut output = editor.show(ui);
+                if let Some(index) = self.pending_caret.take() {
+                    let cursor = egui::text::CCursor::new(index);
+                    output
+                        .state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(cursor)));
+                    output.state.store(ui.ctx(), egui::Id::new("source-editor"));
+                    output.response.request_focus();
+                }
                 if output.response.changed() {
                     self.on_edit(Instant::now());
                 }
@@ -2078,20 +2272,308 @@ impl TextrillApp {
             });
     }
 
-    /// The placeholder for views that arrive in a later phase (the native
-    /// rendered preview and the outline). It fills the working area with an
-    /// explanation instead of an empty screen.
-    fn pending_view(&mut self, ui: &mut Ui) {
-        let text = match self.view_mode {
-            crate::settings::ViewMode::Outline => {
-                "Outline view arrives with the structure panel."
+    /// The native rendered preview (roadmap §7, workstream 1): the produced
+    /// HTML drawn with egui's own text and layout, plus the local escape hatch
+    /// that hands the exact bytes to the desktop's browser.
+    fn preview_pane(&mut self, ui: &mut Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.heading("Preview");
+            ui.label(
+                egui::RichText::new(
+                    "native subset — faithful to structure, not pixel-identical to a browser",
+                )
+                .small()
+                .weak(),
+            );
+            if ui
+                .button("Open in browser")
+                .on_hover_text(
+                    "Write the produced HTML to a temporary file and open it with the \
+                     desktop's handler. This is a local program launch; textrill itself \
+                     makes no network request.",
+                )
+                .clicked()
+            {
+                self.open_in_browser();
             }
-            _ => "Rendered preview arrives in a later phase; this view will show the document as it will read, not its HTML.",
-        };
-        ui.vertical_centered(|ui| {
-            ui.add_space(ui.available_height() * 0.3);
-            ui.label(egui::RichText::new(text).weak());
         });
+        ui.separator();
+        if self.status == "error" {
+            ui.colored_label(ui.visuals().error_fg_color, "No output was produced.");
+            ui.add_space(2.0);
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("preview-pane")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if let Some(crate::preview::Action::Open(link)) =
+                    crate::preview::show(ui, &self.output)
+                {
+                    self.open_link(&link);
+                }
+            });
+    }
+
+    /// Write the exact bytes `Save HTML` would write into `dir`, returning the
+    /// path. Kept separate from the launch so a test can compare the bytes
+    /// without starting a browser (roadmap §7 acceptance).
+    pub fn write_preview_file(&self, dir: &Path) -> Result<PathBuf, String> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = dir.join(format!(
+            "textrill-preview-{}-{nanos}.html",
+            std::process::id()
+        ));
+        std::fs::write(&path, self.output.as_bytes())
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(path)
+    }
+
+    /// Hand the produced HTML to the desktop's default handler. No network
+    /// path exists in this process; the browser is a separate local program.
+    pub fn open_in_browser(&mut self) {
+        match self.write_preview_file(&std::env::temp_dir()) {
+            Ok(path) => match std::process::Command::new("xdg-open").arg(&path).spawn() {
+                Ok(_) => self.status = format!("opened {} in the browser", path.display()),
+                Err(e) => self.status = format!("open in browser: {e}"),
+            },
+            Err(e) => self.status = format!("open in browser: {e}"),
+        }
+    }
+
+    /// A link clicked in the preview. Internal anchors are left alone (the
+    /// outline is the navigation surface); anything else is handed to the
+    /// desktop, which is the same local-launch rule as `Open in browser`.
+    fn open_link(&mut self, href: &str) {
+        if href.starts_with('#') {
+            return;
+        }
+        match std::process::Command::new("xdg-open").arg(href).spawn() {
+            Ok(_) => self.status = format!("opened {href}"),
+            Err(e) => self.status = format!("open link: {e}"),
+        }
+    }
+
+    /// The output before the most recent successful conversion, if any.
+    pub fn previous_output(&self) -> Option<&str> {
+        self.previous_output.as_deref()
+    }
+
+    /// The problems from the last failed conversion, if any.
+    pub fn problems(&self) -> &[crate::problems::Problem] {
+        &self.problems
+    }
+
+    /// The source caret as 1-based `(line, column)`, once the editor has drawn.
+    pub fn cursor(&self) -> Option<(usize, usize)> {
+        self.cursor
+    }
+
+    /// The problems panel (roadmap §7, workstream 4). A failure is a list of
+    /// sentences, not one long line; a sentence that names a line is a jump.
+    fn problems_panel(&mut self, ui: &mut Ui) {
+        if self.problems.is_empty() {
+            return;
+        }
+        let mut jump = None;
+        egui::Frame::NONE
+            .fill(ui.visuals().extreme_bg_color)
+            .inner_margin(egui::Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        format!("Problems ({})", self.problems.len()),
+                    );
+                    ui.label(
+                        egui::RichText::new(if self.output.is_empty() {
+                            "no output was written because:"
+                        } else {
+                            "the conversion stopped because:"
+                        })
+                        .small()
+                        .weak(),
+                    );
+                });
+                egui::ScrollArea::vertical()
+                    .id_salt("problems-panel")
+                    .max_height(140.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        for problem in &self.problems {
+                            match problem.line {
+                                Some(line) => {
+                                    let text = format!("line {line}: {}", problem.message);
+                                    if ui
+                                        .add(
+                                            egui::Label::new(text)
+                                                .sense(egui::Sense::click())
+                                                .wrap(),
+                                        )
+                                        .on_hover_text("Jump to this line in the source")
+                                        .clicked()
+                                    {
+                                        jump = Some(line);
+                                    }
+                                }
+                                None => {
+                                    ui.add(
+                                        egui::Label::new(&problem.message)
+                                            .wrap()
+                                            .halign(egui::Align::Min),
+                                    );
+                                }
+                            }
+                        }
+                    });
+            });
+        if let Some(line) = jump {
+            self.jump_to_line(line);
+        }
+    }
+
+    /// Put the source caret on 1-based `line` and show the source view.
+    pub fn jump_to_line(&mut self, line: usize) {
+        let line = line.max(1);
+        let mut index = 0usize;
+        for (current, part) in self.doc.text.split_inclusive('\n').enumerate() {
+            if current + 1 == line {
+                break;
+            }
+            index += part.chars().count();
+        }
+        self.pending_caret = Some(index);
+        self.set_view_mode(crate::settings::ViewMode::Source);
+        self.status = format!("problem at line {line}");
+    }
+
+    /// The rendered diff (roadmap §7, workstream 3): the current output beside
+    /// the previous one, both drawn by the same subset renderer, so a settings
+    /// change can be judged by reading rather than by diffing HTML.
+    fn diff_pane(&mut self, ui: &mut Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.heading("Diff");
+            ui.label(
+                egui::RichText::new(
+                    "current output beside the previous conversion — rendered, not an HTML diff",
+                )
+                .small()
+                .weak(),
+            );
+        });
+        ui.separator();
+        let Some(previous) = self.previous_output.clone() else {
+            ui.weak(
+                "No previous output yet. Change the text or an option, convert again, \
+                 and the two results appear here side by side.",
+            );
+            return;
+        };
+        let gap = 12.0;
+        let column = ((ui.available_width() - gap) / 2.0).max(160.0);
+        let height = ui.available_height();
+        let mut action = None;
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(column, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.strong("Current");
+                    egui::ScrollArea::vertical()
+                        .id_salt("diff-current")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            action = crate::preview::show(ui, &self.output);
+                        });
+                },
+            );
+            ui.add_space(gap);
+            ui.allocate_ui_with_layout(
+                egui::vec2(column, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.strong("Previous");
+                    egui::ScrollArea::vertical()
+                        .id_salt("diff-previous")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let _ = crate::preview::show(ui, &previous);
+                        });
+                },
+            );
+        });
+        if let Some(crate::preview::Action::Open(link)) = action {
+            self.open_link(&link);
+        }
+    }
+
+    /// The outline (roadmap §7, workstream 2): the headings of the produced
+    /// document, indented by level. The engine exposes no source line map, so
+    /// a click finds the heading's text in the source and puts the caret
+    /// there, switching to the source view where the jump is visible.
+    fn outline_pane(&mut self, ui: &mut Ui) {
+        let headings = crate::preview::outline(&self.output);
+        ui.horizontal_wrapped(|ui| {
+            ui.heading("Outline");
+            ui.label(
+                egui::RichText::new(
+                    "headings in the produced document — click to jump to the source",
+                )
+                .small()
+                .weak(),
+            );
+        });
+        ui.separator();
+        if headings.is_empty() {
+            ui.weak(
+                "No headings yet. The outline is built from the converted HTML, \
+                 so it appears as soon as the document has one.",
+            );
+            return;
+        }
+        let mut jump = None;
+        egui::ScrollArea::vertical()
+            .id_salt("outline-pane")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for heading in &headings {
+                    ui.horizontal(|ui| {
+                        ui.add_space(f32::from(heading.level.saturating_sub(1)) * 14.0);
+                        let text = if heading.level == 1 {
+                            egui::RichText::new(&heading.text).strong()
+                        } else {
+                            egui::RichText::new(&heading.text)
+                        };
+                        let response = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
+                        if response.clicked() {
+                            jump = Some(heading.text.clone());
+                        }
+                        if let Some(id) = &heading.id {
+                            ui.label(egui::RichText::new(format!("#{id}")).small().weak());
+                        }
+                    });
+                }
+            });
+        if let Some(text) = jump {
+            self.jump_to_heading(&text);
+        }
+    }
+
+    /// Put the source caret on `text` and switch to the source view. The caret
+    /// is applied by `source_pane` on the next frame: requesting focus on a
+    /// widget that is not in this frame's tree would confuse AccessKit.
+    fn jump_to_heading(&mut self, text: &str) {
+        let Some(byte) = find_in_source(&self.doc.text, text) else {
+            self.status = format!("outline: no source line matches {text:?}");
+            return;
+        };
+        let index = self.doc.text[..byte].chars().count();
+        self.pending_caret = Some(index);
+        self.set_view_mode(crate::settings::ViewMode::Source);
+        let (line, column) = line_col(&self.doc.text, index);
+        self.status = format!("outline: {text} is at line {line}, column {column}");
     }
 
     /// The status bar, pinned to the bottom of the working area. Left: the live
@@ -2127,6 +2609,23 @@ impl TextrillApp {
             });
         });
     }
+}
+
+/// Find `needle` in the source, case-insensitively as a fallback. Only accept
+/// the lowercase mapping when it preserves byte length (some Unicode case
+/// mappings do not), so character offsets stay valid.
+fn find_in_source(source: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return None;
+    }
+    if let Some(byte) = source.find(needle) {
+        return Some(byte);
+    }
+    let lower = source.to_lowercase();
+    if lower.len() != source.len() {
+        return None;
+    }
+    lower.find(&needle.to_lowercase())
 }
 
 /// The 1-based (line, column) of a character index in `text`, counting columns

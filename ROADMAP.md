@@ -585,7 +585,7 @@ asset for auditing), **isolate** it:
 
 ```
 Phase 0 (done) ──► Phase 1 (UI shell) (done) ──┬─► Phase 2 (template delivery v1) (done) ──► Phase 3 (sharing/catalog) (done)
-                                        ├─► Phase 4 (preview/editing)
+                                        ├─► Phase 4 (preview/editing) (done)
                                         └─► Phase 5 (options/presets) ──► Phase 6 (distribution) ──► Phase 7 (hardening)
 ```
 
@@ -694,3 +694,18 @@ no network anywhere in the tool (not just the conversion path). See
   The register flag was named **`--catalog_dir`**, not the `--catalog` written
   in §6 above, for symmetry with `--template_dir`. Detached signatures remain
   deferred (hash-only first, per the Risks above).
+
+- v5 — Phase 4 built. The preview is a dependency-free egui subset renderer
+  (`preview.rs`) over the produced HTML: headings, paragraphs, lists (ul/ol/dl),
+  `strong`/`em`/`u`/`code`, `<pre>`, blockquotes, tables with column alignment,
+  links and the header/TOC landmarks; it says it is structure-faithful, not
+  pixel-identical. Bundling `NotoSans-Bold.ttf` (OFL) gives real bold, since
+  egui synthesises italics but not weight. `Open in browser` writes the exact
+  bytes `Save HTML` writes to a temp file and hands them to `xdg-open` — a local
+  launch, never a network request. The outline derives headings and anchors from
+  the same HTML (id, else a nested `<a name>`) and jumps the source caret.
+  The diff view keeps the previous successful output and renders both sides.
+  Engine `notes_error` now reaches the GUI through the worker, so a refused
+  document produces no output and a Problems panel with clickable `line N`
+  entries. `File → Recent files`, palette rows and opt-in session restore
+  (off by default) round out §7.

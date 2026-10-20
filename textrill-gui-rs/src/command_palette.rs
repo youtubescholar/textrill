@@ -31,9 +31,14 @@ pub enum Command {
     ViewSplit,
     ViewSource,
     ViewHtml,
+    ViewPreview,
+    ViewOutline,
+    ViewDiff,
     ResetWindow,
     /// A preset, as an index into [`presets::PRESETS`].
     Preset(usize),
+    /// A recent file, as an index into the app's recent list.
+    OpenRecent(usize),
 }
 
 impl Command {
@@ -52,15 +57,23 @@ impl Command {
             Command::ViewSplit,
             Command::ViewSource,
             Command::ViewHtml,
+            Command::ViewPreview,
+            Command::ViewOutline,
+            Command::ViewDiff,
             Command::ResetWindow,
         ];
         commands.extend((0..presets::PRESETS.len()).map(Command::Preset));
         commands
     }
 
-    /// The text shown in the list, and the text [`Command::matches`] searches.
-    pub fn label(&self) -> String {
+    /// The text shown in the list, and the text
+    /// [`Command::matches_with`] searches, naming recent files by path.
+    pub fn label_with(&self, recents: &[std::path::PathBuf]) -> String {
         match self {
+            Command::OpenRecent(index) => match recents.get(*index) {
+                Some(path) => format!("Open recent: {}", path.display()),
+                None => String::from("Open recent file"),
+            },
             Command::Preset(index) => format!("Preset: {}", presets::PRESETS[*index].name),
             Command::New => String::from("New document"),
             Command::Open => String::from("Open file"),
@@ -74,6 +87,9 @@ impl Command {
             Command::ViewSplit => String::from("View: source and HTML"),
             Command::ViewSource => String::from("View: source only"),
             Command::ViewHtml => String::from("View: HTML only"),
+            Command::ViewPreview => String::from("View: rendered preview"),
+            Command::ViewOutline => String::from("View: outline"),
+            Command::ViewDiff => String::from("View: diff (rendered vs. previous)"),
             Command::ResetWindow => String::from("Reset window size and zoom"),
         }
     }
@@ -83,7 +99,13 @@ impl Command {
     pub fn category(&self) -> &'static str {
         match self {
             Command::Preset(_) => "preset",
-            Command::ViewSplit | Command::ViewSource | Command::ViewHtml => "view",
+            Command::OpenRecent(_) => "file",
+            Command::ViewSplit
+            | Command::ViewSource
+            | Command::ViewHtml
+            | Command::ViewPreview
+            | Command::ViewOutline
+            | Command::ViewDiff => "view",
             Command::New | Command::Open | Command::Save | Command::SaveText | Command::Example => {
                 "file"
             }
@@ -94,8 +116,8 @@ impl Command {
 
     /// Whether `query` selects this command. An empty query matches
     /// everything, so the palette opens showing the whole list.
-    pub fn matches(&self, query: &str) -> bool {
-        fuzzy_match(query, &self.label())
+    pub fn matches_with(&self, query: &str, recents: &[std::path::PathBuf]) -> bool {
+        fuzzy_match(query, &self.label_with(recents))
     }
 }
 
@@ -131,7 +153,11 @@ mod tests {
     #[test]
     fn an_empty_query_matches_every_command() {
         for command in Command::all() {
-            assert!(command.matches(""), "empty query should show {:?}", command);
+            assert!(
+                command.matches_with("", &[]),
+                "empty query should show {:?}",
+                command
+            );
         }
     }
 
@@ -139,7 +165,7 @@ mod tests {
     fn every_command_is_found_by_its_own_label() {
         for command in Command::all() {
             assert!(
-                command.matches(&command.label()),
+                command.matches_with(&command.label_with(&[]), &[]),
                 "{:?} should match its own label",
                 command
             );
@@ -173,15 +199,31 @@ mod tests {
     #[test]
     fn presets_are_spelled_out_by_name() {
         let preset = Command::Preset(0);
-        assert_eq!(preset.label(), "Preset: Plain");
-        assert!(preset.matches("Plain"));
+        assert_eq!(preset.label_with(&[]), "Preset: Plain");
+        assert!(preset.matches_with("Plain", &[]));
+    }
+
+    #[test]
+    fn a_recent_file_is_named_by_its_path() {
+        let recents = vec![std::path::PathBuf::from("/tmp/chapter.txt")];
+        let command = Command::OpenRecent(0);
+        assert_eq!(
+            command.label_with(&recents),
+            "Open recent: /tmp/chapter.txt"
+        );
+        assert!(command.matches_with("chapter", &recents));
+        assert_eq!(command.category(), "file");
+        assert_eq!(
+            Command::OpenRecent(9).label_with(&recents),
+            "Open recent file"
+        );
     }
 
     #[test]
     fn the_list_has_one_entry_per_preset_plus_the_actions() {
         assert_eq!(
             Command::all().len(),
-            13 + presets::PRESETS.len(),
+            16 + presets::PRESETS.len(),
             "the base actions and every preset should be reachable"
         );
         let presets_in_list = Command::all()

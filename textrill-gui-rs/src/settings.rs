@@ -182,6 +182,54 @@ impl Settings {
         self.set("last-dir", &dir.to_string_lossy())
     }
 
+    /// Files recently opened, most recent first. Stored newline-joined so the
+    /// file stays plain INI.
+    pub fn recent_files(&self) -> Vec<PathBuf> {
+        self.get("recent-files")
+            .map(|value| {
+                value
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(PathBuf::from)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Replace the recent-files list.
+    pub fn set_recent_files(&mut self, files: &[PathBuf]) -> Result<(), String> {
+        let value = files
+            .iter()
+            .map(|path| path.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.set("recent-files", &value)
+    }
+
+    /// Whether the last document should be reopened on launch.
+    pub fn restore_session(&self) -> Option<bool> {
+        self.get("restore-session").map(parse_bool)
+    }
+
+    /// Set the opt-in session restore flag.
+    pub fn set_restore_session(&mut self, restore: bool) -> Result<(), String> {
+        self.set("restore-session", if restore { "true" } else { "false" })
+    }
+
+    /// The document session restore would reopen.
+    pub fn session_document(&self) -> Option<PathBuf> {
+        self.get("session-document")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    }
+
+    /// Record the document session restore would reopen.
+    pub fn set_session_document(&mut self, path: &Path) -> Result<(), String> {
+        self.set("session-document", &path.to_string_lossy())
+    }
+
     /// Persist the built-in-browser choice.
     pub fn set_builtin_browser(&mut self, builtin: bool) -> Result<(), String> {
         self.set("builtin-browser", if builtin { "true" } else { "false" })
@@ -418,6 +466,7 @@ pub enum ViewMode {
     Html,
     Preview,
     Outline,
+    Diff,
 }
 
 impl ViewMode {
@@ -429,6 +478,7 @@ impl ViewMode {
             ViewMode::Html => "html",
             ViewMode::Preview => "preview",
             ViewMode::Outline => "outline",
+            ViewMode::Diff => "diff",
         }
     }
 
@@ -440,6 +490,7 @@ impl ViewMode {
             "html" => Some(ViewMode::Html),
             "preview" => Some(ViewMode::Preview),
             "outline" => Some(ViewMode::Outline),
+            "diff" => Some(ViewMode::Diff),
             _ => None,
         }
     }

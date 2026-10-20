@@ -56,8 +56,18 @@ pub struct Outcome {
     pub html: String,
     /// The error message, if the conversion failed.
     pub error: Option<String>,
+    /// A content problem that makes the engine refuse to write output (the
+    /// HTML may still be present, but must not be presented as a result).
+    pub problem: Option<String>,
     /// How long the conversion took.
     pub seconds: f64,
+}
+
+/// One conversion's result before it is turned into an [`Outcome`].
+#[derive(Debug, Clone, Default)]
+struct Conversion {
+    html: String,
+    problem: Option<String>,
 }
 
 struct Job {
@@ -66,7 +76,7 @@ struct Job {
     opts: Options,
 }
 
-type ConvertFn = dyn Fn(&str, &Options) -> String + Send + Sync;
+type ConvertFn = dyn Fn(&str, &Options) -> Conversion + Send + Sync;
 
 /// The state the pool threads share. It lives in its own `Arc`, separate from
 /// [`ConversionWorker`], so a thread owns a reference that cannot dangle if the
@@ -116,9 +126,13 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl ConversionWorker {
     /// A worker that converts with the engine, allowing `max_threads` at once.
     pub fn new(max_threads: usize) -> Arc<Self> {
-        Self::with_converter(max_threads, |text, opts| {
+        Self::with_conversion(max_threads, |text, opts| {
             let mut converter = EngineConverter::new(opts.clone());
-            converter.convert_text(text)
+            let html = converter.convert_text(text);
+            Conversion {
+                html,
+                problem: converter.notes_error.take(),
+            }
         })
     }
 
@@ -130,6 +144,18 @@ impl ConversionWorker {
     pub fn with_converter(
         max_threads: usize,
         converter: impl Fn(&str, &Options) -> String + Send + Sync + 'static,
+    ) -> Arc<Self> {
+        Self::with_conversion(max_threads, move |text, opts| Conversion {
+            html: converter(text, opts),
+            problem: None,
+        })
+    }
+
+    /// As [`ConversionWorker::with_converter`], for a converter that can also
+    /// refuse a document (roadmap §7, workstream 4).
+    fn with_conversion(
+        max_threads: usize,
+        converter: impl Fn(&str, &Options) -> Conversion + Send + Sync + 'static,
     ) -> Arc<Self> {
         let (results, inbox) = mpsc::channel();
         let shared = Arc::new(Shared {
@@ -207,6 +233,7 @@ impl ConversionWorker {
                 generation,
                 html: String::new(),
                 error: Some(SPAWN_ERROR.to_string()),
+                problem: None,
                 seconds: 0.0,
             });
             return generation;
@@ -288,16 +315,18 @@ fn run(converter: &ConvertFn, job: Job) -> Outcome {
     let result = catch_unwind(AssertUnwindSafe(|| converter(&job.text, &job.opts)));
     let seconds = started.elapsed().as_secs_f64();
     match result {
-        Ok(html) => Outcome {
+        Ok(conversion) => Outcome {
             generation: job.generation,
-            html,
+            html: conversion.html,
             error: None,
+            problem: conversion.problem,
             seconds,
         },
         Err(_) => Outcome {
             generation: job.generation,
             html: String::new(),
             error: Some(PANIC_MESSAGE.to_string()),
+            problem: None,
             seconds,
         },
     }
