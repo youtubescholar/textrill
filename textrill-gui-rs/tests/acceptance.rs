@@ -386,6 +386,247 @@ fn a_conversion_reaches_the_preview() {
     assert_ne!(app.status, "converting…", "the status never cleared");
 }
 
+/// The native preview draws the produced HTML with egui's own text: the
+/// heading and the paragraph arrive in the access tree, and the pane offers
+/// the explicit local escape hatch (roadmap §7, workstream 1).
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn the_preview_pane_renders_the_document() {
+    let dir = scratch_dir("preview-pane");
+    let mut app = TextrillApp::with_settings(Settings::with_path(dir.join("textrill.conf")));
+    app.doc.text = "Hello preview\n\n- one\n- two\n".to_string();
+    app.set_view_mode(textrill_gui::settings::ViewMode::Preview);
+    app.request_conversion();
+    wait_for_conversion(&mut app, Duration::from_secs(10));
+
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.set_size(egui::vec2(1000.0, 1400.0));
+    harness.run();
+
+    harness.get_by_label("Preview");
+    harness.get_by_label("Open in browser");
+    harness.get_by_label("Hello preview");
+    harness.get_by_label("one");
+    harness.get_by_label("two");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// "Open in browser" hands over the same bytes "Save HTML" writes; only the
+/// launch differs. The bytes are compared without starting a browser.
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn the_browser_handoff_writes_the_saved_html_bytes() {
+    let dir = scratch_dir("preview-bytes");
+    let mut app = TextrillApp::with_settings(Settings::with_path(dir.join("textrill.conf")));
+    app.doc.text = "Hello\n\nWorld".to_string();
+    app.request_conversion();
+    wait_for_conversion(&mut app, Duration::from_secs(10));
+
+    let preview = app.write_preview_file(&dir).expect("write preview file");
+    let saved = dir.join("saved.html");
+    app.save_html_to(&saved).expect("save html");
+
+    let preview_bytes = std::fs::read(&preview).expect("read preview");
+    let saved_bytes = std::fs::read(&saved).expect("read saved");
+    assert_eq!(preview_bytes, saved_bytes);
+    assert_eq!(preview_bytes, app.output.as_bytes());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The outline lists the produced document's headings, with the section
+/// anchors the engine emitted, and a click puts the source caret on the
+/// heading's text (roadmap §7, workstream 2).
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn the_outline_lists_headings_and_jumps_to_the_source() {
+    let dir = scratch_dir("outline");
+    let mut app = TextrillApp::with_settings(Settings::with_path(dir.join("textrill.conf")));
+    app.doc.text = "Intro.\n\nOne\n===\n\nfirst\n\nSub\n---\n\nsub\n".to_string();
+    app.opts.section = true;
+    app.set_view_mode(textrill_gui::settings::ViewMode::Outline);
+    app.request_conversion();
+    wait_for_conversion(&mut app, Duration::from_secs(10));
+
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.set_size(egui::vec2(1000.0, 1000.0));
+    harness.run();
+
+    harness.get_by_label("Outline");
+    harness.get_by_label("One");
+    harness.get_by_label("Sub");
+    harness.get_by_label("#section_1");
+    harness.get_by_label("#section_1_1");
+
+    harness.get_by_label("Sub").click_accesskit();
+    harness.run();
+
+    let app = harness.state();
+    assert_eq!(
+        app.view_mode(),
+        textrill_gui::settings::ViewMode::Source,
+        "a jump must show the source it jumped to"
+    );
+    assert!(
+        app.status.contains("line 8"),
+        "the status should name the heading's line: {}",
+        app.status
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The rendered diff keeps the previous successful output and shows it beside
+/// the current one (roadmap §7, workstream 3).
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn the_diff_view_shows_the_previous_output_beside_the_current_one() {
+    let dir = scratch_dir("diff");
+    let mut app = TextrillApp::with_settings(Settings::with_path(dir.join("textrill.conf")));
+    app.doc.text = "First version".to_string();
+    app.request_conversion();
+    wait_for_conversion(&mut app, Duration::from_secs(10));
+    let first = app.output.clone();
+
+    app.doc.text = "Second version".to_string();
+    app.request_conversion();
+    wait_for_conversion(&mut app, Duration::from_secs(10));
+    assert_eq!(
+        app.previous_output(),
+        Some(first.as_str()),
+        "the diff must remember the output before the change"
+    );
+
+    app.set_view_mode(textrill_gui::settings::ViewMode::Diff);
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.set_size(egui::vec2(1400.0, 900.0));
+    harness.run();
+
+    harness.get_by_label("Diff");
+    harness.get_by_label("Current");
+    harness.get_by_label("Previous");
+    harness.get_by_label("First version");
+    harness.get_by_label("Second version");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A document the engine refuses produces no output and a list of problems
+/// (roadmap §7, workstream 4).
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn a_refused_document_lists_its_problems_and_writes_no_output() {
+    let dir = scratch_dir("problems");
+    let mut app = TextrillApp::with_settings(Settings::with_path(dir.join("textrill.conf")));
+    app.opts.citations = true;
+    app.doc.text = "See {{textrill:cite:missing}}.\n".to_string();
+    app.request_conversion();
+    wait_for_conversion(&mut app, Duration::from_secs(10));
+
+    assert!(app.output.is_empty(), "a refused document must not render");
+    assert!(
+        !app.problems().is_empty(),
+        "the refusal must be a list of problems"
+    );
+    assert!(
+        app.problems()[0].message.contains("no definition"),
+        "{:?}",
+        app.problems()
+    );
+
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.set_size(egui::vec2(1000.0, 900.0));
+    harness.run();
+    harness.get_by_label("Problems (1)");
+    harness.get_by_label("no output was written because:");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A problem that names a line jumps the source view to it.
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn a_problem_line_jumps_the_source_to_it() {
+    let dir = scratch_dir("problem-jump");
+    let mut app = TextrillApp::with_settings(Settings::with_path(dir.join("textrill.conf")));
+    app.doc.text = "one\ntwo\nthree\n".to_string();
+    app.jump_to_line(3);
+    assert_eq!(app.view_mode(), textrill_gui::settings::ViewMode::Source);
+    assert!(app.status.contains("line 3"), "{}", app.status);
+
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.set_size(egui::vec2(1000.0, 900.0));
+    harness.run();
+    harness.run();
+    assert_eq!(
+        harness.state().cursor(),
+        Some((3, 1)),
+        "the caret should sit at the start of line 3"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Recently opened files are remembered, most recent first and without
+/// duplicates (roadmap §7, workstream 5).
+#[test]
+fn recent_files_are_remembered_in_order() {
+    let dir = scratch_dir("recents");
+    let a = dir.join("a.txt");
+    let b = dir.join("b.txt");
+    std::fs::write(&a, "alpha").unwrap();
+    std::fs::write(&b, "beta").unwrap();
+
+    let mut app = TextrillApp::with_settings(Settings::with_path(dir.join("textrill.conf")));
+    app.load_file(&a).expect("load a");
+    app.load_file(&b).expect("load b");
+    assert_eq!(app.recent_files(), [b.clone(), a.clone()]);
+
+    app.load_file(&a).expect("load a again");
+    assert_eq!(
+        app.recent_files(),
+        [a.clone(), b],
+        "reopening a file moves it to the front instead of duplicating it"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Session restore is opt-in: with the flag off, a remembered document is not
+/// reopened, so nothing can overwrite the fresh buffer.
+#[test]
+fn session_restore_is_opt_in() {
+    let dir = scratch_dir("session-off");
+    let document = dir.join("chapter.txt");
+    std::fs::write(&document, "chapter text").unwrap();
+    let mut settings = Settings::with_path(dir.join("textrill.conf"));
+    settings.set_session_document(&document).unwrap();
+    assert_eq!(settings.restore_session(), None);
+
+    let app = TextrillApp::with_settings(settings);
+    assert!(app.doc.text.is_empty(), "restore must be off by default");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// With the opt-in flag on, the last document is reopened on launch.
+#[test]
+fn session_restore_reopens_the_last_document_when_asked() {
+    let dir = scratch_dir("session-on");
+    let document = dir.join("chapter.txt");
+    std::fs::write(&document, "chapter text").unwrap();
+    let mut settings = Settings::with_path(dir.join("textrill.conf"));
+    settings.set_restore_session(true).unwrap();
+    settings.set_session_document(&document).unwrap();
+
+    let app = TextrillApp::with_settings(settings);
+    assert_eq!(app.doc.text, "chapter text");
+    assert_eq!(app.recent_files().first(), Some(&document));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The window has its controls, and the app draws without panicking.
 #[test]
 fn the_app_exposes_its_controls() {
@@ -1604,7 +1845,7 @@ fn the_file_strip_shows_source_and_destination() {
     let _ = std::fs::remove_file(&conf);
 }
 
-/// The three view modes switch with Ctrl+1/2/3, not only from the View menu.
+/// The view modes switch with Ctrl+1…6, not only from the View menu.
 /// It uses a temporary settings file: switching a mode persists the choice, and
 /// a test must never write to the developer's real configuration.
 #[test]
@@ -1636,6 +1877,18 @@ fn the_view_modes_switch_with_the_keyboard() {
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num1);
     harness.run();
     assert_eq!(harness.state().view_mode(), ViewMode::Split);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num4);
+    harness.run();
+    assert_eq!(harness.state().view_mode(), ViewMode::Preview);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num5);
+    harness.run();
+    assert_eq!(harness.state().view_mode(), ViewMode::Outline);
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num6);
+    harness.run();
+    assert_eq!(harness.state().view_mode(), ViewMode::Diff);
 
     let _ = std::fs::remove_file(&path);
 }

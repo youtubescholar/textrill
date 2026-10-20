@@ -29,6 +29,8 @@ mod json;
 pub mod options_panel;
 pub mod options_store;
 pub mod presets;
+pub mod preview;
+pub mod problems;
 pub mod settings;
 pub mod summary;
 pub mod templates_window;
