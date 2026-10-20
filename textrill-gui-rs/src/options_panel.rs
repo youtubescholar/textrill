@@ -48,6 +48,7 @@ enum TemplateSource {
     Body,
     Document,
     Library,
+    Discovered,
 }
 
 /// Where the document `<title>` comes from.
@@ -396,12 +397,18 @@ fn help_label(ui: &mut Ui, opt: Opt) {
     ui.label(egui::RichText::new(opt.help()).small().weak());
 }
 
-/// Render the three template sources as one choice. The engine refuses a
-/// document with two of `--body_template`, `--document_template` and
+/// Render the template sources as one choice. The engine refuses a document
+/// with two of `--body_template`, `--document_template` and
 /// `--template_library` set, so the panel offers a single radio with one field
 /// instead of three checkboxes that can collide. Only the selected source's
 /// own field is drawn; the others keep their help text visible so the panel
 /// still names every engine option.
+///
+/// `--template_library` holds either a shipped name (`article`, `book`, …) or
+/// a `pack-id:name` address from a discovered pack (roadmap §5.4). Those are
+/// two different mental models — a fixed built-in set versus whatever packs are
+/// installed — so they get two radios: "Shipped" takes a name, "Discovered"
+/// offers the discovered addresses as a menu.
 ///
 /// `enabled` is `false` when `--extract` (Body only) is on, because the engine
 /// refuses a template together with body-only output.
@@ -411,8 +418,13 @@ fn template_source(
     remembered: &mut TemplateSource,
     enabled: bool,
 ) -> bool {
+    let discovered = discovered_addresses(opts);
     let current = if !opts.template_library.is_empty() {
-        TemplateSource::Library
+        if discovered.iter().any(|a| a == &opts.template_library) {
+            TemplateSource::Discovered
+        } else {
+            TemplateSource::Library
+        }
     } else if !opts.document_template.is_empty() {
         TemplateSource::Document
     } else if !opts.template.is_empty() {
@@ -428,11 +440,12 @@ fn template_source(
         if !enabled {
             label.on_hover_text("A template cannot be used with \"Body only\" output.");
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.radio_value(&mut choice, TemplateSource::None, "No template");
             ui.radio_value(&mut choice, TemplateSource::Body, "Body wrapper");
             ui.radio_value(&mut choice, TemplateSource::Document, "Whole document");
             ui.radio_value(&mut choice, TemplateSource::Library, "Shipped");
+            ui.radio_value(&mut choice, TemplateSource::Discovered, "Discovered");
         });
 
         let mut changed = false;
@@ -443,6 +456,10 @@ fn template_source(
             let _ = cli::set_opt(opts, Opt::TemplateLibrary, "");
             changed = true;
         }
+        // A `--template_library` chosen as Shipped but not one of the five
+        // shipped names may still be a valid address the user typed; a move
+        // between the two library radios keeps the field, so only a deliberate
+        // change to a non-library source clears it.
         *remembered = choice;
 
         match choice {
@@ -466,10 +483,73 @@ fn template_source(
                 help_label(ui, Opt::BodyTemplate);
                 help_label(ui, Opt::DocumentTemplate);
             }
+            TemplateSource::Discovered => {
+                changed |= discovered_choice(ui, opts, &discovered);
+                help_label(ui, Opt::BodyTemplate);
+                help_label(ui, Opt::DocumentTemplate);
+            }
         }
         changed
     })
     .inner
+}
+
+/// The `pack-id:name` addresses of every discovered (non-shipped) template,
+/// discovered through the engine's own catalog so the menu is exactly what
+/// `--list_templates` prints.
+fn discovered_addresses(opts: &Options) -> Vec<String> {
+    let catalog = textrill::pack::discover(&opts.search_path());
+    let mut addresses: Vec<String> = catalog
+        .entries
+        .iter()
+        .filter(|e| e.source != textrill::pack::Source::Shipped)
+        .map(textrill::pack::Entry::address)
+        .collect();
+    addresses.sort();
+    addresses
+}
+
+/// The "Discovered" source's field: a menu of the discovered addresses plus a
+/// free-text box, so a pack installed since the window opened can still be
+/// typed. The menu lists nothing when no packs are discovered, which is itself
+/// the answer to "why can I not pick one".
+fn discovered_choice(ui: &mut Ui, opts: &mut Options, discovered: &[String]) -> bool {
+    let current = opts.template_library.clone();
+    let mut chosen = current.clone();
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label("Template");
+        let selected = if current.is_empty() {
+            "(pick a discovered template)"
+        } else {
+            current.as_str()
+        };
+        egui::ComboBox::from_id_salt("discovered-template")
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                if discovered.is_empty() {
+                    ui.weak("No discovered packs. Add one under .textrill/templates.");
+                }
+                for address in discovered {
+                    if ui.selectable_label(current == *address, address).clicked() {
+                        chosen = address.clone();
+                    }
+                }
+            });
+        ui.label(
+            egui::RichText::new(Opt::TemplateLibrary.help())
+                .small()
+                .weak(),
+        );
+    });
+    if chosen != current {
+        if let Err(message) = cli::set_opt(opts, Opt::TemplateLibrary, &chosen) {
+            ui.colored_label(ui.visuals().error_fg_color, message);
+        } else {
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Render the document title as one choice over the engine's precedence:

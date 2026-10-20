@@ -389,130 +389,35 @@ fn verb_new(args: &[String]) -> Outcome {
         Ok(s) => s,
         Err(e) => return usage_error(&e),
     };
-    let leaf = match sanitize(&name) {
-        Some(leaf) => leaf,
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = cwd.join(".textrill").join("templates");
+    let planned = match pack::plan_scaffold(&root, &cwd, &name) {
+        Some(p) => p,
         None => {
             return usage_error(&format!(
                 "new: {name:?} has no usable characters for a pack or file name"
             ))
         }
     };
-    let id = scaffold_id(&leaf);
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let root = cwd.join(".textrill").join("templates").join(&id);
-    if root.exists() {
-        return failure(&format!("new: {} already exists", root.display()));
+    if planned.dir.exists() {
+        return failure(&format!("new: {} already exists", planned.dir.display()));
     }
-    let manifest = scaffold_manifest(&id, &leaf);
-    let html = scaffold_html(&leaf);
-    let write = std::fs::create_dir_all(&root)
-        .map_err(|e| format!("{}: {e}", root.display()))
-        .and_then(|()| {
-            std::fs::write(root.join(pack::MANIFEST), &manifest)
-                .map_err(|e| format!("{}: {e}", root.join(pack::MANIFEST).display()))
-        })
-        .and_then(|()| {
-            std::fs::write(root.join(format!("{leaf}.html")), &html)
-                .map_err(|e| format!("{}: {e}", root.join(format!("{leaf}.html")).display()))
-        });
-    if let Err(e) = write {
+    if let Err(e) = pack::scaffold::write(&planned) {
         return failure(&format!("new: {e}"));
     }
     let out = format!(
         "created {}\n  {}\n  {leaf}.html\n\nid: {id}\nselect it with: \
          --template_library {id}:{leaf}\n",
-        root.display(),
-        pack::MANIFEST
+        planned.dir.display(),
+        pack::MANIFEST,
+        leaf = planned.leaf,
+        id = planned.id,
     );
     Outcome {
         stdout: out.into_bytes(),
         stderr: Vec::new(),
         code: 0,
     }
-}
-
-/// A pack or file name from a user's word: lowercase, with runs of anything
-/// else folded to a single `-`. `None` when nothing usable is left.
-fn sanitize(word: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut last_dash = false;
-    for c in word.chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_lowercase());
-            last_dash = false;
-        } else if !last_dash && !out.is_empty() {
-            out.push('-');
-            last_dash = true;
-        }
-    }
-    while out.ends_with('-') {
-        out.pop();
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
-}
-
-/// A reverse-DNS id for a scaffolded pack, from the working directory's
-/// components (reversed, sanitized, non-numeric) plus `leaf`. An empty prefix
-/// (say, a scratch directory of digits) becomes the label `local`, which keeps
-/// the id valid and readable.
-fn scaffold_id(leaf: &str) -> String {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let mut labels: Vec<String> = cwd
-        .components()
-        .filter_map(|c| match c {
-            std::path::Component::Normal(s) => sanitize(&s.to_string_lossy()),
-            _ => None,
-        })
-        .filter(|s| s.chars().any(|c| c.is_ascii_alphabetic()))
-        .collect();
-    labels.reverse();
-    labels.push(leaf.to_string());
-    if labels.len() < 2 {
-        labels.insert(0, "local".to_string());
-    }
-    labels.join(".")
-}
-
-/// The minimal manifest a scaffolded pack needs, valid against §5.3 with no
-/// edits: one document-model template using only the fixed `title` slot.
-fn scaffold_manifest(id: &str, leaf: &str) -> String {
-    format!(
-        "schema = 1\n\
-         id = {id:?}\n\
-         name = {name:?}\n\
-         version = \"0.1.0\"\n\
-         license = \"GPL-3.0-or-later\"\n\
-         description = \"A scaffolded textrill template pack.\"\n\
-         \n\
-         [[templates]]\n\
-         file = {file:?}\n\
-         model = \"document\"\n",
-        name = format!("{leaf} templates"),
-        file = format!("{leaf}.html"),
-    )
-}
-
-/// A minimal whole-document template: the required `content` slot plus a title,
-/// so it validates and converts out of the box.
-fn scaffold_html(leaf: &str) -> String {
-    format!(
-        "<!DOCTYPE html>\n\
-         <html>\n\
-         <head>\n\
-         <meta charset=\"utf-8\">\n\
-         <title>{{{{textrill:title}}}}</title>\n\
-         </head>\n\
-         <body>\n\
-         <main class=\"{leaf}\">\n\
-         {{{{textrill:content}}}}\n\
-         </main>\n\
-         </body>\n\
-         </html>\n"
-    )
 }
 
 /// `install <PATH>` — a pack directory or a `.tar`, staged beside its
