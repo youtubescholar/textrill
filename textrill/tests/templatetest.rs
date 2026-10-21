@@ -131,6 +131,41 @@ fn toc_slot_places_the_generated_navigation() {
     );
 }
 
+/// The `lang` slot carries `--lang` into a template, so a shipped template no
+/// longer hard-codes `en`; the default is still `en`, byte for byte.
+#[test]
+fn lang_slot_carries_the_declared_language() {
+    let dir = tmpdir();
+    let input = write_file(&dir, "in.txt", SAMPLE);
+
+    let out = run(&["--template_library", "article", &input]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("<html lang=\"en\">"),
+        "the default stays en: {}",
+        out.stdout
+    );
+
+    let template = write_file(
+        &dir,
+        "doc.html",
+        "<!DOCTYPE html>\n<html lang=\"{{textrill:lang}}\">\n<head>{{textrill:head}}</head>\n         <body>\n{{textrill:content}}</body>\n</html>\n",
+    );
+    let out = run(&[
+        "--document_template",
+        &template,
+        "--lang",
+        "zh-Hans",
+        &input,
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("<html lang=\"zh-Hans\">"),
+        "the declared language reaches the template: {}",
+        out.stdout
+    );
+}
+
 #[test]
 fn document_template_owns_the_whole_page() {
     let dir = tmpdir();

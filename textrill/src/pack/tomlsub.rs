@@ -17,7 +17,7 @@
 
 /// One parsed value, by the only four shapes the subset allows.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Value {
+pub(crate) enum Value {
     Str(String),
     Int(i64),
     Bool(bool),
@@ -25,13 +25,13 @@ pub(super) enum Value {
 }
 
 /// Fail with a `line N:` prefix, the one diagnostic shape this reader emits.
-pub(super) fn err<T>(n: usize, message: impl std::fmt::Display) -> Result<T, String> {
+pub(crate) fn err<T>(n: usize, message: impl std::fmt::Display) -> Result<T, String> {
     Err(format!("line {n}: {message}"))
 }
 
 /// Reject anything that is not a bare key: the subset has no dotted keys
 /// (`a.b = …`) and no quoted keys, so both are a hard error.
-pub(super) fn check_key(key: &str, n: usize) -> Result<(), String> {
+pub(crate) fn check_key(key: &str, n: usize) -> Result<(), String> {
     if key.is_empty() {
         return err(n, "missing key before `=`");
     }
@@ -53,7 +53,7 @@ pub(super) fn check_key(key: &str, n: usize) -> Result<(), String> {
 /// Recognise a `[[…]]` header (its leading `[[` already stripped) and return
 /// the section name, refusing trailing text so `[[templates]] junk` cannot
 /// slip through.
-pub(super) fn section_name(rest: &str, n: usize) -> Result<&str, String> {
+pub(crate) fn section_name(rest: &str, n: usize) -> Result<&str, String> {
     let Some(end) = rest.find("]]") else {
         return err(n, "unterminated `[[section]]` header (missing `]]`)");
     };
@@ -66,7 +66,7 @@ pub(super) fn section_name(rest: &str, n: usize) -> Result<&str, String> {
 }
 
 /// After a complete value only whitespace or a comment may follow.
-pub(super) fn end_of_value(text: &str, i: usize, n: usize) -> Result<(), String> {
+pub(crate) fn end_of_value(text: &str, i: usize, n: usize) -> Result<(), String> {
     let rest = text[i..].trim_start();
     if rest.is_empty() || rest.starts_with('#') {
         Ok(())
@@ -78,7 +78,7 @@ pub(super) fn end_of_value(text: &str, i: usize, n: usize) -> Result<(), String>
 impl Value {
     /// Parse the text after a `=` into one of the four allowed shapes,
     /// refusing trailing text so `x = "a" b` cannot slip through.
-    pub(super) fn parse(text: &str, n: usize) -> Result<Value, String> {
+    pub(crate) fn parse(text: &str, n: usize) -> Result<Value, String> {
         let b = text.as_bytes();
         let mut i = 0;
         while i < b.len() && b[i].is_ascii_whitespace() {

@@ -57,11 +57,17 @@ There is no other normalisation — changing `caps_tag` to `B` instead of
 
 ## The differential cross-check (`make diff`)
 
+The Perl runner is not in this directory any more: the differential harness
+lives with the rest of the reference tooling in `parity/` (roadmap §8.5), so
+everything in `tests/corpus/` is runnable without Perl or `make ref`. The
+shared case table (`cases.sh`), fixtures, author goldens and `normalize.py`
+stay here and both runners read them.
+
 ```sh
-make ref          # extract the reference from the tracked tarball (offline)
-make diff         # the differential corpus and author goldens
-tests/corpus/run.sh          # all cases
-tests/corpus/run.sh sample   # one case
+make ref                    # extract the reference from the tracked tarball (offline)
+make diff                   # the differential corpus and author goldens
+parity/corpus/run.sh        # all cases
+parity/corpus/run.sh sample # one case
 ```
 
 Both halves of the doctype are pinned so no case reads a default: the

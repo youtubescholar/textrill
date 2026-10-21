@@ -16,10 +16,10 @@ declare -A NOGOLDEN
 # Perl differential (run.sh) and the reference-free acceptance runner
 # (accept.sh) -- read from here, so a case has exactly one input and moving a
 # fixture cannot make the two runners disagree. They are copies of
-# ref/txt2html-3.0/tfiles and .github/workflows, which are derived from the
-# tracked research/txt2html-3.0.tar.gz; see tfiles/PROVENANCE.md.
-FIX="${FIX:-$HERE/tfiles}"
-WF="${WF:-$HERE/workflows}"
+# parity/ref/txt2html-3.0/tfiles and .github/workflows, which are derived from
+# the tracked parity/txt2html-3.0.tar.gz; see tfiles/PROVENANCE.md.
+FIX="${FIX:-${CORPUS:-$HERE}/tfiles}"
+WF="${WF:-${CORPUS:-$HERE}/workflows}"
 
 NOGOLDEN[custom-headers2]='golden records section_3..5: upstream t/20tfiles.t reuses one $conv for all cases and never resets the heading-anchor counter, so custom-headers consumed 1..2. This runner builds a fresh converter per case, which is what a fresh Perl run does, and the port matches that exactly'
 NOGOLDEN[pre2]='golden is 141 bytes, converter output is 140: the only difference is a trailing newline the converter never emits. Upstream compare() strips CR/LF per line and cannot see it'
@@ -235,14 +235,14 @@ INPUT[link_in_url]="$WF/test2.txt"
 # BORDER table.
 EXTRA[table_type_replace]='extract=>1,make_tables=>1,table_type=>{DELIM=>0}'
 CLI[table_type_replace]='--extract --make_tables --table_type DELIM=0'
-INPUT[table_type_replace]="$HERE/inputs/table_type.txt"
+INPUT[table_type_replace]="${CORPUS:-$HERE}/inputs/table_type.txt"
 
 # And the positive control: naming BORDER=1 still builds a border table, so
 # the test above is not passing merely because table detection was switched
 # off wholesale.
 EXTRA[table_type_named]='extract=>1,make_tables=>1,table_type=>{BORDER=>1}'
 CLI[table_type_named]='--extract --make_tables --table_type BORDER=1'
-INPUT[table_type_named]="$HERE/inputs/border_table.txt"
+INPUT[table_type_named]="${CORPUS:-$HERE}/inputs/border_table.txt"
 
 # An explicit-quote PRE block swallowed everything after its first blank line:
 # the continuation text is buffered by split_end_explicit_preformat and only
@@ -257,7 +257,7 @@ INPUT[table_type_named]="$HERE/inputs/border_table.txt"
 # makes the next one loud. See that function for why the count could not catch it.
 EXTRA[pre_explicit]='extract=>1,use_preformat_marker=>1'
 CLI[pre_explicit]='--extract --use_preformat_marker'
-INPUT[pre_explicit]="$HERE/inputs/pre_explicit.txt"
+INPUT[pre_explicit]="${CORPUS:-$HERE}/inputs/pre_explicit.txt"
 
 # --- a paragraph far larger than any real-world use of the tool ----------
 #
@@ -269,12 +269,12 @@ INPUT[pre_explicit]="$HERE/inputs/pre_explicit.txt"
 # these in about a second, so the port must as well.
 EXTRA[huge_paragraph]='extract=>1'
 CLI[huge_paragraph]='--extract'
-INPUT[huge_paragraph]="$HERE/inputs/big_para.txt"
+INPUT[huge_paragraph]="${CORPUS:-$HERE}/inputs/big_para.txt"
 
 # Same scale, CRLF line endings, to keep the CR-chopping path in the test.
 EXTRA[huge_paragraph_crlf]='extract=>1'
 CLI[huge_paragraph_crlf]='--extract'
-INPUT[huge_paragraph_crlf]="$HERE/inputs/big_para_crlf.txt"
+INPUT[huge_paragraph_crlf]="${CORPUS:-$HERE}/inputs/big_para_crlf.txt"
 
 # --- rejected delimiter candidate must be retried, not swallowed ----------
 #
@@ -285,7 +285,7 @@ INPUT[huge_paragraph_crlf]="$HERE/inputs/big_para_crlf.txt"
 # link, which is what selects the in-link-context substitution path.
 EXTRA[delim_retry]='table_type=>{ALIGN=>0},preformat_trigger_lines=>2'
 CLI[delim_retry]='--table_type ALIGN=0 --preformat_trigger_lines 2'
-INPUT[delim_retry]="$HERE/inputs/delim_retry.txt"
+INPUT[delim_retry]="${CORPUS:-$HERE}/inputs/delim_retry.txt"
 
 # --- explicit <pre> spanning a blank line, end marker in its own para ------
 #
@@ -306,7 +306,7 @@ INPUT[delim_retry]="$HERE/inputs/delim_retry.txt"
 # point of the case is a byte difference the port used to get wrong.
 EXTRA[pre_explicit_blank]='use_preformat_marker=>1'
 CLI[pre_explicit_blank]='--use_preformat_marker'
-INPUT[pre_explicit_blank]="$HERE/inputs/pre_explicit_blank.txt"
+INPUT[pre_explicit_blank]="${CORPUS:-$HERE}/inputs/pre_explicit_blank.txt"
 
 # --- option values interpolated into the document are escaped --------------
 #
@@ -323,7 +323,7 @@ INPUT[pre_explicit_blank]="$HERE/inputs/pre_explicit_blank.txt"
 # known-open checks for.
 EXTRA[opt_injection]='title=>"</title><script>alert(3)</script>",style_url=>"x.css\" onload=\"alert(4)"'
 CLI[opt_injection]='--title "plain" --style_url "plain.css"'
-INPUT[opt_injection]="$HERE/inputs/pre_explicit_blank.txt"
+INPUT[opt_injection]="${CORPUS:-$HERE}/inputs/pre_explicit_blank.txt"
 NOGOLDEN[opt_injection]='differential must fail: deliberate divergence: the reference interpolates --title and --style_url into the document unescaped, which is a live XSS. The port escapes them, so a byte comparison against the reference must fail and cannot be the oracle; the oracle is the XML well-formedness check in proptest.py'
 
 # --- the URL scheme policy on generated hrefs ------------------------------
@@ -350,7 +350,7 @@ NOGOLDEN[opt_injection]='differential must fail: deliberate divergence: the refe
 # pattern-matching a substring rather than reading a URL.
 EXTRA[url_scheme]='extract=>1,make_links=>1'
 CLI[url_scheme]='--extract --make_links'
-INPUT[url_scheme]="$HERE/inputs/url_scheme.txt"
+INPUT[url_scheme]="${CORPUS:-$HERE}/inputs/url_scheme.txt"
 NOGOLDEN[url_scheme]='differential must fail: a deliberate divergence where the port is unambiguously better. The reference emits whatever scheme a <URL:...> tag names, so this input came out of it with a live href="javascript:alert(document.domain)" and a live data: URL. The port refuses every scheme outside --allowed_url_schemes, unwraps the anchor and keeps the text, so a byte comparison against the reference must fail and cannot be the oracle. The oracle is tests/urlschemetest.rs, which asserts no refused scheme survives, that the words are kept, and that the relative href the label spelling produces is left alone'
 
 # --- the definition-list trigger is a real, pinned shape now ---
@@ -364,7 +364,7 @@ NOGOLDEN[url_scheme]='differential must fail: a deliberate divergence where the 
 # an ordered list, so the one-line form is not turned into a definition.
 EXTRA[definitions]='extract=>1'
 CLI[definitions]='--extract'
-INPUT[definitions]="$HERE/inputs/definitions.txt"
+INPUT[definitions]="${CORPUS:-$HERE}/inputs/definitions.txt"
 
 # --- the 0x80-0x9F range, where the fallback decode used to be wrong --------
 #
@@ -386,7 +386,7 @@ INPUT[definitions]="$HERE/inputs/definitions.txt"
 # decoded code points, which are checked by cargo test and cannot silently rot.
 EXTRA[cp1252_smart]='make_tables=>0,xhtml=>1'
 CLI[cp1252_smart]='--no-make_tables --xhtml'
-INPUT[cp1252_smart]="$HERE/inputs/cp1252_smart.txt"
+INPUT[cp1252_smart]="${CORPUS:-$HERE}/inputs/cp1252_smart.txt"
 NOGOLDEN[cp1252_smart]='differential must fail: the reference emits CP1252 bytes verbatim and relies on the browser guessing CP1252; the port decodes CP1252 and demoronize rewrites the smart punctuation to ASCII. Both render the same text, the bytes differ, so a byte comparison cannot be the oracle. The oracle is tests/encodingtest.rs, which asserts the decoded code points and that no C1 control survives into the output'
 
 # --- wide characters in an aligned table -----------------------------------
@@ -404,7 +404,7 @@ NOGOLDEN[cp1252_smart]='differential must fail: the reference emits CP1252 bytes
 # oracle.
 EXTRA[cjk_table]='make_tables=>1,xhtml=>1'
 CLI[cjk_table]='--make_tables --xhtml'
-INPUT[cjk_table]="$HERE/inputs/cjk_table.txt"
+INPUT[cjk_table]="${CORPUS:-$HERE}/inputs/cjk_table.txt"
 NOGOLDEN[cjk_table]='differential must fail: Perl demoronizes each byte of a multi-byte UTF-8 sequence independently and mangles the CJK cell into Latin-1 entities; the port decodes UTF-8 first and the text survives. Deliberate divergence where the port is better, so a byte comparison against the reference must fail and cannot be the oracle; the oracle is the port preserving the cell text, asserted in tests/encodingtest.rs'
 
 # --- input encodings the reference has no notion of -------------------------
@@ -434,15 +434,15 @@ NOGOLDEN[cjk_table]='differential must fail: Perl demoronizes each byte of a mul
 # encoding the file actually is.
 EXTRA[cp1251_cyrillic]='make_tables=>0,xhtml=>1'
 CLI[cp1251_cyrillic]='--no-make_tables --xhtml'
-INPUT[cp1251_cyrillic]="$HERE/inputs/cp1251_cyrillic.txt"
+INPUT[cp1251_cyrillic]="${CORPUS:-$HERE}/inputs/cp1251_cyrillic.txt"
 
 EXTRA[koi8r_cyrillic]='make_tables=>0,xhtml=>1'
 CLI[koi8r_cyrillic]='--no-make_tables --xhtml'
-INPUT[koi8r_cyrillic]="$HERE/inputs/koi8r_cyrillic.txt"
+INPUT[koi8r_cyrillic]="${CORPUS:-$HERE}/inputs/koi8r_cyrillic.txt"
 
 EXTRA[cp1253_greek]='make_tables=>0,xhtml=>1'
 CLI[cp1253_greek]='--no-make_tables --xhtml'
-INPUT[cp1253_greek]="$HERE/inputs/cp1253_greek.txt"
+INPUT[cp1253_greek]="${CORPUS:-$HERE}/inputs/cp1253_greek.txt"
 
 # The same three files, read with the encoding named. These *are* declared
 # NOGOLDEN, because now the port decodes correctly and the reference still emits
@@ -450,17 +450,17 @@ INPUT[cp1253_greek]="$HERE/inputs/cp1253_greek.txt"
 # asserting the recovered text rather than any comparison against Perl.
 EXTRA[cp1251_named]='make_tables=>0,xhtml=>1'
 CLI[cp1251_named]='--no-make_tables --xhtml --encoding cp1251'
-INPUT[cp1251_named]="$HERE/inputs/cp1251_cyrillic.txt"
+INPUT[cp1251_named]="${CORPUS:-$HERE}/inputs/cp1251_cyrillic.txt"
 NOGOLDEN[cp1251_named]='differential must fail: the same CP1251 file as cp1251_cyrillic, read with --encoding cp1251. The reference has no encoding option and emits the bytes for a browser to guess, so it cannot produce this output at all. Deliberate divergence where the port is unambiguously better: the Russian text survives. The oracle is tests/encodingtest.rs asserting the recovered text, not a byte comparison against a reference that cannot read the file'
 
 EXTRA[koi8r_named]='make_tables=>0,xhtml=>1'
 CLI[koi8r_named]='--no-make_tables --xhtml --encoding koi8-r'
-INPUT[koi8r_named]="$HERE/inputs/koi8r_cyrillic.txt"
+INPUT[koi8r_named]="${CORPUS:-$HERE}/inputs/koi8r_cyrillic.txt"
 NOGOLDEN[koi8r_named]='differential must fail: KOI8-R named explicitly. Note CP1251 and KOI8-R disagree about nearly every byte above 0x80, so naming the wrong one is not a small error -- which is why the default is unchanged rather than changed to a guess. Oracle is tests/encodingtest.rs'
 
 EXTRA[cp1253_named]='make_tables=>0,xhtml=>1'
 CLI[cp1253_named]='--no-make_tables --xhtml --encoding cp1253'
-INPUT[cp1253_named]="$HERE/inputs/cp1253_greek.txt"
+INPUT[cp1253_named]="${CORPUS:-$HERE}/inputs/cp1253_greek.txt"
 NOGOLDEN[cp1253_named]='differential must fail: Greek in CP1253 named explicitly. CP1253 leaves 17 of its 128 high bytes undefined and each is read as the Latin-1 C1 control, the same total-and-lossless rule the CP1252 fallback uses. Oracle is tests/encodingtest.rs'
 
 # UTF-16 with no BOM, in both endiannesses.  This is why the NUL-alignment
@@ -470,12 +470,12 @@ NOGOLDEN[cp1253_named]='differential must fail: Greek in CP1253 named explicitly
 # survives.
 EXTRA[utf16le_ascii]='make_tables=>0,xhtml=>1'
 CLI[utf16le_ascii]='--no-make_tables --xhtml'
-INPUT[utf16le_ascii]="$HERE/inputs/utf16le_ascii.txt"
+INPUT[utf16le_ascii]="${CORPUS:-$HERE}/inputs/utf16le_ascii.txt"
 NOGOLDEN[utf16le_ascii]='differential must fail: BOM-less UTF-16LE of ASCII prose, which is also valid UTF-8. The reference reads raw bytes and the port used to do the same, so both emitted NUL characters between every letter; the port now detects the NUL alignment. A byte comparison cannot be the oracle because the reference has no UTF-16 concept at all -- the oracle is tests/encodingtest.rs'
 
 EXTRA[utf16be_ascii]='make_tables=>0,xhtml=>1'
 CLI[utf16be_ascii]='--no-make_tables --xhtml'
-INPUT[utf16be_ascii]="$HERE/inputs/utf16be_ascii.txt"
+INPUT[utf16be_ascii]="${CORPUS:-$HERE}/inputs/utf16be_ascii.txt"
 NOGOLDEN[utf16be_ascii]='differential must fail: BOM-less UTF-16BE, same class as utf16le_ascii with the NULs on the other alignment. Oracle is tests/encodingtest.rs'
 
 # UTF-16 *with* a BOM.  Here the reference's behaviour is not a defect but a
@@ -484,5 +484,5 @@ NOGOLDEN[utf16be_ascii]='differential must fail: BOM-less UTF-16BE, same class a
 # have no meaning at all.
 EXTRA[utf16le_bom]='make_tables=>0,xhtml=>1'
 CLI[utf16le_bom]='--no-make_tables --xhtml'
-INPUT[utf16le_bom]="$HERE/inputs/utf16le_bom.txt"
+INPUT[utf16le_bom]="${CORPUS:-$HERE}/inputs/utf16le_bom.txt"
 NOGOLDEN[utf16le_bom]='differential must fail: UTF-16LE with a byte-order mark and Cyrillic text. The port reads the mark as a declaration and consumes it; the reference passes FF FE through as bytes. Oracle is tests/encodingtest.rs asserting the text and that U+FEFF does not lead the output'

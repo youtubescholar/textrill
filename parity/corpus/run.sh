@@ -1,30 +1,36 @@
 #!/bin/bash
 # Corpus runner: per-file isolated comparison reference(Perl) vs port(Rust).
-set -u
-# Directory holding this script, so regression fixtures in tests/corpus/inputs
-# can be referenced by absolute path from cases.sh.
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Every path below used to be the absolute path of the machine that
-# happened to develop this port, so a fresh clone had no working differential
-# gate at all: `git archive HEAD` contains no ref/ tree, because ref/ is
-# gitignored, and the defaults pointed into a home directory that does not exist
-# elsewhere. They are now derived from $HERE, and every one of them is still
-# overridable from the environment, so nothing here is load-bearing.
 #
-# $HERE is .../textrill/tests/corpus, so ROOT is the crate and REPO the
-# checkout holding ref/ and the tracked upstream archives.
-ROOT="$(cd "$HERE/../.." && pwd)"
+# This is the Perl half of the corpus and lives under parity/ with the rest of
+# the reference harness (roadmap §8.5). The Rust gate (accept.sh, `make
+# accept`) never runs it; `make diff` reaches it on demand.
+set -u
+# Directory holding this script.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The shared corpus -- case definitions, fixtures, author goldens and the
+# normaliser -- stays with the Rust crate, because the reference-free
+# acceptance runner reads the same files and a case must have exactly one
+# input set. Every path below is derived from this checkout and overridable
+# from the environment, so nothing here is load-bearing.
+CORPUS="${CORPUS:-$(cd "$HERE/../../textrill/tests/corpus" && pwd)}"
+# cases.sh builds its fixture paths from $CORPUS (or the acceptance runner's
+# $HERE); the environment copy reaches it that way.
+export CORPUS
+# ROOT is the crate, REPO the checkout holding parity/.
+ROOT="$(cd "$CORPUS/../.." && pwd)"
 REPO="$(cd "$ROOT/.." && pwd)"
 # `make ref` materialises the reference from txt2html-3.0.tar.gz and writes the
-# YAML::Syck stub; see the `ref` target in the top-level Makefile.
-REFDIR="${REFDIR:-$REPO/ref/txt2html-3.0}"
-STUBS="${STUBS:-$REPO/ref/stubs}"
+# YAML::Syck stub; see the `ref` target in parity/Makefile (wrapped at the top
+# level as `make ref`).
+REFDIR="${REFDIR:-$REPO/parity/ref/txt2html-3.0}"
+STUBS="${STUBS:-$REPO/parity/ref/stubs}"
 MINE="${MINE:-$ROOT/target/debug/textrill}"
 # The author goldens are tracked copies under tests/corpus/tfiles, not the
-# derived `ref/tfiles`, so the golden half of this run needs no `make ref` and
-# cannot drift from the copy the reference-free acceptance runner reads. The
-# reference *module* still does: it is the oracle, and it comes from REFDIR.
-GOLDEN_AUTHOR="${GOLDEN_AUTHOR:-$HERE/tfiles}"
+# derived `parity/ref/tfiles`, so the golden half of this run needs no
+# `make ref` and cannot drift from the copy the reference-free acceptance
+# runner reads. The reference *module* still does: it is the oracle, and it
+# comes from REFDIR.
+GOLDEN_AUTHOR="${GOLDEN_AUTHOR:-$CORPUS/tfiles}"
 # Scratch directory for the two output sets. Derived from TMPDIR rather than
 # hardcoded, so it works on a machine that keeps its temporary files elsewhere.
 RUNDIR="${RUNDIR:-${TMPDIR:-/tmp}/textrill-corpus}"
@@ -45,8 +51,8 @@ rm -rf "$RUNDIR/ref" "$RUNDIR/mine"
 mkdir -p "$RUNDIR"/ref "$RUNDIR"/mine "$RUNDIR"/golden
 export PERL5LIB="${PERL5LIB:-$STUBS:$_refdir_lib}"
 
-# The reference is a Perl checkout that has to be built from the tracked archive
-# by `make ref`; it is not in version control.  Without it the harness cannot
+# The reference is a Perl checkout that has to be built from the tracked
+# archive by `make ref`; without it the harness cannot run.  Without it the harness cannot
 # run, and the failure it used to produce was silent: both halves of every case
 # failed identically and cmp.py compared two empty files, so the corpus reported
 # a clean pass. Refuse to start, loudly, rather than report that.
@@ -228,7 +234,7 @@ run_case() {
   # Done here rather than inside cmp.py and golden_check separately so there is
   # exactly one place the divergence is declared, and one place to audit.
   local _norm_n
-  _norm_n=$(python3 "$HERE/normalize.py" \
+  _norm_n=$(python3 "$CORPUS/normalize.py" \
     "$RUNDIR/ref/$stem.html" "$RUNDIR/mine/$stem.html" 2>/dev/null | head -1)
   NORMALISED=$(( NORMALISED + ${_norm_n:-0} ))
 }
@@ -274,7 +280,7 @@ golden_check() {
   local gn="$RUNDIR/golden/$stem.html"
   cp "$g" "$gn"
   local _gn_n
-  _gn_n=$(python3 "$HERE/normalize.py" "$gn" 2>/dev/null | head -1)
+  _gn_n=$(python3 "$CORPUS/normalize.py" "$gn" 2>/dev/null | head -1)
   NORMALISED=$(( NORMALISED + ${_gn_n:-0} ))
   if LC_ALL=C cmp -s "$gn" "$RUNDIR/mine/$stem.html"; then
     echo "  GOLDEN pass"
@@ -286,7 +292,7 @@ golden_check() {
   GOLDEN_N=$((GOLDEN_N + 1))
 }
 
-CASES="${CASES:-$HERE/cases.sh}"
+CASES="${CASES:-$CORPUS/cases.sh}"
 # shellcheck source=tests/corpus/cases.sh
 # shellcheck disable=SC1091
 . "$CASES"
@@ -296,7 +302,7 @@ CASES="${CASES:-$HERE/cases.sh}"
 # is the failure they exist to catch.
 # shellcheck source=tests/corpus/lib.sh
 # shellcheck disable=SC1091
-. "$HERE/lib.sh"
+. "$CORPUS/lib.sh"
 
 if [ "$#" -gt 0 ]; then
   stem="$1"

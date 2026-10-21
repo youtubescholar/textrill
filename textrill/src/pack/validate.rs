@@ -49,6 +49,8 @@ pub struct ValidTemplate {
 pub struct Var {
     pub name: String,
     pub required: bool,
+    /// Value substituted when the caller passes no `--var` for this name.
+    pub default: Option<String>,
 }
 
 /// A pack that passed every check: the normalized form, with no `Option`
@@ -182,6 +184,7 @@ pub fn validate_template(root: &Path, entry: &TemplateEntry) -> Result<ValidTemp
         vars.push(Var {
             name,
             required: v.required.unwrap_or(false),
+            default: v.default.clone(),
         });
     }
     for (i, v) in vars.iter().enumerate() {
@@ -709,8 +712,27 @@ mod tests {
             vec![Var {
                 name: "author".to_string(),
                 required: true,
+                default: None,
             }]
         );
+    }
+
+    #[test]
+    fn a_var_default_is_carried_through_validation() {
+        let d = scratch("var-default");
+        write(
+            &d,
+            MANIFEST,
+            &format!("{GOOD}\n[[templates.vars]]\nname = \"author\"\ndefault = \"Anon\"\n"),
+        );
+        write(
+            &d,
+            "good.html",
+            "<p>{{textrill:var:author}}</p>{{textrill:content}}",
+        );
+        let v = load(&d).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(v.templates[0].vars[0].default.as_deref(), Some("Anon"));
     }
 
     #[test]

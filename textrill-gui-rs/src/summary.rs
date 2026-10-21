@@ -22,18 +22,16 @@
 
 use textrill::options::Options;
 
-use crate::presets::Preset;
-
 /// Describe the current settings as a short, multi-line paragraph.
 ///
 /// `preset` and `edited` name the chosen starting point and whether the options
 /// have been changed away from its bundle, so the summary agrees with the
 /// preset strip above it.
-pub fn describe(opts: &Options, preset: &Preset, edited: bool) -> String {
+pub fn describe(opts: &Options, preset_name: &str, edited: bool) -> String {
     let preset_line = if edited {
-        format!("Preset: {} (edited).", preset.name)
+        format!("Preset: {preset_name} (edited).")
     } else {
-        format!("Preset: {}.", preset.name)
+        format!("Preset: {preset_name}.")
     };
     [
         preset_line,
@@ -85,7 +83,7 @@ fn title_phrase(opts: &Options) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::presets;
+    use crate::presets::{self, Preset};
 
     fn book() -> &'static Preset {
         presets::get("book").expect("book preset")
@@ -93,7 +91,7 @@ mod tests {
 
     #[test]
     fn a_plain_document_says_so() {
-        let text = describe(&Options::default(), presets::default_preset(), false);
+        let text = describe(&Options::default(), presets::default_preset().name, false);
         assert!(text.contains("Preset: Plain."), "{text}");
         assert!(text.contains("no template"), "{text}");
         assert!(text.contains("as a single page"), "{text}");
@@ -102,7 +100,7 @@ mod tests {
 
     #[test]
     fn a_preset_is_named_and_its_bundle_described() {
-        let text = describe(&book().options(), book(), false);
+        let text = describe(&book().options(), book().name, false);
         assert!(text.contains("Preset: Book."), "{text}");
         assert!(text.contains("shipped \"book\" template"), "{text}");
         assert!(text.contains("table of contents"), "{text}");
@@ -110,7 +108,7 @@ mod tests {
 
     #[test]
     fn editing_away_from_the_preset_is_visible_in_the_summary() {
-        let text = describe(&book().options(), book(), true);
+        let text = describe(&book().options(), book().name, true);
         assert!(text.contains("Preset: Book (edited)."), "{text}");
     }
 
@@ -121,7 +119,7 @@ mod tests {
             template: "wrapper.html".to_string(),
             ..Options::default()
         };
-        let text = describe(&opts, presets::default_preset(), false);
+        let text = describe(&opts, presets::default_preset().name, false);
         assert!(text.contains("your template file wrapper.html"), "{text}");
         assert!(
             text.contains("Title: \u{201c}My Document\u{201d}."),

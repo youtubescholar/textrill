@@ -228,8 +228,13 @@ pub struct TextrillApp {
     /// The key of the chosen preset ([`crate::presets`]). A starting point, not
     /// a mode: the options it set are the live ones, and the window shows a
     /// "Modified" marker as soon as they are edited away from the preset's
-    /// bundle.
-    preset: &'static str,
+    /// bundle. Owned because a user preset's key comes from a file.
+    preset: String,
+    /// The user's own presets, read from `presets.toml` (roadmap §8.1) and
+    /// offered in the strip beside the shipped starting points. The engine
+    /// reads the same file for `--preset`, so both paths apply the same
+    /// bundles.
+    user_presets: Vec<textrill::presets::Preset>,
     /// The source/preview split ratio: the fraction of the working area given
     /// to the source pane, the rest to the preview. Clamped in the UI.
     pub split_ratio: f32,
@@ -324,7 +329,8 @@ impl TextrillApp {
             use_builtin_browser: !native_dialog_available,
             native_dialog_available,
             in_flatpak,
-            preset: presets::default_preset().key,
+            preset: presets::default_preset().key.to_string(),
+            user_presets: Vec::new(),
             file_browser: None,
             last_dir: None,
             split_ratio: 0.5,
@@ -344,6 +350,9 @@ impl TextrillApp {
             palette_focus: false,
             palette_search_focused: false,
         };
+        // Presets load before the stored key resolves: a stored user preset
+        // key must find its entry rather than falling back to Plain.
+        app.load_user_presets_default();
         app.restore_settings();
         app.restore_last_document();
         app
@@ -422,31 +431,105 @@ impl TextrillApp {
     }
 
     /// The chosen preset's key, for tests and the settings store.
-    pub fn preset_key(&self) -> &'static str {
-        self.preset
+    pub fn preset_key(&self) -> &str {
+        &self.preset
     }
 
-    /// The chosen preset. An unknown stored key falls back to Plain, so a
-    /// hand-edited settings file can never leave the window presetting to
-    /// nothing.
-    pub fn current_preset(&self) -> &'static Preset {
-        presets::get(self.preset).unwrap_or_else(presets::default_preset)
+    /// The user presets read from `presets.toml` (empty when the file is
+    /// missing or refused, in which case the refusal is the window's status).
+    pub fn user_presets(&self) -> &[textrill::presets::Preset] {
+        &self.user_presets
+    }
+
+    /// Read the user presets file from its config location. A broken file is
+    /// reported in the status line and yields no presets rather than a
+    /// half-applied strip.
+    pub fn load_user_presets_default(&mut self) {
+        match textrill::presets::load() {
+            Ok(list) => self.user_presets = list,
+            Err(error) => {
+                self.user_presets.clear();
+                self.status = format!("presets: {error}");
+            }
+        }
+    }
+
+    /// Read `path` as the user presets file, replacing the current list.
+    /// Tests use this to point at a scratch file.
+    pub fn load_user_presets(&mut self, path: &std::path::Path) -> Result<(), String> {
+        self.user_presets = textrill::presets::load_from(path)?;
+        Ok(())
+    }
+
+    /// The chosen preset's name: the built-in one, the user preset's own name,
+    /// or Plain when the key resolves to neither (a deleted file, a
+    /// hand-edited settings line).
+    pub fn current_preset_name(&self) -> String {
+        if let Some(builtin) = presets::get(&self.preset) {
+            return builtin.name.to_string();
+        }
+        self.user_presets
+            .iter()
+            .find(|p| p.key == self.preset)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| presets::default_preset().name.to_string())
+    }
+
+    /// The option bundle the chosen preset stands for: the built-in's, the
+    /// user preset's, or Plain's, so the Modified marker compares against
+    /// whatever the key actually names.
+    pub fn current_preset_options(&self) -> Options {
+        if let Some(builtin) = presets::get(&self.preset) {
+            return builtin.options();
+        }
+        self.user_presets
+            .iter()
+            .find(|p| p.key == self.preset)
+            .map(|p| p.options.clone())
+            .unwrap_or_else(|| presets::default_preset().options())
     }
 
     /// Whether the live options differ from the chosen preset's bundle. This is
     /// the "Modified" marker; a preset is a starting point, so editing any
     /// option away from it is normal, not an error.
     pub fn preset_is_modified(&self) -> bool {
-        !presets::same_options(&self.opts, &self.current_preset().options())
+        !presets::same_options(&self.opts, &self.current_preset_options())
     }
 
     /// Adopt `preset`: write its option bundle and remember the choice. The
-    /// options it sets stay editable, so this is a starting point rather than a
+    /// options it set stay editable, so this is a starting point rather than a
     /// lock.
     pub fn apply_preset(&mut self, preset: &Preset) {
-        self.opts = preset.options();
-        self.preset = preset.key;
-        if let Err(error) = self.settings.set_preset(preset.key) {
+        self.adopt_preset(preset.key, preset.options());
+    }
+
+    /// Adopt a user preset by key, exactly as `--preset` would: the bundle
+    /// replaces the option state, so the GUI and the command line agree.
+    pub fn apply_user_preset(&mut self, key: &str) -> Result<(), String> {
+        let options = self
+            .user_presets
+            .iter()
+            .find(|p| p.key == key)
+            .map(|p| p.options.clone())
+            .ok_or_else(|| {
+                format!(
+                    "no preset `{key}`; the file has: {}",
+                    self.user_presets
+                        .iter()
+                        .map(|p| p.key.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?;
+        self.adopt_preset(key, options);
+        Ok(())
+    }
+
+    /// The shared adopt behind both preset kinds.
+    fn adopt_preset(&mut self, key: &str, options: Options) {
+        self.opts = options;
+        self.preset = key.to_string();
+        if let Err(error) = self.settings.set_preset(key) {
             self.status = format!("could not save settings: {error}");
         }
         self.schedule_convert(Instant::now());
@@ -520,10 +603,15 @@ impl TextrillApp {
         }
         self.last_dir = self.settings.last_dir();
         if let Some(key) = self.settings.preset() {
-            // An unreadable key is Plain, never a dangling choice.
-            self.preset = presets::get(&key)
-                .unwrap_or_else(presets::default_preset)
-                .key;
+            // An unreadable key is Plain, never a dangling choice: unknown
+            // here means neither a built-in nor a user preset's key.
+            let known =
+                presets::get(&key).is_some() || self.user_presets.iter().any(|p| p.key == key);
+            self.preset = if known {
+                key
+            } else {
+                presets::default_preset().key.to_string()
+            };
         }
         if let Some(ratio) = self.settings.split_ratio() {
             self.split_ratio = ratio;
@@ -1659,6 +1747,25 @@ impl TextrillApp {
                     self.apply_preset(preset);
                 }
             }
+            // The user's own presets, from presets.toml, beside the shipped
+            // ones: the same file --preset reads.
+            let user: Vec<(String, String, String)> = self
+                .user_presets
+                .iter()
+                .map(|p| (p.key.clone(), p.name.clone(), p.description.clone()))
+                .collect();
+            for (key, name, description) in &user {
+                let chosen = self.preset == *key;
+                if ui
+                    .selectable_label(chosen, name)
+                    .on_hover_text(description)
+                    .clicked()
+                {
+                    if let Err(error) = self.apply_user_preset(key) {
+                        self.status = error;
+                    }
+                }
+            }
             if self.preset_is_modified() {
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new("Modified").small().weak())
@@ -2063,7 +2170,7 @@ impl TextrillApp {
                 .show(ui, |ui| {
                     ui.label(summary::describe(
                         &self.opts,
-                        self.current_preset(),
+                        &self.current_preset_name(),
                         self.preset_is_modified(),
                     ));
                 });

@@ -88,6 +88,43 @@ The link dictionary follows the same rule: `~/.textrill.dict` if it exists,
 otherwise `~/.txt2html.dict` (`./.textrill.dict` / `./.txt2html.dict` when
 `HOME` is unset).
 
+## Presets
+
+A preset is a named bundle of options, stored in
+`$XDG_CONFIG_HOME/textrill/presets.toml` (usually
+`~/.config/textrill/presets.toml`). It applies the same options the GUI's
+preset strip offers, so the window and the command line cannot drift apart:
+
+```toml
+schema = 1
+
+[[presets]]
+key = "study"
+name = "Study notes"
+description = "Article with a sectioned TOC."
+template_library = "article"
+section = true
+toc = true
+```
+
+- **`schema = 1` is required**, and each `[[presets]]` entry needs a `key` (the
+  name `--preset` takes) and a `name`. `description` is what the GUI shows on
+  hover. Every other key is an option, spelled exactly as on the command line
+  minus the dashes; an unknown key is an error naming the file, the line and
+  the keys that are allowed.
+- **A preset is a whole state, not a patch.** Applying one replaces the option
+  set with the bundle built on defaults, so nothing from an earlier rc line or
+  an earlier preset leaks through — GUI and CLI both do this.
+- **Precedence** with `--preset NAME`: the command line beats the preset, and
+  the preset beats both rc files, wherever they appear in the arguments. The
+  last `--preset` wins. `--preset` is refused *inside* an rc file or `@file`
+  group with a message saying it belongs on the command line; the file is
+  parsed strictly, so a malformed one fails loudly with its line number.
+- A missing file is an error when a name was given; the error lists the
+  presets that do exist. The GUI reads the same file at startup and offers the
+  entries beside the shipped starting points; editing options away from the
+  bundle raises the same "Modified" marker.
+
 ## Install
 
 ### The CLI
@@ -153,7 +190,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **75 options** with **133 accepted spellings** including short
+There are **76 options** with **134 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names are the upstream ones, unchanged, so a document converts the
@@ -173,8 +210,8 @@ same way under either tool; the one default that differs is the doctype
 | `--extract` | off | Output only the body, without the surrounding document |
 | `--meta_charset` | off | Emit `<meta charset="utf-8">` |
 | `--no_referrer` | off | Private reading: emit `<meta name="referrer" content="no-referrer">` and `rel="nofollow noreferrer"` on generated external links |
-| `--html5` | on | Emit HTML5: `<!DOCTYPE html>`, no namespace, charset meta; `--no-html5` gives the Perl original's HTML 4.01 |
-| `--xhtml` | off | Emit XHTML 1.0 Strict instead — the Perl original's default |
+| `--html5` | on | Emit HTML5: `<!DOCTYPE html>`, no namespace, charset meta; `--no-html5` gives the Perl original's HTML 4.01 (frozen compatibility layer, see "HTML5 output") |
+| `--xhtml` | off | Emit XHTML 1.0 Strict instead — the Perl original's default (frozen compatibility layer, see "HTML5 output") |
 | `--lang` | `en` | Declared language of the document, a BCP 47 tag; emitted on the root `<html>` in HTML5 mode, empty disables it (see "Declared language") |
 | `--lang_runs` | off | Wrap runs of a script other than the document language in `<span lang="…">` (disallowed with `--stream`; see "Declared language") |
 | `--section` | off | Wrap each heading section in `<article id="chunk-N">` |
@@ -187,6 +224,7 @@ same way under either tool; the one default that differs is the doctype
 | `--document_template` | none | Use a whole-document template file |
 | `--template_library` | none | Use a shipped template by name: `article`, `book`, `manpage`, `slide` or `bare` |
 | `--var` | none | Template parameter `name=value`, filled into `{{textrill:var:name}}` (see below); repeat for several |
+| `--preset` | none | Apply the named option bundle from `presets.toml` (see "Presets"); command-line only |
 | `--encoding` | `auto` | How to decode the input (see below) |
 
 The delimiter names are inherited from the Perl original and are not intuitive:
@@ -228,7 +266,10 @@ element with no namespace, a forced `<meta charset="utf-8">`, and lower-case
 tags. The Perl original's modes are all still one flag away: `--xhtml` gives
 the XHTML 1.0 Strict doctype with the XHTML namespace, and `--no-html5` (or
 `--no-xhtml`) gives the HTML 4.01 prolog with upper-case tags, byte for byte
-what the reference produces. The frozen corpus cases, and the differential's
+what the reference produces. These two flags are a frozen compatibility
+layer: they exist to reproduce the Perl reference's skeleton for porting and
+audit (roadmap §8.5), not as part of the product's identity, and they no
+longer constrain new features. The frozen corpus cases, and the differential's
 cases when `make diff` is run, pin those modes explicitly, so the default
 change never touches the parity record. Tag case is governed by
 `--lower_case_tags` as usual, and each mode flag sets it as part of entering
@@ -418,6 +459,7 @@ Slots are written `{{textrill:name}}`:
 | `{{textrill:title}}` | The escaped document title, or empty without `--title` |
 | `{{textrill:header}}` | A `<header>` landmark wrapping the title in an `<h1>`, empty without `--title` |
 | `{{textrill:head}}` | The engine's `<head>` contents (title, metas, stylesheet) |
+| `{{textrill:lang}}` | The declared `--lang`, attribute-escaped for `lang="…"`; empty when `--lang` is |
 | `{{textrill:pager}}` | Prev/next links (reserved for `--chunk`) |
 | `{{textrill:citations}}` | The end notes block, empty when there are none |
 | `{{textrill:glossary}}` | The glossary block, empty when there is none |

@@ -49,6 +49,8 @@ pub struct TemplateEntry {
 pub struct VarEntry {
     pub name: Option<String>,
     pub required: Option<bool>,
+    /// Value used when the caller passes no `--var name=…`.
+    pub default: Option<String>,
 }
 
 /// The top-level keys the subset knows, for the "unknown key" message.
@@ -58,7 +60,7 @@ const TOP_KEYS: &str = "schema, id, name, version, description, authors, license
 const TEMPLATE_KEYS: &str = "file, model, slots, preview";
 
 /// The keys one `[[templates.vars]]` entry knows.
-const VAR_KEYS: &str = "name, required";
+const VAR_KEYS: &str = "name, required, default";
 
 /// Which array-of-table section the current `key = value` lines belong to.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -224,7 +226,7 @@ fn set_template(entry: &mut TemplateEntry, key: &str, v: Value, n: usize) -> Res
                  `vars = …` value",
             );
         }
-        "name" | "required" => {
+        "name" | "required" | "default" => {
             return err(
                 n,
                 format!("`{key}` belongs in a `[[templates.vars]]` entry, not in `[[templates]]`"),
@@ -245,6 +247,10 @@ fn set_var(var: &mut VarEntry, key: &str, v: Value, n: usize) -> Result<(), Stri
         "required" => {
             once(&var.required, key, n)?;
             var.required = Some(want_bool(key, v, n)?);
+        }
+        "default" => {
+            once(&var.default, key, n)?;
+            var.default = Some(want_string(key, v, n)?);
         }
         other => return err(n, unknown(other, VAR_KEYS)),
     }
@@ -371,6 +377,7 @@ mod tests {
             vec![VarEntry {
                 name: Some("author".to_string()),
                 required: Some(false),
+                default: None,
             }]
         );
     }
@@ -591,6 +598,24 @@ mod tests {
     #[test]
     fn rejects_an_unsupported_section() {
         rejects("[[notes]]\n", 1, &["[[notes]]", "unsupported section"]);
+    }
+
+    /// `default` is a plain string and is optional; it is not a substitute for
+    /// `required`, which keeps its own meaning.
+    #[test]
+    fn a_var_may_carry_a_default() {
+        let m = parse(
+            "[[templates]]\nfile = \"a.html\"\n[[templates.vars]]\n\
+             name = \"by\"\ndefault = \"Anonymous\"\n",
+        )
+        .unwrap();
+        assert_eq!(m.templates[0].vars[0].default.as_deref(), Some("Anonymous"));
+        rejects(
+            "[[templates]]\nfile = \"a.html\"\n[[templates.vars]]\n\
+             name = \"by\"\ndefault = 1\n",
+            5,
+            &["`default` expects a string"],
+        );
     }
 
     #[test]

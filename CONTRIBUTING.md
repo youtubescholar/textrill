@@ -40,9 +40,12 @@ make accept-write / make examples-write   # recapture
 make diff        # optional: the Perl differential corpus, as a cross-check
 ```
 
-`make verify` needs no Perl. `make diff` materialises the reference offline from
-the tracked tarball (`make ref`; never clone or download it) and runs the
-differential corpus and author goldens against it, non-gating.
+`make verify` needs no Perl and passes with the `parity/` directory absent:
+everything reference-related (the Perl tree, the stubs, the tracked tarballs,
+the differential runner) lives there, outside every gate (roadmap §8.5).
+`make diff` materialises the reference offline from the tracked tarball
+(`make ref`; never clone or download it) and runs the differential corpus and
+author goldens against it, non-gating.
 
 ## Legal
 
