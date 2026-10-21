@@ -119,7 +119,7 @@ fn conversions_are_independent_across_threads() {
 /// unordered lists.  It must finish without quadratic blowup.
 ///
 /// The fixture is the 26 MB `test2.txt` from the tracked `txt2html-master.zip`,
-/// extracted by `make ref-large` into `ref/txt2html-master/`. It is not tracked
+/// extracted by `make ref-large` into `parity/ref/txt2html-master/`. Not tracked
 /// itself -- 26 MB of lorem ipsum does not belong in git -- and this test skips
 /// when it is absent, which is the only reason the path is derived rather than
 /// assumed. A skip here is a test that did not run, so it says so on stderr
@@ -134,7 +134,11 @@ fn large_heading_list_document_is_not_quadratic() {
         .expect("crate dir has a parent");
     let path = match std::env::var("LARGE_FIXTURE") {
         Ok(p) => std::path::PathBuf::from(p),
-        Err(_) => root.join("ref").join("txt2html-master").join("test2.txt"),
+        Err(_) => root
+            .join("parity")
+            .join("ref")
+            .join("txt2html-master")
+            .join("test2.txt"),
     };
     let Ok(text) = std::fs::read_to_string(&path) else {
         eprintln!(
@@ -494,9 +498,15 @@ fn replacement_sees_text_outside_the_match() {
 /// which is exactly the case naive prefix extraction misses.
 #[test]
 fn prefilter_never_loses_a_match_on_the_real_dictionary() {
-    let path = "../ref/txt2html-3.0/doc/txt2html.dict";
+    let path = "../parity/ref/txt2html-3.0/doc/txt2html.dict";
     let Ok(dict) = std::fs::read_to_string(path) else {
-        return; // dictionary absent in this checkout
+        // The reference dictionary lives with the parity harness (§8.5) and
+        // is absent from checkouts without it; a skip says so out loud.
+        eprintln!(
+            "SKIP prefilter_never_loses_a_match_on_the_real_dictionary: no \
+             dictionary at {path} (run `make ref`, or drop `parity/`)"
+        );
+        return;
     };
     let mut parser = links::LinkParser::new(false, textrill::urlscheme::UrlPolicy::default());
     let filtered = parser.filter_dict(&dict);
@@ -551,8 +561,16 @@ fn prefilter_never_loses_a_match_on_the_real_dictionary() {
 /// absent. Silent link loss.
 #[test]
 fn prefilter_keeps_mail_header_links() {
+    const DICT: &str = "../parity/ref/txt2html-3.0/doc/txt2html.dict";
+    if !std::path::Path::new(DICT).exists() {
+        eprintln!(
+            "SKIP prefilter_keeps_mail_header_links: no dictionary at {DICT} \
+             (run `make ref`, or drop `parity/`)"
+        );
+        return;
+    }
     let opts = Options {
-        links_dictionaries: vec!["../ref/txt2html-3.0/doc/txt2html.dict".to_string()],
+        links_dictionaries: vec![DICT.to_string()],
         default_link_dict: String::new(),
         extract: true,
         ..Default::default()

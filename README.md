@@ -11,7 +11,8 @@ templates you control.
 `txt2html` script, by Seth Golub. It has moved on from byte-parity with that
 reference as its default; the legacy `--xhtml`/`--no-html5` modes and the
 frozen corpus still reproduce the reference byte for byte, and the Perl
-original is kept as an on-demand cross-check (`make diff`).
+original is kept as an on-demand cross-check (`make diff`, in the non-gating
+`parity/` directory).
 
 **This is a fork.** It is not affiliated with or endorsed by the upstream
 `txt2html` project.

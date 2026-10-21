@@ -14,12 +14,14 @@
 #   make scale         the 1 MB paragraph probes, timed against Perl
 #   make appimage      a local (non-portable) AppImage of the GUI and CLI
 #
-# `make verify` needs no Perl: the differential is the non-gating `make diff`,
-# on demand. Individual targets build first and pass the binary path explicitly
+# `make verify` needs no Perl, and passes with `parity/` absent: everything
+# Perl-related -- the reference tree, the stubs, the tracked tarballs and the
+# differential runner -- lives in the non-gating `parity/` directory (roadmap
+# §8.5) and is reached only through the `corpus`/`diff`/`scale`/`ref` wrappers
+# below. Individual targets build first and pass the binary path explicitly
 # -- exporting MINE here means no invocation can pick up a stale binary that was
 # not just built, which is how the harness once reported a false green.
 
-TIME   ?= /usr/bin/time -f "  %es"
 CARGO  ?= cargo
 PYTHON ?= python3
 ROOT  := $(CURDIR)
@@ -27,13 +29,9 @@ RS    := $(ROOT)/textrill
 GUI_RS := $(ROOT)/textrill-gui-rs
 
 RELEASE_BIN := $(RS)/target/release/textrill
-REFDIR      ?= $(ROOT)/ref/txt2html-3.0
-STUBS       ?= $(ROOT)/ref/stubs
+export MINE := $(RELEASE_BIN)
 
-export PERL5LIB := $(STUBS):$(REFDIR)/lib
-export MINE     := $(RELEASE_BIN)
-
-.PHONY: all verify build gui run-gui fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale musl corpus-musl accept-musl examples examples-write appimage clean
+.PHONY: all verify build gui run-gui fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale ref ref-large musl corpus-musl accept-musl examples examples-write appimage clean distclean
 
 all: verify
 
@@ -89,7 +87,7 @@ accept-musl: musl
 # The parity cross-check on the static binary. Optional, like `make diff`: it
 # needs the Perl reference and is not part of any gate.
 corpus-musl: musl
-	cd $(RS) && MINE=$(MUSL_BIN) ./tests/corpus/run.sh
+	$(MAKE) -C parity corpus MINE=$(MUSL_BIN)
 
 # --- rust --------------------------------------------------------------------
 
@@ -137,10 +135,13 @@ proptest: build
 alloctest: build
 	cd $(RS) && $(CARGO) test --release --test alloctest -- --nocapture --test-threads=1
 
-# --- differential corpus -----------------------------------------------------
+# --- Perl parity (delegates to parity/; see parity/README.md) ----------------
+# The differential harness itself is not in this Makefile any more: the
+# reference, the stubs and the Perl runner live under parity/, outside every
+# gate. These are thin wrappers so the familiar command names keep working.
 
-corpus: build
-	cd $(RS) && ./tests/corpus/run.sh
+corpus:
+	$(MAKE) -C parity corpus
 
 # --- acceptance ---------------------------------------------------------------
 
@@ -184,76 +185,19 @@ examples-write: build
 
 # The parity oracle, on demand. `make verify` never invokes Perl; this target
 # re-runs the differential corpus and the author goldens against the reference
-# as a non-gating cross-check. Nothing depends on it. `ref` is a phony rebuild
-# so a fresh clone can run this without a separate `make ref`.
-.PHONY: diff
-diff: ref corpus
-	@echo
-	@echo "diff: OK (non-gating parity cross-check)"
+# as a non-gating cross-check. Nothing depends on it.
+diff:
+	$(MAKE) -C parity diff
 
-# --- the reference checkout ---------------------------------------------------
+# --- the reference checkout (parity/) ----------------------------------------
 
-# The differential needs the Perl original, which is derived rather than
-# tracked (`ref/` is gitignored). This target extracts the tracked tarball and
-# installs the one stub module the reference `use`s at load time. Idempotent
-# and offline: no network, no CPAN, no package installs -- the reference needs
-# nothing but a core Perl (Getopt::ArgvFile is an optional `eval require`;
-# YAML::Syck is `use`d but never called).
-#
-# The stub is a tracked file copied into place rather than a heredoc here, so
-# its provenance and reasoning live in a file you can read and diff.
-REF_TARBALL := $(ROOT)/research/txt2html-3.0.tar.gz
-REF_SRC     := $(ROOT)/ref/txt2html-3.0
-REF_STUB    := $(ROOT)/ref/stubs/YAML/Syck.pm
-STUB_SOURCE := $(ROOT)/stubs/YAML/Syck.pm
-
-# Phony, deliberately. A directory target that make considers "up to date" is a
-# trap here: delete ref/stubs but leave ref/txt2html-3.0 and a non-phony `ref`
-# does nothing at all, silently leaving the reference broken. The recipe
-# is already idempotent and cheap -- a tar test and one perl -e -- so running it
-# unconditionally is the honest default. Every other target in this Makefile is
-# a real file, which is why this needs saying out loud.
-.PHONY: ref distclean
-
+# The reference tree, the stubs and the tracked upstream archives all live in
+# parity/ now; these wrappers keep the documented command names working.
 ref:
-	@test -f "$(REF_TARBALL)" || { \
-	  echo "ERROR: $(REF_TARBALL) is missing; it is tracked in git." >&2; exit 1; }
-	@if [ ! -f "$(REF_SRC)/lib/HTML/TextToHTML.pm" ]; then \
-	  echo "ref: extracting $(notdir $(REF_TARBALL))"; \
-	  mkdir -p "$(ROOT)/ref"; \
-	  tar -xzf "$(REF_TARBALL)" -C "$(ROOT)/ref"; \
-	else \
-	  echo "ref: $(REF_SRC) already present, not re-extracting"; \
-	fi
-	@if [ ! -f "$(REF_STUB)" ]; then \
-	  echo "ref: writing YAML::Syck stub"; \
-	  mkdir -p "$(dir $(REF_STUB))"; \
-	  cp "$(STUB_SOURCE)" "$(REF_STUB)"; \
-	fi
-	@PERL5LIB="$(STUBS):$(REFDIR)/lib" perl -e 'use HTML::TextToHTML; print "ref: reference loads OK\n"' \
-	  || { echo "ERROR: the reference does not load; check the stub" >&2; exit 1; }
+	$(MAKE) -C parity ref
 
-# The 26 MB scale fixture, split off from `ref` because it is large and only
-# one test wants it. `make test` runs without it and reports the skip; this is
-# for when that test is the thing being worked on.
-REF_LARGE_DIR := $(ROOT)/ref/txt2html-master
-LARGE_ZIP     := $(ROOT)/research/txt2html-master.zip
-
-.PHONY: ref-large
 ref-large:
-	@test -f "$(LARGE_ZIP)" || { \
-	  echo "ERROR: $(LARGE_ZIP) is missing; it is tracked in git." >&2; exit 1; }
-	@if [ -f "$(REF_LARGE_DIR)/test2.txt" ]; then \
-	  echo "ref-large: already present, not re-extracting"; \
-	else \
-	  echo "ref-large: extracting $(notdir $(LARGE_ZIP))"; \
-	  mkdir -p "$(ROOT)/ref"; \
-	  unzip -q -o "$(LARGE_ZIP)" -d "$(ROOT)/ref"; \
-	fi
-	@test -f "$(REF_LARGE_DIR)/test2.txt" \
-	  || { echo "ERROR: test2.txt not found in $(REF_LARGE_DIR)" >&2; exit 1; }
-	@echo "ref-large: fixture ready ($$(du -h "$(REF_LARGE_DIR)/test2.txt" | cut -f1))"
-
+	$(MAKE) -C parity ref-large
 # Remove the derived reference. `make clean` leaves it alone on purpose: it is
 # 1 MB of extracted Perl, it takes one `make ref` to rebuild, and deleting it on
 # every clean is a good way to make the gate mysteriously unavailable.
@@ -292,26 +236,12 @@ appimage:
 	packaging/appimage/build.sh
 
 distclean: clean
-	rm -rf "$(ROOT)/ref"
+	$(MAKE) -C parity distclean
 
-# --- scale probes ------------------------------------------------------------
+# --- scale probes (parity/) --------------------------------------------------
 
-# The point is the timing. The byte compare keeps it honest: the two tools must
-# be converting the same bytes, or a timing advantage over a differently-shaped
-# run is meaningless. That compare has to use the modes the corpus pins, not the
-# defaults: textrill's default doctype is deliberately HTML5 while the reference
-# defaults to XHTML, and the generator meta line names each tool. `--extract`
-# drops both (no prolog, no generator line), and `--xhtml` pins the one
-# serialization the two share byte-for-byte. The corpus proves this combination
-# is byte-exact (`huge_paragraph`, `huge_paragraph_crlf`).
-scale: build
-	@for f in big_para big_para_crlf; do \
-		in=$(RS)/tests/corpus/inputs/$$f.txt; \
-		$(TIME) $(RELEASE_BIN) --extract --xhtml --infile $$in --outfile /tmp/scale_mine.html; \
-		$(TIME) perl $(REFDIR)/scripts/txt2html --extract --xhtml --infile $$in --outfile /tmp/scale_ref.html; \
-		cmp -s /tmp/scale_mine.html /tmp/scale_ref.html \
-			&& echo "  $$f: byte-identical" || echo "  $$f: DIFFER"; \
-	done
+scale:
+	$(MAKE) -C parity scale
 
 clean:
 	cd $(RS) && $(CARGO) clean

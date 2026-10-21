@@ -79,7 +79,7 @@ fn option_help_strings_are_unique() {
     // Adding an engine option means adding a panel widget. The count is here
     // to make an addition a deliberate act rather than something that happens
     // when the engine grows an option.
-    assert_eq!(seen.len(), 75, "the engine's option count changed");
+    assert_eq!(seen.len(), 76, "the engine's option count changed");
 }
 
 /// Every option in `cli::SPECS` is reachable as a labelled widget.
@@ -1725,6 +1725,166 @@ fn an_unknown_stored_preset_falls_back_to_plain() {
     assert_eq!(app.preset_key(), "plain");
     assert!(!app.preset_is_modified());
     let _ = std::fs::remove_file(&path);
+}
+
+/// A user preset (roadmap §8.1) is read from `presets.toml` and applies the
+/// exact option bundle the engine's `--preset` builds from the same file, so
+/// the window and the command line cannot drift apart.
+#[test]
+fn a_user_preset_matches_what_the_cli_would_apply() {
+    let path = temp_settings_path("user-preset");
+    let presets = temp_settings_path("user-preset-toml");
+    std::fs::write(
+        &presets,
+        "schema = 1\n\n[[presets]]\nkey = \"study\"\nname = \"Study notes\"\n\
+         description = \"Article with a sectioned TOC.\"\n\
+         template_library = \"article\"\nsection = true\ntoc = true\n",
+    )
+    .expect("write presets file");
+
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.load_user_presets(&presets).expect("load presets file");
+    let keys: Vec<&str> = app.user_presets().iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, ["study"], "the file's own keys, in order");
+
+    // What `--preset study` builds: the same engine parser, the same file.
+    let cli_bundle = textrill::presets::load_from(&presets)
+        .expect("load")
+        .into_iter()
+        .find(|p| p.key == "study")
+        .expect("study entry")
+        .options;
+
+    app.apply_user_preset("study").expect("apply");
+    assert_eq!(app.preset_key(), "study");
+    assert!(
+        textrill_gui::presets::same_options(&app.opts, &cli_bundle),
+        "the GUI applied a different bundle than `--preset` would"
+    );
+    assert!(!app.preset_is_modified(), "a fresh preset is not modified");
+    assert_eq!(app.current_preset_name(), "Study notes");
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&presets);
+}
+
+/// Editing away from a user preset raises the same Modified marker as a
+/// shipped one, and re-applying clears it.
+#[test]
+fn a_user_preset_gets_the_modified_marker_too() {
+    let path = temp_settings_path("user-preset-mod");
+    let presets = temp_settings_path("user-preset-mod-toml");
+    std::fs::write(
+        &presets,
+        "schema = 1\n[[presets]]\nkey = \"s\"\nname = \"S\"\ntoc = true\n",
+    )
+    .expect("write presets file");
+
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.load_user_presets(&presets).expect("load");
+    app.apply_user_preset("s").expect("apply");
+    assert!(!app.preset_is_modified());
+
+    app.opts.toc = false;
+    assert!(app.preset_is_modified(), "editing should mark Modified");
+    app.apply_user_preset("s").expect("re-apply");
+    assert!(!app.preset_is_modified(), "re-applying clears it");
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&presets);
+}
+
+/// A stored key naming a user preset resolves on restart once the file is
+/// read, instead of falling back to Plain.
+#[test]
+fn a_stored_user_preset_key_survives_a_restart() {
+    let path = temp_settings_path("user-preset-restart");
+    let presets = temp_settings_path("user-preset-restart-toml");
+    std::fs::write(
+        &presets,
+        "schema = 1\n[[presets]]\nkey = \"study\"\nname = \"Study\"\n",
+    )
+    .expect("write presets file");
+    {
+        let mut settings = Settings::with_path(&path);
+        settings.set_preset("study").expect("write");
+    }
+
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    // The file read happens at startup; load it here so the scratch path can
+    // stand in for the config location, then replay the restore.
+    app.load_user_presets(&presets).expect("load");
+    app.restore_settings();
+
+    assert_eq!(app.preset_key(), "study");
+    assert_eq!(app.current_preset_name(), "Study");
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&presets);
+}
+
+/// A stored key that names neither a shipped nor a user preset is Plain, so a
+/// deleted presets file cannot leave the window presetting to nothing.
+#[test]
+fn a_stored_key_of_a_deleted_user_preset_falls_back_to_plain() {
+    let path = temp_settings_path("user-preset-deleted");
+    {
+        let mut settings = Settings::with_path(&path);
+        settings.set_preset("gone").expect("write");
+    }
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.load_user_presets(&path).unwrap_or(());
+    app.restore_settings();
+    assert_eq!(app.preset_key(), "plain");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A broken presets file is a loud error naming the file and the line, with no
+/// half-applied strip.
+#[test]
+fn a_broken_presets_file_is_reported_not_swallowed() {
+    let path = temp_settings_path("user-preset-broken");
+    let presets = temp_settings_path("user-preset-broken-toml");
+    std::fs::write(
+        &presets,
+        "schema = 1\n[[presets]]\nkey = \"x\"\nsction = true\n",
+    )
+    .expect("write presets file");
+
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    let error = app.load_user_presets(&presets).expect_err("must fail");
+    assert!(error.contains("line 4"), "{error}");
+    assert!(error.contains("`sction`"), "{error}");
+    assert!(
+        app.user_presets().is_empty(),
+        "a broken file yields no presets at all"
+    );
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&presets);
+}
+
+/// An unknown key passed to the user-preset applier names the file's contents
+/// rather than silently doing nothing.
+#[test]
+fn applying_a_missing_user_preset_names_what_is_there() {
+    let path = temp_settings_path("user-preset-missing");
+    let presets = temp_settings_path("user-preset-missing-toml");
+    std::fs::write(
+        &presets,
+        "schema = 1\n[[presets]]\nkey = \"study\"\nname = \"Study\"\n",
+    )
+    .expect("write presets file");
+
+    let mut app = TextrillApp::with_settings(Settings::with_path(&path));
+    app.load_user_presets(&presets).expect("load");
+    let error = app.apply_user_preset("nope").expect_err("must fail");
+    assert!(error.contains("no preset `nope`"), "{error}");
+    assert!(error.contains("study"), "{error}");
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&presets);
 }
 
 /// The preset strip is on screen with the rest of the chrome, and clicking a

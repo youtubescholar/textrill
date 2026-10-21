@@ -132,6 +132,7 @@ option_table![
     PreformatWhitespaceMin, Int, "Whitespace needed in a line to preformat it.", ["preformat_whitespace_min", "prewhite", "p"];
     PrependFile, Str, "File whose contents are prepended to the output.", ["prepend_file", "prepend_body", "pp"];
     PreserveIndent, Flag, "Keep the original indentation of list items.", ["preserve_indent", "pi"];
+    Preset, Str, "Apply the named preset from <config>/textrill/presets.toml. Expanded above the rc files and below the other command-line options.", ["preset"];
     Report, Flag, "Print what the conversion recovered (bytes, headings, paragraphs, capitals, breaks) on standard error.", ["report"];
     Section, Flag, "Wrap each heading section in <article>.", ["section"];
     ShortLineLength, Int, "Lines shorter than this are broken with <br/>.", ["short_line_length", "shortline", "s"];
@@ -160,7 +161,7 @@ option_table![
 /// The README quotes the option count; binding it here makes an addition a
 /// deliberate, compile-time act rather than a silent prose drift.
 const _: () = assert!(
-    Opt::ALL.len() == 75,
+    Opt::ALL.len() == 76,
     "option count changed; update this assertion and README.md"
 );
 
@@ -283,6 +284,7 @@ pub fn set_opt(opts: &mut Options, opt: Opt, value: &str) -> Result<(), String> 
         Opt::NoReferrer => opts.no_referrer = parse_flag(value)?,
         Opt::NumberHeadings => opts.number_headings = parse_flag(value)?,
         Opt::PreserveIndent => opts.preserve_indent = parse_flag(value)?,
+        Opt::Preset => opts.preset = value.to_string(),
         Opt::Report => opts.report = parse_flag(value)?,
         Opt::Section => opts.section = parse_flag(value)?,
         Opt::Stream => opts.stream = parse_flag(value)?,
@@ -387,6 +389,23 @@ pub fn set_opt(opts: &mut Options, opt: Opt, value: &str) -> Result<(), String> 
     Ok(())
 }
 
+/// Empty the `StrArray` `opt` names, so a caller that replaces an array can
+/// re-add its values. Every [`Kind::StrArray`] option needs an arm: a miss
+/// would leave the old list in place and a re-add would double it; the
+/// `every_string_array_option_is_cleared` test walks every one.
+pub fn clear_array(opts: &mut Options, opt: Opt) {
+    match opt {
+        Opt::CustomHeadingRegexp => opts.custom_heading_regexp.clear(),
+        Opt::Infile => opts.infile.clear(),
+        Opt::Instring => opts.instring.clear(),
+        Opt::LinksDictionaries => opts.links_dictionaries.clear(),
+        Opt::TemplateDir => opts.template_dir.clear(),
+        Opt::CatalogDir => opts.catalog_dir.clear(),
+        Opt::Var => opts.vars.clear(),
+        _ => {}
+    }
+}
+
 /// Read one option back as text. Exhaustive over [`Opt`], the inverse of
 /// [`set_opt`] and so unable to fall out of step with it.
 pub fn get_opt(opts: &Options, opt: Opt) -> String {
@@ -451,6 +470,7 @@ pub fn get_opt(opts: &Options, opt: Opt) -> String {
         Opt::PreformatStartMarker => opts.preformat_start_marker.clone(),
         Opt::PreformatEndMarker => opts.preformat_end_marker.clone(),
         Opt::PrependFile => opts.prepend_file.clone(),
+        Opt::Preset => opts.preset.clone(),
         Opt::StyleUrl => opts.style_url.clone(),
         Opt::BodyTemplate => opts.template.clone(),
         Opt::TemplateLibrary => opts.template_library.clone(),
@@ -606,8 +626,9 @@ pub fn parse_args_from(args: &[String], opts: &mut Options, label: &str) -> Resu
     Ok(())
 }
 
-/// Look up an option name, handling `no` prefix for boolean flags.
-fn resolve(name: &str) -> Result<(Opt, bool), String> {
+/// Look up an option name, handling `no` prefix for boolean flags. Public
+/// within the crate because the `--preset` scan reuses the same token rules.
+pub(crate) fn resolve(name: &str) -> Result<(Opt, bool), String> {
     let stripped = name
         .strip_prefix("no-")
         .or_else(|| name.strip_prefix("no_"))
@@ -723,6 +744,14 @@ pub fn parse_args_with_rc(
         read_option_file(&path, &label, opts, true)?;
     }
 
+    // --preset on the command line sits above the rc files and below the rest
+    // of the command line: expand it now, then parse every command-line
+    // option on top, so precedence holds no matter where the option stands in
+    // the line.
+    if let Some(name) = crate::presets::scan_preset(&command_line)? {
+        crate::presets::apply(opts, &name)?;
+    }
+
     parse_args(&command_line, opts)
 }
 
@@ -763,6 +792,13 @@ fn read_option_file(
         let tokens: Vec<String> = crate::rcfile::split_tokens(line);
         if tokens.is_empty() {
             continue;
+        }
+        if crate::presets::scan_preset(&tokens)?.is_some() {
+            return Err(format!(
+                "{where_}: `--preset` belongs on the command line: a preset is \
+                 a whole option state, expanded after the rc files are read and \
+                 before the command line is parsed"
+            ));
         }
         // First --table_type in a file resets defaults; repeats accumulate.
         if !table_type_seen

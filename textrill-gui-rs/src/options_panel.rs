@@ -26,6 +26,8 @@ use textrill::options::{numeric_range, Encoding, Options};
 pub struct OptionsPanel {
     /// The filter box contents.
     pub filter: String,
+    /// Show only the options whose value differs from the engine default.
+    pub only_changed: bool,
     /// Currently selected category when not filtering.
     selected_category: usize,
     /// The template source last chosen in the panel; see [`TemplateSource`].
@@ -94,6 +96,7 @@ fn category(opt: Opt) -> &'static str {
         | Opt::EightBitClean
         | Opt::Stream
         | Opt::Report
+        | Opt::Preset
         | Opt::ListTemplates => "Input & Output",
         Opt::Doctype
         | Opt::Html5
@@ -174,6 +177,7 @@ impl OptionsPanel {
                     .hint_text("Filter options…")
                     .desired_width(160.0),
             );
+            ui.checkbox(&mut self.only_changed, "Show only changed");
             if ui
                 .button("Reset all options")
                 .on_hover_text("Put every option back to its default")
@@ -246,12 +250,13 @@ impl OptionsPanel {
                             let mut title_source_drawn = false;
                             for &opt in Opt::ALL {
                                 let keep = if filtering {
-                                    opt_matches(opt, &needle)
+                                    opt_matches(opt, &needle, opts)
                                 } else if selected == "All" {
                                     true
                                 } else {
                                     category(opt) == selected
                                 };
+                                let keep = keep && (!self.only_changed || any_changed(opt, opts));
                                 if !keep {
                                     continue;
                                 }
@@ -333,7 +338,7 @@ impl OptionsPanel {
             return true;
         }
         match cli::lookup(name) {
-            Some(opt) => opt_matches(opt, &needle),
+            Some(opt) => opt_matches_name(opt, &needle),
             None => false,
         }
     }
@@ -370,9 +375,10 @@ fn document_type(ui: &mut Ui, opts: &mut Options) -> bool {
     });
     ui.label(egui::RichText::new(Opt::Html5.help()).small().weak());
     ui.label(egui::RichText::new(Opt::Xhtml.help()).small().weak());
+    let reset = group_reset(ui, opts, &[Opt::Html5, Opt::Xhtml]);
 
     if choice == current {
-        return false;
+        return reset;
     }
     // `html5` and `xhtml` are mutually exclusive in the engine; selecting the
     // pair off gives the reference's HTML 4.01.
@@ -593,6 +599,7 @@ fn title_source(ui: &mut Ui, opts: &mut Options, remembered: &mut TitleSource) -
     }
     *remembered = choice;
 
+    let reset = group_reset(ui, opts, &[Opt::Title, Opt::Titlefirst]);
     match choice {
         TitleSource::Explicit => {
             changed |= string(ui, opts, Opt::Title, true);
@@ -603,6 +610,7 @@ fn title_source(ui: &mut Ui, opts: &mut Options, remembered: &mut TitleSource) -
             help_label(ui, Opt::Titlefirst);
         }
     }
+    changed = changed || reset;
     changed
 }
 
@@ -634,9 +642,10 @@ fn link_mode(ui: &mut Ui, opts: &mut Options) -> bool {
     });
     help_label(ui, Opt::MakeLinks);
     help_label(ui, Opt::LinkOnly);
+    let reset = group_reset(ui, opts, &[Opt::MakeLinks, Opt::LinkOnly]);
 
     if choice == current {
-        return false;
+        return reset;
     }
     match choice {
         Mode::Off => {
@@ -688,17 +697,17 @@ fn encoding_choice(ui: &mut Ui, opts: &mut Options) -> bool {
             ui.radio_value(&mut choice, encoding, label);
         }
     });
+    let mut reset = group_reset(ui, opts, &[Opt::Encoding]);
 
     if choice != opts.encoding {
         opts.encoding = choice;
-        true
-    } else {
-        false
+        reset = true;
     }
+    reset
 }
 
-/// Whether an option matches the (already lowercased) needle.
-fn opt_matches(opt: Opt, needle: &str) -> bool {
+/// Whether an option's *name or help* matches the (already lowercased) needle.
+fn opt_matches_name(opt: Opt, needle: &str) -> bool {
     for name in opt.names() {
         if name.to_lowercase().contains(needle) {
             return true;
@@ -709,6 +718,116 @@ fn opt_matches(opt: Opt, needle: &str) -> bool {
         }
     }
     opt.help().to_lowercase().contains(needle)
+}
+
+/// Whether an option matches the needle: its names, its help, and its current
+/// *value*, so a search for `zh-Hans` or `true` finds the option carrying that
+/// value rather than only the option named for it.
+fn opt_matches(opt: Opt, needle: &str, opts: &Options) -> bool {
+    opt_matches_name(opt, needle) || cli::get_opt(opts, opt).to_lowercase().contains(needle)
+}
+
+/// Whether `opt` differs from the engine default, exactly as the panel's
+/// changed badge defines it: the canonical spelling of the live value against
+/// the canonical spelling of [`Options::default`].
+pub fn changed_from_default(opt: Opt, opts: &Options) -> bool {
+    cli::get_opt(opts, opt) != cli::get_opt(&Options::default(), opt)
+}
+
+/// [`changed_from_default`] for the option a drawn group stands for: the two
+/// document-type flags, the three template sources and the two link modes are
+/// drawn once, so the "Show only changed" filter keeps the row when any member
+/// has moved off the default.
+fn any_changed(opt: Opt, opts: &Options) -> bool {
+    let same = |a: Opt, b: Opt| changed_from_default(a, opts) || changed_from_default(b, opts);
+    match opt {
+        Opt::Html5 | Opt::Xhtml => same(Opt::Html5, Opt::Xhtml),
+        Opt::BodyTemplate | Opt::DocumentTemplate | Opt::TemplateLibrary => {
+            changed_from_default(Opt::BodyTemplate, opts)
+                || changed_from_default(Opt::DocumentTemplate, opts)
+                || changed_from_default(Opt::TemplateLibrary, opts)
+        }
+        Opt::MakeLinks | Opt::LinkOnly => same(Opt::MakeLinks, Opt::LinkOnly),
+        Opt::Title | Opt::Titlefirst => same(Opt::Title, Opt::Titlefirst),
+        other => changed_from_default(other, opts),
+    }
+}
+
+/// Put one option back to its engine default, the row-local counterpart of
+/// "Reset all options". Returns `true` (an edit), since the value moved.
+fn reset_opt(opts: &mut Options, opt: Opt) -> bool {
+    if opt.kind() == Kind::StrArray {
+        clear_array(opts, opt);
+        return true;
+    }
+    let default = cli::get_opt(&Options::default(), opt);
+    cli::set_opt(opts, opt, &default).is_ok()
+}
+
+/// The changed badge plus a one-option reset, drawn only while the option is
+/// off its default, so the panel's answer to "what did I change?" sits next to
+/// the control itself.
+fn option_reset(ui: &mut Ui, opts: &mut Options, opt: Opt) -> bool {
+    if !changed_from_default(opt, opts) {
+        return false;
+    }
+    let mut clicked = false;
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("changed")
+                .small()
+                .strong()
+                .color(ui.visuals().warn_fg_color),
+        )
+        .on_hover_text("This option differs from the engine default.");
+        if ui
+            .small_button("\u{21ba}")
+            .on_hover_text("Reset this option to its default")
+            .clicked()
+        {
+            clicked = true;
+        }
+    });
+    if clicked {
+        reset_opt(opts, opt)
+    } else {
+        false
+    }
+}
+
+/// [`option_reset`] for a widget that draws several options as one control: the
+/// badge appears once, from the first member that has changed, and resets every
+/// member when clicked.
+fn group_reset(ui: &mut Ui, opts: &mut Options, members: &[Opt]) -> bool {
+    if !members.iter().any(|o| changed_from_default(*o, opts)) {
+        return false;
+    }
+    let mut clicked = false;
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("changed")
+                .small()
+                .strong()
+                .color(ui.visuals().warn_fg_color),
+        )
+        .on_hover_text("These options differ from the engine default.");
+        if ui
+            .small_button("\u{21ba}")
+            .on_hover_text("Reset them to their defaults")
+            .clicked()
+        {
+            clicked = true;
+        }
+    });
+    if clicked {
+        let mut moved = false;
+        for opt in members {
+            moved |= reset_opt(opts, *opt);
+        }
+        moved
+    } else {
+        false
+    }
 }
 
 /// Options the GUI structurally cannot use. The worker converts the document
@@ -728,6 +847,7 @@ pub(crate) fn gui_ignored(opt: Opt) -> bool {
         Opt::Stream
             | Opt::Chunk
             | Opt::Report
+            | Opt::Preset
             | Opt::ListTemplates
             | Opt::Infile
             | Opt::Instring
@@ -777,23 +897,27 @@ fn disabled_reason(opt: Opt, opts: &Options) -> Option<&'static str> {
 fn flag(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> bool {
     let help = opt.help();
     let mut on = cli::get_opt(opts, opt) == "true";
-    let response = ui.add_enabled(enabled, egui::Checkbox::new(&mut on, help));
-    let response = match disabled_reason(opt, opts) {
-        Some(reason) => response.on_hover_text(reason),
-        None => response,
-    };
-    if response.changed() {
-        let _ = cli::set_opt(opts, opt, if on { "true" } else { "false" });
-        true
-    } else {
-        false
-    }
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let response = ui.add_enabled(enabled, egui::Checkbox::new(&mut on, help));
+        let response = match disabled_reason(opt, opts) {
+            Some(reason) => response.on_hover_text(reason),
+            None => response,
+        };
+        if response.changed() {
+            let _ = cli::set_opt(opts, opt, if on { "true" } else { "false" });
+            changed = true;
+        }
+        changed |= option_reset(ui, opts, opt);
+    });
+    changed
 }
 
 fn int(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> bool {
     let help = opt.help();
     let current = cli::get_opt(opts, opt).parse::<i64>().unwrap_or(0);
     let mut value = current;
+    let mut reset = false;
     ui.horizontal(|ui| {
         let mut widget = egui::DragValue::new(&mut value).speed(1.0);
         if let Some((low, high)) = numeric_range(opt.canonical()) {
@@ -801,13 +925,13 @@ fn int(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> bool {
         }
         ui.add_enabled(enabled, widget);
         ui.label(help);
+        reset = option_reset(ui, opts, opt);
     });
-    if value != current {
+    let moved = value != current;
+    if moved {
         let _ = cli::set_opt(opts, opt, &value.to_string());
-        true
-    } else {
-        false
     }
+    moved || reset
 }
 
 fn string(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> bool {
@@ -832,7 +956,12 @@ fn string(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> bool {
             ui.colored_label(ui.visuals().error_fg_color, message);
         }
     }
-    changed
+    let mut reset = false;
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        reset = option_reset(ui, opts, opt);
+    });
+    changed || reset
 }
 
 fn string_array(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> bool {
@@ -851,7 +980,11 @@ fn string_array(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> boo
         response.on_hover_text(reason);
     }
     if !changed {
-        return false;
+        let mut reset = false;
+        ui.horizontal(|ui| {
+            reset = option_reset(ui, opts, opt);
+        });
+        return reset;
     }
     // `set_opt` appends to a `StrArray`; the panel edits the whole list, so
     // clear it and re-add. `var` is a `Vec<(String, String)>` rather than a
@@ -870,6 +1003,9 @@ fn string_array(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> boo
     if let Some(message) = error {
         ui.colored_label(ui.visuals().error_fg_color, message);
     }
+    ui.horizontal(|ui| {
+        option_reset(ui, opts, opt);
+    });
     true
 }
 
@@ -895,6 +1031,9 @@ fn clear_array(opts: &mut Options, opt: Opt) {
 fn table_type(ui: &mut Ui, opts: &mut Options, help: &str, enabled: bool) -> bool {
     ui.label(help);
     let mut changed = false;
+    ui.horizontal(|ui| {
+        changed |= option_reset(ui, opts, Opt::TableType);
+    });
     ui.horizontal(|ui| {
         changed |= ui
             .add_enabled(
@@ -957,6 +1096,56 @@ mod tests {
                 "{key}: clear_array has no arm for this StrArray option"
             );
         }
+    }
+
+    /// The changed badge is exactly "the live value differs from the default",
+    /// read through `cli::get_opt` on both sides — no second opinion.
+    #[test]
+    fn the_changed_badge_matches_get_opt_versus_defaults() {
+        let defaults = Options::default();
+        let mut opts = Options::default();
+        for &opt in Opt::ALL {
+            assert!(
+                !changed_from_default(opt, &defaults),
+                "{}: a default must not read as changed",
+                opt.canonical()
+            );
+        }
+        for (key, value) in [
+            ("tab_width", "9"),
+            ("lang", "ja"),
+            ("section", "true"),
+            ("title", "Doc"),
+            ("template_library", "book"),
+        ] {
+            let opt = cli::lookup(key).expect("known option");
+            cli::set_opt(&mut opts, opt, value).expect("set");
+            assert!(
+                changed_from_default(opt, &opts),
+                "{key}: a moved value must read as changed"
+            );
+            assert!(
+                changed_from_default(opt, &opts)
+                    == (cli::get_opt(&opts, opt) != cli::get_opt(&defaults, opt)),
+                "{key}: the badge must be exactly the get_opt comparison"
+            );
+            reset_opt(&mut opts, opt);
+            assert!(!changed_from_default(opt, &opts), "{key}: reset restores");
+        }
+    }
+
+    /// The filter matches the current value, not only the option's name and
+    /// help, so searching for a value finds the option carrying it.
+    #[test]
+    fn the_filter_matches_option_values() {
+        let opts = Options {
+            lang: "zh-Hans".to_string(),
+            ..Options::default()
+        };
+        assert!(opt_matches(Opt::Lang, "zh-hans", &opts));
+        assert!(!opt_matches(Opt::TabWidth, "zh-hans", &opts));
+        let tab = cli::get_opt(&opts, Opt::TabWidth);
+        assert!(opt_matches(Opt::TabWidth, &tab, &opts));
     }
 
     /// An option is enabled exactly when the option it depends on is in the

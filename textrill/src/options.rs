@@ -262,6 +262,9 @@ pub struct Options {
     /// once the output is written. Counts are of the produced document, not
     /// engine events ([`crate::report`]); default **off**, refused with `--stream`.
     pub report: bool,
+    /// The preset named by `--preset`, recorded for reporting; expansion
+    /// happens during argument parsing, before any conversion.
+    pub preset: String,
     /// Wrap each heading-delimited section of the body in an
     /// `<article class="section" id="chunk-N">` element. Default **off**: the
     /// markup is HTML5-flavoured and would move the reference goldens.
@@ -391,6 +394,7 @@ impl Default for Options {
             template_library: String::new(),
             list_templates: String::new(),
             vars: Vec::new(),
+            preset: String::new(),
             eight_bit_clean: false,
             escape_html_chars: true,
             explicit_headings: false,
@@ -679,6 +683,20 @@ impl Options {
         Ok((u8::from(whole), html, flag))
     }
 
+    /// The variables a selected pack template declares, with any manifest
+    /// defaults. Empty for custom templates and for an unresolved name (the
+    /// error is reported by [`Options::template_source`] and validation).
+    pub fn template_vars(&self) -> Vec<crate::pack::validate::Var> {
+        if self.template_library.is_empty() {
+            return Vec::new();
+        }
+        let catalog = crate::pack::discover(&self.search_path());
+        match catalog.resolve(&self.template_library) {
+            Ok(entry) => entry.vars.clone(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// The options whose value is a caller-supplied regular expression, as
     /// `(option, pattern)`. This explicit list is checked against
     /// [`Options::REGEXP_OPTIONS`] and the CLI table by `tests/cliexit.rs`; each
@@ -729,6 +747,18 @@ impl Options {
     }
 
     pub fn deal_with_options(&mut self) {
+        // Manifest var defaults are part of option resolution, not conversion:
+        // validation must see them, or a template whose var has a default
+        // would be refused for the `--var` the caller no longer has to type.
+        // An explicit value always wins, and this runs again harmlessly on the
+        // already-filled list.
+        for var in self.template_vars() {
+            if let Some(default) = var.default {
+                if !self.vars.iter().any(|(name, _)| name == &var.name) {
+                    self.vars.push((var.name, default));
+                }
+            }
+        }
         if !self.make_links {
             self.links_dictionaries.clear();
         }

@@ -3104,10 +3104,16 @@ impl Converter {
                 self.title_text
             )
         };
+        // `lang` is the declared language as an attribute value, so a shipped
+        // template writes `<html lang="{{textrill:lang}}">` instead of hard-
+        // coding `en`. It is escaped like any other attribute; an empty
+        // `--lang` therefore renders an empty attribute in a template.
+        let lang = chars::escape_attr(&self.opts.lang);
         let mut slots = vec![
             ("content", body.as_str()),
             ("toc", toc),
             ("title", self.title_text.as_str()),
+            ("lang", lang.as_str()),
             ("header", header.as_str()),
             ("head", self.head_inner.as_str()),
             ("pager", ""),
@@ -4073,6 +4079,48 @@ mod delim_linear_tests {
         Converter::new(opts)
     }
 
+    /// Run `body` over every text in `texts`, with one [`Converter`] per worker
+    /// and the work split across the machine's cores. The random suites below
+    /// are 20,000 single-threaded iterations of two fancy-regex differentials
+    /// each, which is minutes of wall clock on one core; the iterations are
+    /// independent, so spreading them over the cores costs nothing in coverage
+    /// and turns the suite from minutes into seconds.
+    ///
+    /// It uses *half* the cores, not all of them: `cargo test` runs test
+    /// functions in parallel, so the three heavy suites here can be in flight
+    /// at once, and each claiming every core would oversubscribe the machine
+    /// and run *slower* than half-cores each. Two suites at half the cores fill
+    /// the box without the contention; a lone suite still uses half, which is
+    /// ample next to the regex work that dominates the runtime.
+    ///
+    /// Each worker builds its own `Converter` (the checks take `&mut` and the
+    /// cached regexes are shared safely), so there is no state to synchronize.
+    pub(crate) fn run_parallel(texts: &[String], body: impl Fn(&mut Converter, &str) + Sync) {
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let workers = (cores / 2).max(1);
+        if workers <= 1 || texts.len() < 2 {
+            let mut c = conv();
+            for text in texts {
+                body(&mut c, text);
+            }
+            return;
+        }
+        let chunk = texts.len().div_ceil(workers);
+        std::thread::scope(|scope| {
+            for slice in texts.chunks(chunk) {
+                let body = &body;
+                scope.spawn(move || {
+                    let mut c = conv();
+                    for text in slice {
+                        body(&mut c, text);
+                    }
+                });
+            }
+        });
+    }
+
     /// The original `replace_all_captures`: iterate matches with
     /// `captures_iter`.
     fn orig_replace(re: &fancy_regex::Regex, text: &str, tag: &str) -> String {
@@ -4207,7 +4255,6 @@ mod delim_linear_tests {
             'a', 'b', 'Z', '0', '9', ' ', '\t', '\n', '!', '.', '-', '_', '#', '*', '^', '<', '>',
             '&', '"', '/', '=', '@', '`', '{', '}', '~',
         ];
-        let mut c = conv();
         let mut state = 0x243F_6A88_85A3_08D3u64;
         let mut next = || {
             // xorshift64
@@ -4216,15 +4263,19 @@ mod delim_linear_tests {
             state ^= state << 17;
             state
         };
-        for _ in 0..20_000 {
-            let len = (next() % 24) as usize;
-            let text: String = (0..len)
-                .map(|_| alphabet[(next() as usize) % alphabet.len()])
-                .collect();
+        let texts: Vec<String> = (0..20_000)
+            .map(|_| {
+                let len = (next() % 24) as usize;
+                (0..len)
+                    .map(|_| alphabet[(next() as usize) % alphabet.len()])
+                    .collect()
+            })
+            .collect();
+        run_parallel(&texts, |c, text| {
             for &(delim, tag) in DELIMS {
-                check_pair(&mut c, &text, delim, tag);
+                check_pair(c, text, delim, tag);
             }
-        }
+        });
     }
 }
 
@@ -4232,7 +4283,7 @@ mod delim_linear_tests {
 /// `#...#` pattern and the underscore pattern.
 #[cfg(test)]
 mod delim_wide_linear_tests {
-    use super::delim_linear_tests::check_pair;
+    use super::delim_linear_tests::{check_pair, run_parallel};
     use super::*;
     use crate::links::{ascii_re, ascii_re_cached};
     use crate::options::Options;
@@ -4444,7 +4495,6 @@ mod delim_wide_linear_tests {
         // a delimiter is 0xC3 0xA9, which shares its trailing byte 0xA9 with
         // several other characters, so a byte-wise "previous char" test is wrong
         const NONASCII: &[(char, &str)] = &[('\u{e9}', "em"), ('\u{fc}', "strong")];
-        let mut c = conv();
         let mut state = 0x2545_F491_4F6C_DD1Du64;
         let mut next = || {
             state ^= state << 13;
@@ -4452,20 +4502,24 @@ mod delim_wide_linear_tests {
             state ^= state << 17;
             state
         };
-        for _ in 0..20_000 {
-            let len = (next() % 24) as usize;
-            let text: String = (0..len)
-                .map(|_| alphabet[(next() as usize) % alphabet.len()])
-                .collect();
-            check_bold(&mut c, &text);
-            check_under(&mut c, &text);
+        let texts: Vec<String> = (0..20_000)
+            .map(|_| {
+                let len = (next() % 24) as usize;
+                (0..len)
+                    .map(|_| alphabet[(next() as usize) % alphabet.len()])
+                    .collect()
+            })
+            .collect();
+        run_parallel(&texts, |c, text| {
+            check_bold(c, text);
+            check_under(c, text);
             for delim in ["XY", "@@"] {
-                check_multi(&mut c, &text, delim);
+                check_multi(c, text, delim);
             }
             for (delim, tag) in NONASCII {
-                check_pair(&mut c, &text, *delim, tag);
+                check_pair(c, text, *delim, tag);
             }
-        }
+        });
     }
 
     #[test]
@@ -4517,7 +4571,6 @@ mod delim_wide_linear_tests {
             'a', 'b', 'Z', '0', ' ', '\t', '\n', '!', '.', '-', '@', 'X', 'Y', '*', '"', '\'', '_',
             '#', '^', '<', '>', '&', '/', '=', '`', '{',
         ];
-        let mut c = conv();
         let mut state = 0x9E37_79B9_7F4A_7C15u64;
         let mut next = || {
             state ^= state << 13;
@@ -4525,15 +4578,19 @@ mod delim_wide_linear_tests {
             state ^= state << 17;
             state
         };
-        for _ in 0..20_000 {
-            let len = (next() % 28) as usize;
-            let text: String = (0..len)
-                .map(|_| alphabet[(next() as usize) % alphabet.len()])
-                .collect();
+        let texts: Vec<String> = (0..20_000)
+            .map(|_| {
+                let len = (next() % 28) as usize;
+                (0..len)
+                    .map(|_| alphabet[(next() as usize) % alphabet.len()])
+                    .collect()
+            })
+            .collect();
+        run_parallel(&texts, |c, text| {
             for delim in ["XY", "@@"] {
-                check_multi(&mut c, &text, delim);
+                check_multi(c, text, delim);
             }
-        }
+        });
     }
 
     #[test]
@@ -4542,7 +4599,6 @@ mod delim_wide_linear_tests {
             'a', 'b', 'Z', '0', '9', ' ', '\t', '\n', '!', '.', '-', '_', '#', '*', '^', '<', '>',
             '&', '"', '/', '=', '@', '`', '{', '}', '~', '?', ';', ':', '\'',
         ];
-        let mut c = conv();
         let mut state = 0xB502_6F5A_A966_19E9u64;
         let mut next = || {
             state ^= state << 13;
@@ -4550,14 +4606,18 @@ mod delim_wide_linear_tests {
             state ^= state << 17;
             state
         };
-        for _ in 0..20_000 {
-            let len = (next() % 28) as usize;
-            let text: String = (0..len)
-                .map(|_| alphabet[(next() as usize) % alphabet.len()])
-                .collect();
-            check_bold(&mut c, &text);
-            check_under(&mut c, &text);
-        }
+        let texts: Vec<String> = (0..20_000)
+            .map(|_| {
+                let len = (next() % 28) as usize;
+                (0..len)
+                    .map(|_| alphabet[(next() as usize) % alphabet.len()])
+                    .collect()
+            })
+            .collect();
+        run_parallel(&texts, |c, text| {
+            check_bold(c, text);
+            check_under(c, text);
+        });
     }
 }
 

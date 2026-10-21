@@ -167,6 +167,51 @@ fn template_dir_makes_a_pack_discoverable_and_selectable() {
     assert!(conv.out().contains("Body text."), "{}", conv.out());
 }
 
+/// A manifest `default` makes a pack template usable with no `--var`, and an
+/// explicit `--var` of the same name overrides it.
+#[test]
+fn a_pack_var_default_fills_in_when_no_value_is_given() {
+    let s = Scratch::new("var-default");
+    let roots = s.root.join("extra");
+    let dir = roots.join("org.test.defaults");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("template.toml"),
+        "schema = 1
+id = \"org.test.defaults\"\nname = \"Defaults\"\n\
+         version = \"1.0.0\"\nlicense = \"GPL-3.0-or-later\"\n\
+         description = \"d\"\n[[templates]]\nfile = \"page.html\"\n\
+         model = \"body\"\n[[templates.vars]]\nname = \"by\"\n\
+         default = \"Anonymous\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("page.html"),
+        "<footer>{{textrill:var:by}}</footer>{{textrill:content}}",
+    )
+    .unwrap();
+
+    let args = [
+        "--template_dir",
+        roots.to_str().unwrap(),
+        "--template_library",
+        "org.test.defaults:page",
+    ];
+    let out = s.run(&args, b"Body.\n");
+    assert_eq!(out.code, 0, "{}", out.err());
+    assert!(
+        out.out().contains("<footer>Anonymous</footer>"),
+        "{}",
+        out.out()
+    );
+
+    let mut overridden = args.to_vec();
+    overridden.extend(["--var", "by=Ada"]);
+    let out = s.run(&overridden, b"Body.\n");
+    assert_eq!(out.code, 0, "{}", out.err());
+    assert!(out.out().contains("<footer>Ada</footer>"), "{}", out.out());
+}
+
 #[test]
 fn template_dir_beats_the_default_roots_and_names_the_collision() {
     let s = Scratch::new("precedence");

@@ -49,6 +49,35 @@ Per-entry keys: `id`, `name`, `version`, `description`, `authors`, `license`, `t
 - **`archive`** is relative to the catalog directory; a path that escapes the catalog (e.g. `../`) is refused.
 - The installed pack's own manifest id must match the index `id`.
 
+### template.toml (the pack manifest)
+
+Beside the pack's files, a pack carries `template.toml`: the same strict TOML
+subset as the index — `schema = 1` at the top, then one or more `[[templates]]`
+entries, each optionally followed by its own `[[templates.vars]]` entries.
+Unknown keys and sections are refused with the line and the allowed keys.
+
+```toml
+schema = 1
+id = "org.example.academic-book"
+name = "Academic Book"
+version = "1.2.0"
+license = "CC0-1.0"
+
+[[templates]]
+file = "chapter.html"
+model = "body"
+
+[[templates.vars]]
+name = "byline"
+required = false
+default = "Anonymous"
+```
+
+`[[templates.vars]]` keys: `name` (required), `required` (a missing `--var`
+is an error when true), and `default`. A **`default`** fills in when no
+`--var` is given, so a pack template works with zero arguments while an
+explicit `--var` still overrides it.
+
 ### Commands
 
 - `textrill templates search <query> [--catalog_dir DIR]` — search installed packs *and* registered catalogs; entries needing a newer textrill are marked

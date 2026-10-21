@@ -19,6 +19,7 @@ pub mod notes;
 pub mod options;
 pub mod pack;
 pub mod prefilter;
+pub mod presets;
 pub mod rcfile;
 pub mod report;
 pub mod section;
