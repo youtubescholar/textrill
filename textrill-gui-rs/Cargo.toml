@@ -8,7 +8,7 @@ repository = "https://github.com/youtubescholar/textrill"
 homepage = "https://github.com/youtubescholar/textrill"
 
 [dependencies]
-textrill = { path = "../textrill" }
+textrill = { version = "0.1.0", path = "../textrill" }
 egui = "0.36"
 # `glow` (OpenGL) rather than the default `wgpu`: it is the smaller tree, and
 # it is what was validated on this host. `default_fonts` bundles a font so the
@@ -22,10 +22,10 @@ eframe = { version = "0.36", default-features = false, features = ["default_font
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 
 [dev-dependencies]
-# Headless widget queries over AccessKit. `kittest` must match the version
-# `egui_kittest` re-exports, or the query trait methods do not resolve.
+# Headless widget queries over AccessKit. The tests import the `kittest`
+# re-export from `egui_kittest`; a direct `kittest` dependency just adds a
+# second AccessKit tree to the supply-chain graph.
 egui_kittest = "0.36"
-kittest = "0.3"
 
 # Package metadata for the native distro packages. The desktop file, metainfo
 # and icons are the same files the Flatpak manifest and AppImage install.

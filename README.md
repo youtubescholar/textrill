@@ -32,19 +32,26 @@ original is kept as an on-demand cross-check (`make diff`, in the non-gating
 
 ## Build and verify
 
-Requires a Rust toolchain with `rustfmt` and `clippy`.
+`rust-toolchain.toml` pins the compiler and the `rustfmt`/`clippy` components.
 
 ```sh
-make build            # the CLI (single static musl binary)
+make build            # the CLI (release build)
+make musl             # the CLI as a static musl binary (needs the musl target)
 printf 'Hello *world*.\n' | ./textrill/target/release/textrill
 make verify           # fmt, clippy, tests, properties, acceptance — the gate
+make bench            # criterion benchmarks for large-document conversion
+make repro            # two clean CLI builds must match byte for byte
+make deny             # supply chain: cargo-deny + cargo-audit, both crates
+make sbom             # CycloneDX SBOMs under dist/sbom
 ```
 
-`make verify` needs no Perl and means the same thing here and on CI. The CI
-workflow also runs the static-musl acceptance and validates the desktop
-metadata; a `v*` tag triggers `.github/workflows/release.yml`, which publishes
-the Flatpak, AppImage, deb/rpm and Windows/macOS artifacts (and the engine crate
-when a crates.io token is configured).
+`make verify` needs no Perl and means the same thing here and on CI. CI also
+runs `make deny` in a separate supply-chain job, checks that two clean builds
+are byte-identical, and validates the desktop metadata; a `v*` tag triggers
+`.github/workflows/release.yml`, which rechecks reproducibility with
+`make repro-all` and publishes the Flatpak, AppImage, deb/rpm, Windows/macOS
+artifacts and CycloneDX SBOMs (and the engine crate when a crates.io token is
+configured).
 
 ## Changing what the tool outputs
 

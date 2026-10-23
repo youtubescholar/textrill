@@ -596,6 +596,38 @@ notarisation and the Flathub submission remain external follow-ups.
 5. **Docs.** A short `docs/templates.md` (pack authoring + catalogs), an issue
    template, and a release checklist. Keep the "small docs" house rule.
 
+**7.1 status.** `make deny` is a separate gate (not in `verify`, so a missing
+cargo plugin cannot break the product gate): `cargo-deny` checks advisories,
+licences, sources and duplicate versions against both lockfiles, and
+`cargo-audit --deny warnings` scans both. `deny.toml` documents every allowed
+licence and every duplicate-version skip. CI has a dedicated supply-chain job;
+`make sbom` writes CycloneDX 1.5 documents for both crates and the release
+workflow attaches them to the GitHub release.
+
+**7.2 status.** The `cargo-fuzz` workspace under `textrill/fuzz` has six
+targets: the converter (`convert_text`, `process_chunk`), encoding detection
+(`decode_bytes`), pack/archive parsing (`archive_unpack`,
+`pack_manifest_parse`) and the dictionary/link parser (`link_parser`). Curated
+seed corpora are tracked under `corpus/<target>`; generated additions are
+ignored. CI runs a time-budgeted smoke (`-max_total_time=60` and `-timeout=10`
+per target) and fails on a crash or hang.
+
+**7.3 status.** `rust-toolchain.toml` pins the compiler (1.98.1) and the
+`rustfmt`/`clippy` components; CI and release use the same version. `make repro`
+builds the static musl CLI twice in separate clean target directories with a
+commit-derived `SOURCE_DATE_EPOCH`, remapped paths and no incremental state,
+then requires byte-identical output. `make repro-gui` does the same for the GUI
+and `make repro-all` covers both. CI runs `make repro` on every change; the
+release workflow runs `make repro-all` and blocks publishing on it. Both
+binaries matched byte for byte on the verification host.
+
+**7.4 status.** `textrill/benches/convert.rs` uses criterion 0.8 (without its
+default plotting features) to measure `convert_text` on 64 KiB and 1 MiB
+generated documents and report throughput; `make bench` runs it. It is
+deliberately not part of `verify`: the hard resource guarantees remain
+`alloctest` and the fuzz smoke, not measurements. The remaining Phase 7
+workstream is 7.5 (the issue template and release checklist).
+
 ### Acceptance criteria
 - `make verify` (or `make deny`) fails on a known-bad dependency.
 - A fuzz corpus runs clean for a fixed budget in CI.
@@ -759,3 +791,32 @@ no network anywhere in the tool (not just the conversion path). See
   stay in `mod.rs`; moved methods are `pub(super)` and the public
   `crate::convert::*` paths are unchanged. `make verify` passes and no golden
   byte changed.
+
+- v9 — Phase 7.1 supply-chain gate landed. `make deny` runs cargo-deny and
+  cargo-audit against both lockfiles; `deny.toml` records the allowed licences
+  and the reviewed duplicate-version skips (including all-target Windows and
+  macOS splits). CI runs it in a separate job, and `make sbom` produces
+  CycloneDX 1.5 documents for both crates; the release workflow attaches them.
+
+- v10 — Phase 7.2 fuzzing started. `cargo-fuzz` workspace under `textrill/fuzz`
+  with targets for the converter (`convert_text`, `process_chunk`), encoding
+  detection (`decode_bytes`), pack/archive parsing (`archive_unpack`,
+  `pack_manifest_parse`) and the dictionary/link parser (`link_parser`). Seed
+  corpora pulled from the recorded acceptance cases. CI runs a short fuzz smoke;
+  no crashes found in short runs.
+
+- v11 — Phase 7.2 gate tightened. `decode_bytes` now fuzzes
+  `decode_bytes_with` across the encoding list instead of duplicating the
+  converter target, and all six targets are listed consistently in the Makefile,
+  CI and the roadmap. The CI smoke uses a fixed time budget, fails on a crash or
+  hang, and rejects written artifacts. Fuzz build warnings are cleared, and
+  `fuzz/target` plus the unused top-level generated corpus are out of git; the
+  curated `corpus/<target>` seeds stay tracked.
+
+- v12 — Phase 7.3 and 7.4 landed. The compiler is pinned in
+  `rust-toolchain.toml` (1.98.1) and used by CI and release. `make repro` builds
+  the static musl CLI twice with a commit-derived `SOURCE_DATE_EPOCH` and
+  remapped paths and requires identical bytes; `make repro-gui` extends it to
+  the GUI, and release runs `make repro-all` before publishing. Criterion 0.8
+  benchmarks `convert_text` at 64 KiB and 1 MiB via `make bench`, intentionally
+  outside `verify` so `alloctest` stays the hard resource gate.

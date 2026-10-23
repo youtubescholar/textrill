@@ -1,0 +1,56 @@
+[package]
+name = "textrill-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.textrill]
+path = ".."
+
+[[bin]]
+name = "convert_text"
+path = "fuzz_targets/convert_text.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "process_chunk"
+path = "fuzz_targets/process_chunk.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "archive_unpack"
+path = "fuzz_targets/archive_unpack.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_manifest_parse"
+path = "fuzz_targets/pack_manifest_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_bytes"
+path = "fuzz_targets/decode_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "link_parser"
+path = "fuzz_targets/link_parser.rs"
+test = false
+doc = false
+bench = false

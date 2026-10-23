@@ -14,6 +14,12 @@
 #   make scale         the 1 MB paragraph probes, timed against Perl
 #   make appimage      a local (non-portable) AppImage of the GUI and CLI
 #   make metadata      validate the desktop file and AppStream metainfo
+#   make fuzz          print the cargo-fuzz commands for the untrusted inputs
+#   make bench         criterion benchmarks for large-document conversion
+#   make repro         two clean CLI builds must be byte-identical
+#   make repro-gui     the same check for the GUI
+#   make deny          cargo-deny and cargo-audit for both lockfiles
+#   make sbom          CycloneDX SBOMs for both crates under dist/sbom
 #   make deb / rpm     native packages (needs cargo-deb / cargo-generate-rpm)
 #   make publish-crate publish the engine crate (needs a crates.io token)
 #
@@ -34,7 +40,7 @@ GUI_RS := $(ROOT)/textrill-gui-rs
 RELEASE_BIN := $(RS)/target/release/textrill
 export MINE := $(RELEASE_BIN)
 
-.PHONY: all verify build gui run-gui fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale ref ref-large musl corpus-musl accept-musl examples examples-write appimage metadata deb rpm packages publish-crate cargo-sources cargo-sources-check clean distclean
+.PHONY: all verify build gui run-gui fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale ref ref-large musl corpus-musl accept-musl repro repro-gui repro-all examples examples-write appimage metadata fuzz bench deny sbom deb rpm packages publish-crate cargo-sources cargo-sources-check clean distclean
 
 all: verify
 
@@ -92,6 +98,21 @@ accept-musl: musl
 corpus-musl: musl
 	$(MAKE) -C parity corpus MINE=$(MUSL_BIN)
 
+# --- reproducible builds -----------------------------------------------------
+
+# Build each artifact twice in separate clean target directories and require
+# the bytes to match. rust-toolchain.toml pins the compiler; SOURCE_DATE_EPOCH
+# comes from the commit; paths are remapped so the build directory does not
+# leak into the binary. Not part of `verify`: every artifact is built twice.
+# CI runs `make repro` on every change; release runs `make repro-all`.
+repro:
+	$(RS)/tests/repro.sh $(RS)/Cargo.toml textrill $(MUSL_TARGET)
+
+repro-gui:
+	$(RS)/tests/repro.sh $(GUI_RS)/Cargo.toml textrill-gui
+
+repro-all: repro repro-gui
+
 # --- rust --------------------------------------------------------------------
 
 fmt:
@@ -121,6 +142,52 @@ test: build
 # widget tree directly), so this needs no display.
 test-gui-rs:
 	cd $(GUI_RS) && $(CARGO) test
+
+# --- benchmarks --------------------------------------------------------------
+
+# Measurements, not gates: the hard guarantees are `alloctest` and the fuzz
+# smoke. Criterion builds in release and reports throughput for large documents.
+bench:
+	cd $(RS) && $(CARGO) bench --bench convert
+
+# --- fuzzing -----------------------------------------------------------------
+
+# Not part of `verify`: it needs a nightly toolchain and cargo-fuzz. CI runs a
+# short, time-budgeted smoke and fails on a crash. The curated seed corpus under
+# textrill/fuzz/corpus/<target> is tracked; generated additions are ignored.
+fuzz:
+	@echo "fuzz targets: convert_text process_chunk decode_bytes archive_unpack pack_manifest_parse link_parser (in textrill/fuzz)"
+	@echo "run: cd textrill/fuzz && cargo +nightly fuzz run <target> -- -max_len=4096 -timeout=10 -max_total_time=60"
+
+# --- supply chain ------------------------------------------------------------
+
+# Deliberately not part of `verify`: cargo-deny/cargo-audit are extra tools and
+# the audit needs the RustSec database, so a developer without them can still
+# run the product gate. CI runs this in its own job.
+#
+# The engine graph contains none of the GUI-only licences or duplicate skips in
+# deny.toml, so silence the two expected "not encountered" lints there; the GUI
+# run remains strict.
+deny:
+	cd $(RS) && $(CARGO) deny --all-features check \
+	  -A license-not-encountered -A unmatched-skip
+	cd $(GUI_RS) && $(CARGO) deny --all-features check
+	cd $(RS) && $(CARGO) audit --deny warnings
+	cd $(GUI_RS) && $(CARGO) audit --deny warnings
+
+# One CycloneDX document per crate, named `textrill.cdx.json` and
+# `textrill-gui.cdx.json`. cargo-cyclonedx honours SOURCE_DATE_EPOCH; the
+# release job sets it from the tagged commit. `--target all` covers the
+# Windows/macOS dependencies that the host-only default would omit.
+SBOM_DIR := $(ROOT)/dist/sbom
+
+sbom:
+	mkdir -p $(SBOM_DIR)
+	cd $(RS) && $(CARGO) cyclonedx --format json --spec-version 1.5 --target all
+	mv -f $(RS)/textrill.cdx.json $(SBOM_DIR)/
+	cd $(GUI_RS) && $(CARGO) cyclonedx --format json --spec-version 1.5 --target all
+	mv -f $(GUI_RS)/textrill-gui.cdx.json $(SBOM_DIR)/
+	ls -l $(SBOM_DIR)
 
 # --- properties and resource bounds ------------------------------------------
 

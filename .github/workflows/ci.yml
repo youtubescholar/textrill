@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: rustfmt, clippy
           targets: x86_64-unknown-linux-musl
@@ -43,3 +43,61 @@ jobs:
 
       - name: desktop metadata
         run: make metadata
+
+  reproducible:
+    name: reproducible build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Two clean builds must match
+        run: make repro
+
+  supply-chain:
+    name: supply chain
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      # Pinned so a new cargo-deny lint cannot turn the gate red without a
+      # reviewable change here.
+      - name: Install supply-chain tools
+        run: cargo install --locked cargo-deny@0.20.2 cargo-audit@0.22.2
+
+      - name: make deny
+        run: make deny
+
+  fuzz-smoke:
+    name: fuzz smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install --locked cargo-fuzz@0.13.2
+
+      - name: Smoke fuzz the untrusted surfaces
+        run: |
+          set -euo pipefail
+          cd textrill/fuzz
+          for t in convert_text process_chunk decode_bytes archive_unpack pack_manifest_parse link_parser; do
+            cargo +nightly fuzz run "$t" --target x86_64-unknown-linux-gnu -- \
+              -max_len=4096 -timeout=10 -max_total_time=60
+          done
+          if find artifacts -type f -print -quit | grep -q .; then
+            echo "ERROR: fuzz artifacts were written; inspect and commit a regression input" >&2
+            exit 1
+          fi

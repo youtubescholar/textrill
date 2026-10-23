@@ -36,11 +36,20 @@ thing on every machine.
 ```sh
 make verify      # fmt, clippy (-D warnings), engine + GUI tests, proptest,
                  #   alloctest, acceptance
+make deny        # separate supply-chain gate: cargo-deny + cargo-audit
+make sbom        # optional: CycloneDX SBOMs under dist/sbom
+make fuzz        # optional: print the cargo-fuzz commands (needs nightly)
+make bench       # optional: criterion benchmarks (measurements, not gates)
+make repro       # optional: two clean CLI builds must be byte-identical
+make repro-gui   # optional: the same check for the GUI
 make accept-write / make examples-write   # recapture
 make diff        # optional: the Perl differential corpus, as a cross-check
 make metadata    # optional: desktop-file-validate + AppStream validation
 make packages    # optional: deb/rpm (needs cargo-deb, cargo-generate-rpm)
 ```
+
+`make deny` needs `cargo-deny`, `cargo-audit` and the RustSec database; it is
+kept out of `verify` so the product gate does not fail for a missing tool.
 
 `make verify` needs no Perl and passes with the `parity/` directory absent:
 everything reference-related (the Perl tree, the stubs, the tracked tarballs,

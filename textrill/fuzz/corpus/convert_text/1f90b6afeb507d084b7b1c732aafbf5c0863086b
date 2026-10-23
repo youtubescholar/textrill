@@ -1,0 +1,27 @@
+This is for testing a table which is regognised by its alignment.
+
+	Fruit   Vegetable
+       Banana   Carrot
+        Apple   Celery
+
+The following is not a table because there aren't enough spaces between
+items.
+
+Fred Nurk    ate
+Mary Norton  slept
+Hugh Jackman snarled
+
+But this og a table which is regognised by its alignment.
+
+	Fruit   Vegetable
+       Banana   Carrot
+        Apple   Celery
+
+The following is not a table because there aren't enough spaces between
+items.
+
+Fred Nurk    atne is
+
+Fred  Nurk     ate
+Mary  Norton   slept
+Hugh  Jackman  snarled

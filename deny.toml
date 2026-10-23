@@ -1,0 +1,85 @@
+# Supply-chain policy for both crates.
+#
+# `make deny` runs this against the engine and the GUI. The engine is a tiny,
+# dependency-free product; the GUI necessarily inherits the egui/eframe stack.
+# The checks are deliberately strict: advisories, licences and sources fail the
+# gate, and duplicate versions are denied except for the known upstream splits
+# listed below. Each exception carries the reason it exists so a future update
+# can remove it rather than silently widening the policy.
+
+[advisories]
+# No advisory IDs are ignored. An exception needs a written reason here and in
+# the commit that adds it.
+ignore = []
+
+[licenses]
+# The project is GPL-3.0-or-later. These are the permissive and font licences
+# already present in the two locked graphs; `make deny` fails if a dependency
+# introduces anything else.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "GPL-3.0-or-later",
+    "ISC",
+    "MIT",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+private = { ignore = false }
+
+[bans]
+# A new duplicate is a supply-chain decision, not a warning. These are the only
+# known splits in the locked GUI tree; everything else must stay single-version.
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"
+skip = [
+    { crate = "bitflags@1.3.2", reason = "core-graphics 0.23 via winit 0.30 still uses bitflags 1; the rest uses bitflags 2" },
+    { crate = "block2@0.5.1", reason = "objc2 0.5 (via older macOS deps) and objc2 0.6 split block2" },
+    { crate = "calloop@0.13.0", reason = "winit 0.30 still pulls smithay-client-toolkit 0.19; remove when winit moves" },
+    { crate = "calloop-wayland-source@0.3.0", reason = "follows calloop 0.13 from smithay-client-toolkit 0.19" },
+    { crate = "getrandom@0.3.4", reason = "older callers still use getrandom 0.3; the current stack uses 0.4" },
+    { crate = "jni-sys@0.3.1", reason = "older Android JNI shims use jni-sys 0.3; jni 0.22 uses 0.4" },
+    { crate = "linux-raw-sys@0.4.15", reason = "rustix 0.38 (winit) and rustix 1.1 (desktop stack) coexist" },
+    { crate = "miniz_oxide@0.8.9", reason = "png 0.18 has not moved to the miniz_oxide used by flate2" },
+    { crate = "objc2@0.5.2", reason = "objc2 0.5 and 0.6 surfaces coexist in the macOS dependency stack" },
+    { crate = "objc2-app-kit@0.2.2", reason = "follows the objc2 0.5 split" },
+    { crate = "objc2-foundation@0.2.2", reason = "follows the objc2 0.5 split" },
+    { crate = "objc2-ui-kit@0.2.2", reason = "follows the objc2 0.5 split" },
+    { crate = "redox_syscall@0.4.1", reason = "older Redox users in the winit stack still pin 0.4" },
+    { crate = "redox_syscall@0.5.18", reason = "intermediate Redox users pin 0.5; the current stack uses 0.9" },
+    { crate = "r-efi@5.3.0", reason = "the UEFI shim still uses r-efi 5; the current getrandom stack uses 6" },
+    { crate = "rustix@0.38.44", reason = "calloop 0.13 still uses rustix 0.38; the rest uses 1.1" },
+    { crate = "smithay-client-toolkit@0.19.2", reason = "winit 0.30 vs smithay-clipboard 0.7 split the Wayland stack" },
+    { crate = "syn@2.0.119", reason = "thiserror 1.x (via calloop 0.13) still needs syn 2; the rest uses syn 3" },
+    { crate = "thiserror@1.0.69", reason = "calloop 0.13 has not moved to thiserror 2" },
+    { crate = "thiserror-impl@1.0.69", reason = "follows thiserror 1.0.69" },
+    { crate = "windows_aarch64_gnullvm@0.52.6", reason = "windows-targets 0.52 and windows-sys 0.52 pin the 0.52 import libraries" },
+    { crate = "windows_aarch64_msvc@0.52.6", reason = "windows-targets 0.52 and windows-sys 0.52 pin the 0.52 import libraries" },
+    { crate = "windows_i686_gnu@0.52.6", reason = "windows-targets 0.52 and windows-sys 0.52 pin the 0.52 import libraries" },
+    { crate = "windows_i686_gnullvm@0.52.6", reason = "windows-targets 0.52 and windows-sys 0.52 pin the 0.52 import libraries" },
+    { crate = "windows_i686_msvc@0.52.6", reason = "windows-targets 0.52 and windows-sys 0.52 pin the 0.52 import libraries" },
+    { crate = "windows-sys@0.52.0", reason = "older winit and Windows deps still use windows-sys 0.52" },
+    { crate = "windows-sys@0.59.0", reason = "intermediate Windows deps still use windows-sys 0.59" },
+    { crate = "windows-sys@0.60.2", reason = "intermediate Windows deps still use windows-sys 0.60; the current stack uses 0.61" },
+    { crate = "windows-targets@0.52.6", reason = "follows windows-sys 0.52" },
+    { crate = "windows_x86_64_gnu@0.52.6", reason = "windows-targets 0.52 and windows-sys 0.52 pin the 0.52 import libraries" },
+    { crate = "windows_x86_64_gnullvm@0.52.6", reason = "windows-targets 0.52 and windows-sys 0.52 pin the 0.52 import libraries" },
+    { crate = "windows_x86_64_msvc@0.52.6", reason = "windows-targets 0.52 and windows-sys 0.52 pin the 0.52 import libraries" },
+]
+
+[sources]
+# The only permitted source is crates.io. A git or alternative-registry
+# dependency must be reviewed and added here explicitly.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
