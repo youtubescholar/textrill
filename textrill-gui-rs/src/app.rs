@@ -1676,9 +1676,9 @@ impl TextrillApp {
                 }
             });
             ui.menu_button("Help", |ui| {
-                if ui.button("About").clicked() {
+                if ui.button("About…").clicked() {
                     self.about_open = true;
-                    ui.close();
+                    ui.close_menu();
                 }
             });
         });
@@ -1839,15 +1839,14 @@ impl TextrillApp {
         if !self.about_open {
             return;
         }
-        egui::Window::new("About textrill")
+        egui::Window::new("About")
             .collapsible(false)
             .resizable(false)
             .open(&mut self.about_open)
             .show(ctx, |ui| {
                 ui.label(format!("textrill {}", env!("CARGO_PKG_VERSION")));
-                ui.label("Plain text to HTML, with an egui front end.");
-                ui.label("Structure is inferred from layout; no markup required.");
-                ui.label("Released under the GNU General Public License, version 3 or later.");
+                ui.label("Plain text to HTML.");
+                ui.label("GPLv3+");
             });
     }
 
