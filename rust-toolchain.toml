@@ -1,0 +1,6 @@
+# Pin the compiler so release builds are reproducible. CI uses the same version;
+# the fuzz job explicitly selects nightly with `cargo +nightly`.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

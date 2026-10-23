@@ -1,0 +1,9 @@
+schema = 1
+id = org.example.x
+name = X
+version = 1.0.0
+license = GPL-3.0-or-later
+
+[[templates]]
+file = x.html
+model = body

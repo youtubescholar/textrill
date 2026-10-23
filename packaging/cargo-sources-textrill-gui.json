@@ -2,19 +2,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/accesskit/accesskit-0.21.1.crate",
-        "sha256": "cf203f9d3bd8f29f98833d1fbef628df18f759248a547e7e01cfbf63cda36a99",
-        "dest": "cargo/vendor/accesskit-0.21.1"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"cf203f9d3bd8f29f98833d1fbef628df18f759248a547e7e01cfbf63cda36a99\", \"files\": {}}",
-        "dest": "cargo/vendor/accesskit-0.21.1",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/accesskit/accesskit-0.24.1.crate",
         "sha256": "d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320",
         "dest": "cargo/vendor/accesskit-0.24.1"
@@ -23,19 +10,6 @@
         "type": "inline",
         "contents": "{\"package\": \"d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320\", \"files\": {}}",
         "dest": "cargo/vendor/accesskit-0.24.1",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/accesskit_consumer/accesskit_consumer-0.30.1.crate",
-        "sha256": "bdd06f5fea9819250fffd4debf926709f3593ac22f8c1541a2573e5ee0ca01cd",
-        "dest": "cargo/vendor/accesskit_consumer-0.30.1"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"bdd06f5fea9819250fffd4debf926709f3593ac22f8c1541a2573e5ee0ca01cd\", \"files\": {}}",
-        "dest": "cargo/vendor/accesskit_consumer-0.30.1",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -977,19 +951,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/foldhash/foldhash-0.1.5.crate",
-        "sha256": "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2",
-        "dest": "cargo/vendor/foldhash-0.1.5"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2\", \"files\": {}}",
-        "dest": "cargo/vendor/foldhash-0.1.5",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/foldhash/foldhash-0.2.0.crate",
         "sha256": "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb",
         "dest": "cargo/vendor/foldhash-0.2.0"
@@ -1276,19 +1237,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/hashbrown/hashbrown-0.15.5.crate",
-        "sha256": "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1",
-        "dest": "cargo/vendor/hashbrown-0.15.5"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1\", \"files\": {}}",
-        "dest": "cargo/vendor/hashbrown-0.15.5",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/hashbrown/hashbrown-0.16.1.crate",
         "sha256": "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100",
         "dest": "cargo/vendor/hashbrown-0.16.1"
@@ -1466,19 +1414,6 @@
         "type": "inline",
         "contents": "{\"package\": \"e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc\", \"files\": {}}",
         "dest": "cargo/vendor/khronos_api-3.1.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/kittest/kittest-0.3.0.crate",
-        "sha256": "01fd6dd2cce251a360101038acb9334e3a50cd38cd02fefddbf28aa975f043c8",
-        "dest": "cargo/vendor/kittest-0.3.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"01fd6dd2cce251a360101038acb9334e3a50cd38cd02fefddbf28aa975f043c8\", \"files\": {}}",
-        "dest": "cargo/vendor/kittest-0.3.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {

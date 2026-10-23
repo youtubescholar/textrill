@@ -213,12 +213,14 @@ built binaries (`$auto` for deb, the built-in `ldd` pass for rpm).
 that does not match both crate versions and validates the desktop metadata.
 The Linux job re-runs `make verify`, the static musl acceptance, then builds the
 AppImage, deb and rpm packages; separate jobs build the Flatpak, Windows and
-macOS binaries and publish everything with a `SHA256SUMS.txt` on the GitHub
-release. The engine crate is published to crates.io when
-`CARGO_REGISTRY_TOKEN` is configured (the binaries still ship without it).
+macOS binaries, generate the CycloneDX SBOMs and publish everything with a
+`SHA256SUMS.txt` on the GitHub release. The engine crate is published to
+crates.io when `CARGO_REGISTRY_TOKEN` is configured (the binaries still ship
+without it).
 
-CI (`.github/workflows/ci.yml`) runs `make verify`, the musl acceptance and
-`make metadata` on every push and pull request.
+CI (`.github/workflows/ci.yml`) runs `make verify`, the musl acceptance,
+`make metadata` and the separate `make deny` supply-chain job on every push and
+pull request.
 
 ## Still missing for distribution
 

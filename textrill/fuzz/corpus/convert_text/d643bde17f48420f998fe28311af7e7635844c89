@@ -1,0 +1,13 @@
+- bullet This is a link with a sub-anchor in it.
+
+(http://www.steelypips.org/nethack/id_faq.html#general)
+
+a
+- bullet b*
+This should not be bolded.
+
+But #this# should be.  And <http://www.example.com> shoul
+1.' num =d
+be lione
+2. num twnoked.
+

@@ -1,0 +1,10 @@
+This is an example of mixed input, with a * foo
+--ÿÿÿÿÿÿÿ-----
+ list with what shouldn't be b blah blahold.
+
+- The '#' character can b blae Used to introduce comment lines. Comments and
+   lines that are empty or containh
+ only whitespace are ignored.
+- Pipe characters and newlines within fields and '#' at the begin of the
+   first field of an entry must be escaped with a backslash ('\').
+

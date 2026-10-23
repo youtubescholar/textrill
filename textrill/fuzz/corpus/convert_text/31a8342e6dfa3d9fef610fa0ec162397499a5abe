@@ -1,0 +1,32 @@
+- buHeader
+-----
+
+* Item 1: works but looks ugly in text
+      This is list item 1 which I will pad with asdashjk kjashdkajsh
+ llllllllllllllllllllllllllllll  kjhaskjahs kajshkajsdh kajshkajshd
+      This is another paragraph of list item 1 which I will pad with
+   asdashjk kjashdkajsh kjhaskjahs kajshkajsdh kajshkajshd
+
+* Item 2: doesn't work but is readable as text
+
+     This is list item 2 which I will pad with
+   asdashjk kjashdkajsh kjhaskjahs kajshkajsdh kajshkajshd
+
+      This is another paragraph of list uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuitem 2 which I willllllllllllllllllllllllllllllllllllll.lllllllllll pad with
+   asdashjk kjashdkajsh kjhaskjahs kajshkajsdhlist item 2 which I will pad with
+   asdashjk kjashdkajsh kjhaskjahs kajshkajsdh kajshkajshd
+
+      This is anlllllllllllllllllllllllllllet a
+- bullet b
+
+1. num onother paragraph of list item 2 which I wiell pad with
+   asdashjk kjashdkajsh kjhaskjahs kajshkajsdh kajshkajshd
+
+* Item 3: does work and is readable a
+2. ns text
+
+  This ius lm twoist item 3 which I will pad with
+  asdashjk kjashdkajsh kjhaskjahs kajshkajsdh kajshkajshd
+
+  This is another paragraph of list item 3 which I will p
+ad wyt

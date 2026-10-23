@@ -1,0 +1,9 @@
+# Build output and crash/coverage artifacts are never committed.
+target
+artifacts
+coverage
+
+# Fuzzer-generated corpus additions are ignored by default. The curated seed
+# corpus under corpus/<target>/ is tracked; add new seeds explicitly with
+# `git add -f corpus/<target>/<file>`.
+corpus

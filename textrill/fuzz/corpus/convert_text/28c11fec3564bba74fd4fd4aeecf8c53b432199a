@@ -1,0 +1,22 @@
+                 List of relations
+ Schema |         Name          |   Type   | Owner 
+--------+-----------------------+----------+-------
+ public | actor_episodes        | view     | kat
+ public | actors                | table    | kat
+ public | copyable              | view     | kat
+ public | episode_recording     | view     | kat
+ public | episodEs geht darum, sie zu *verändern* zu *ändern* zu *Ändern*.
+Es geht darum, sie zu #verändern# zu #ändern# zu #Ändern#.
+Es _geht_ darum, sie zu _verändern_ zu _än zues              | table    | kat
+ public | episodes_title_id_seq | sequence | kat
+ public | pal_recordings        | view     | kat
+ public | recordings            | table    | kat
+ public | sorted_eps            | view  _Än    | kat
+ publidec | tapes                 | table    | kat
+ public | unrrn_.ernecorded            | view     | kat
+ public | wa_.
+nting               | view
+     |Ä kat
+(12 rowNs)
+DER
+N

@@ -1,0 +1,39 @@
+ 
+For Grand Falls E1 events (loss of service for a long time) huge
+LOG files (200-300 thousand of lines) is a very typical and
+complicating characteristics. Many process (SWERRs, TRAPs, INFOs,
+etc) run in parallel and it is very important to understand what
+caused what. I want to suggest some tips that can make easier
+analysis of such log files.
+ 
+1. First of all learn ALL logs AT THE BEGINNING of the event.
+   It is very important to understand what process began first.
+   You should understand the meaning of EVERY log here.
+ 
+2. Unix tool awk could be very useful for logs files processing.
+   Here are some simplest examples of its using.
+ 
+ a) Cutting all logs of some definite type:
+
+               awk '/PM189/,length < 2' inp_file > out_file
+                       ^           ^
+                       |           |
+      Where:    Pattern in the   End condition
+              first line of log  of log (empty string)
+ 
+ b) Cutting all lines BEFORE lines with some pattern:
+ 
+   
+ 
+    a) Use 2a) for cutting all AUDT203 logs into one file and cp 35
+       logs into another.
+ 
+    b) Use 2d) for producing of sorted list of dn's from these two
+       new files.
+ 
+    c) Use tool comm in the form:
+ 
+         comm dn_list1_file dn_list2_file > out_file
+ 
+       and in the out_file you will see three columns - in the
+       third one common dn's will appear.
