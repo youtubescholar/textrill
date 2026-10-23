@@ -613,7 +613,8 @@ Phase 0 (done) ──► Phase 1 (UI shell) (done) ──┬─► Phase 2 (temp
 
 - Phases 2 and 4 both need Phase 1's shell.
 - Phase 3 depends on Phase 2's pack/manifest format being frozen.
-- Phase 5's `convert.rs` split should wait until GUI churn pauses.
+- Phase 5's `convert.rs` split landed after Phase 6 (v8); the GUI churn it
+  waited for had settled.
 - Phase 6 can start in parallel once the GUI stabilises.
 
 ---
@@ -750,3 +751,11 @@ no network anywhere in the tool (not just the conversion path). See
   AppImage built on Ubuntu 22.04 but still not fully portable, and only the
   engine crate goes to crates.io. Flathub submission, store screenshot, Windows
   signing and macOS notarisation remain external.
+
+- v8 — Phase 5's deferred engine split landed. `convert.rs` is now
+  `convert/mod.rs` plus `decode`, `tags`, `paragraph`, `lists`, `tables`,
+  `preformat`, `headings`, `inline`, `pages`, `stream` and `tests`, following
+  the §8 map. The action constants, `Converter` fields and the main pipeline
+  stay in `mod.rs`; moved methods are `pub(super)` and the public
+  `crate::convert::*` paths are unchanged. `make verify` passes and no golden
+  byte changed.
