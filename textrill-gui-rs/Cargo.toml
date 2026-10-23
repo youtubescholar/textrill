@@ -5,6 +5,7 @@ edition = "2021"
 description = "Native GUI for textrill, built with egui/eframe."
 license = "GPL-3.0-or-later"
 repository = "https://github.com/youtubescholar/textrill"
+homepage = "https://github.com/youtubescholar/textrill"
 
 [dependencies]
 textrill = { path = "../textrill" }
@@ -25,6 +26,37 @@ rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 # `egui_kittest` re-exports, or the query trait methods do not resolve.
 egui_kittest = "0.36"
 kittest = "0.3"
+
+# Package metadata for the native distro packages. The desktop file, metainfo
+# and icons are the same files the Flatpak manifest and AppImage install.
+[package.metadata.deb]
+maintainer = "Textrill contributors <youtubescholar@users.noreply.github.com>"
+copyright = "2026, Textrill contributors"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+Native editor for textrill, with a live source/HTML split, a native preview, \
+generated options, presets and an offline template manager. The command-line \
+engine is available in the separate textrill package."""
+depends = "$auto"
+section = "text"
+priority = "optional"
+assets = [
+    ["target/release/textrill-gui", "usr/bin/textrill-gui", "755"],
+    ["../packaging/appimage/io.github.youtubescholar.Textrill.desktop", "usr/share/applications/io.github.youtubescholar.Textrill.desktop", "644"],
+    ["../packaging/io.github.youtubescholar.Textrill.metainfo.xml", "usr/share/metainfo/io.github.youtubescholar.Textrill.metainfo.xml", "644"],
+    ["../packaging/appimage/io.github.youtubescholar.Textrill.png", "usr/share/icons/hicolor/256x256/apps/io.github.youtubescholar.Textrill.png", "644"],
+    ["../packaging/appimage/io.github.youtubescholar.Textrill.svg", "usr/share/icons/hicolor/scalable/apps/io.github.youtubescholar.Textrill.svg", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "Native GUI for textrill"
+assets = [
+    { source = "target/release/textrill-gui", dest = "/usr/bin/textrill-gui", mode = "755" },
+    { source = "../packaging/appimage/io.github.youtubescholar.Textrill.desktop", dest = "/usr/share/applications/io.github.youtubescholar.Textrill.desktop", mode = "644" },
+    { source = "../packaging/io.github.youtubescholar.Textrill.metainfo.xml", dest = "/usr/share/metainfo/io.github.youtubescholar.Textrill.metainfo.xml", mode = "644" },
+    { source = "../packaging/appimage/io.github.youtubescholar.Textrill.png", dest = "/usr/share/icons/hicolor/256x256/apps/io.github.youtubescholar.Textrill.png", mode = "644" },
+    { source = "../packaging/appimage/io.github.youtubescholar.Textrill.svg", dest = "/usr/share/icons/hicolor/scalable/apps/io.github.youtubescholar.Textrill.svg", mode = "644" },
+]
 
 # This crate is built on its own; `textrill` is a path dependency, not a
 # workspace member, so the GUI's heavier dependency tree cannot leak into the

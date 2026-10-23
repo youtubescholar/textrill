@@ -5,9 +5,10 @@
 # `textrill-gui-rs/Cargo.toml`): `io.github.youtubescholar.Textrill`. The
 # filename matches the id, as the format requires.
 #
-# `cargo-sources-*.json`, referenced by the modules below, are generated, not
-# committed; `make cargo-sources` writes them with `flatpak-cargo-generator`
-# (pip). See packaging/README.md. Generate them once before building.
+# `cargo-sources-*.json`, referenced by the modules below, are generated
+# snapshots; `make cargo-sources` refreshes them with flatpak-cargo-generator
+# (pip). The release workflow regenerates them before building. See
+# packaging/README.md.
 #
 # The CLI stays independently distributable — this manifest installs it as well as
 # the GUI so the single artifact carries both, per the refined delivery goal.
@@ -64,9 +65,14 @@ modules:
           - target
           - textrill/target
           - textrill-gui-rs/target
-          - ref
-          - research
-          - stubs
+          - build
+          - dist
+          - .flatpak-builder
+          - .github
+          - .venv
+          - docs
+          - examples
+          - parity
           - packaging
           - .git
       # A bare filename here (not `type: file`) makes flatpak-builder expand
@@ -93,9 +99,34 @@ modules:
           - target
           - textrill/target
           - textrill-gui-rs/target
-          - ref
-          - research
-          - stubs
+          - build
+          - dist
+          - .flatpak-builder
+          - .github
+          - .venv
+          - docs
+          - examples
+          - parity
           - packaging
           - .git
       - cargo-sources-textrill-gui.json
+
+  # Desktop integration is a separate module because the two build modules skip
+  # `packaging/` (it contains this manifest and the generated source lists).
+  # The same three files are installed by the AppImage and the deb/rpm packages.
+  - name: textrill-metadata
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 io.github.youtubescholar.Textrill.desktop ${FLATPAK_DEST}/share/applications/io.github.youtubescholar.Textrill.desktop
+      - install -Dm644 io.github.youtubescholar.Textrill.metainfo.xml ${FLATPAK_DEST}/share/metainfo/io.github.youtubescholar.Textrill.metainfo.xml
+      - install -Dm644 io.github.youtubescholar.Textrill.png ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/io.github.youtubescholar.Textrill.png
+      - install -Dm644 io.github.youtubescholar.Textrill.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.youtubescholar.Textrill.svg
+    sources:
+      - type: file
+        path: appimage/io.github.youtubescholar.Textrill.desktop
+      - type: file
+        path: io.github.youtubescholar.Textrill.metainfo.xml
+      - type: file
+        path: appimage/io.github.youtubescholar.Textrill.png
+      - type: file
+        path: appimage/io.github.youtubescholar.Textrill.svg

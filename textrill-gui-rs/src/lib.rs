@@ -26,6 +26,7 @@ pub mod document;
 pub mod file_browser;
 pub mod fonts;
 mod json;
+mod opener;
 pub mod options_panel;
 pub mod options_store;
 pub mod presets;

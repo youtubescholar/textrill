@@ -40,7 +40,11 @@ printf 'Hello *world*.\n' | ./textrill/target/release/textrill
 make verify           # fmt, clippy, tests, properties, acceptance — the gate
 ```
 
-`make verify` needs no Perl and means the same thing here and on CI.
+`make verify` needs no Perl and means the same thing here and on CI. The CI
+workflow also runs the static-musl acceptance and validates the desktop
+metadata; a `v*` tag triggers `.github/workflows/release.yml`, which publishes
+the Flatpak, AppImage, deb/rpm and Windows/macOS artifacts (and the engine crate
+when a crates.io token is configured).
 
 ## Changing what the tool outputs
 
@@ -66,7 +70,8 @@ resources) are gated separately by `proptest` and `alloctest`.
 | `textrill-gui-rs/` | The native GUI (`egui`/`eframe`). |
 | `examples/` | Real documents used as acceptance inputs, with a license record. |
 | `textrill/tests/` | Unit tests, corpus and goldens. |
-| `packaging/` | Flatpak manifest. |
+| `packaging/` | Flatpak manifest, desktop metadata, AppImage and package notes. |
+| `.github/workflows/` | The CI gate and the tag-triggered release artifacts. |
 
 See `CONTRIBUTING.md` for the workflow.
 

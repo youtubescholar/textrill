@@ -5,6 +5,10 @@ edition = "2021"
 description = "Convert plain text to HTML. A Rust reimplementation of HTML::TextToHTML / txt2html."
 license = "GPL-3.0-or-later"
 repository = "https://github.com/youtubescholar/textrill"
+homepage = "https://github.com/youtubescholar/textrill"
+readme = "README.md"
+keywords = ["text", "html", "converter", "plain-text", "txt2html"]
+categories = ["command-line-utilities", "text-processing"]
 
 [lib]
 name = "textrill"
@@ -22,6 +26,29 @@ fancy-regex = "0.14"
 regex-syntax = "0.8"
 # SIMD substring search for the required-literal prefilter.
 memchr = "2.8"
+
+[package.metadata.deb]
+maintainer = "Textrill contributors <youtubescholar@users.noreply.github.com>"
+copyright = "2026, Textrill contributors"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+Convert plain text to HTML by inferring structure from layout: setext headings, \
+lists from indentation, paragraphs from blank lines, and links from trailing \
+punctuation. The command-line tool is a single dependency-free binary."""
+depends = "$auto"
+section = "text"
+priority = "optional"
+assets = [
+    ["target/release/textrill", "usr/bin/textrill", "755"],
+    ["README.md", "usr/share/doc/textrill/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "Convert plain text to HTML"
+assets = [
+    { source = "target/release/textrill", dest = "/usr/bin/textrill", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/textrill/README.md", mode = "644", doc = true },
+]
 
 [profile.release]
 lto = true

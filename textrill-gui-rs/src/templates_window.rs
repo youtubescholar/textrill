@@ -1201,17 +1201,16 @@ impl TemplatesWindow {
         }
     }
 
-    /// Open the pack's directory in the desktop's file manager. Uses
-    /// `xdg-open`, which every XDG desktop provides; a failure is reported, not
-    /// fatal.
+    /// Open the pack's directory in the desktop's file manager. A failure is
+    /// reported, not fatal.
     fn reveal(&mut self, row: &Row) {
         let Some(root) = &row.root else {
             self.notice = Some(Notice::error("the shipped set has no folder on disk"));
             return;
         };
-        match std::process::Command::new("xdg-open").arg(root).spawn() {
+        match crate::opener::open_target(root) {
             Ok(_) => self.notice = Some(Notice::ok(format!("revealed {}", root.display()))),
-            Err(e) => self.notice = Some(Notice::error(format!("xdg-open: {e}"))),
+            Err(e) => self.notice = Some(Notice::error(format!("open folder: {e}"))),
         }
     }
 

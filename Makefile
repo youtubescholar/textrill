@@ -13,6 +13,9 @@
 #   make diff          the Perl differential corpus, as a non-gating cross-check
 #   make scale         the 1 MB paragraph probes, timed against Perl
 #   make appimage      a local (non-portable) AppImage of the GUI and CLI
+#   make metadata      validate the desktop file and AppStream metainfo
+#   make deb / rpm     native packages (needs cargo-deb / cargo-generate-rpm)
+#   make publish-crate publish the engine crate (needs a crates.io token)
 #
 # `make verify` needs no Perl, and passes with `parity/` absent: everything
 # Perl-related -- the reference tree, the stubs, the tracked tarballs and the
@@ -31,7 +34,7 @@ GUI_RS := $(ROOT)/textrill-gui-rs
 RELEASE_BIN := $(RS)/target/release/textrill
 export MINE := $(RELEASE_BIN)
 
-.PHONY: all verify build gui run-gui fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale ref ref-large musl corpus-musl accept-musl examples examples-write appimage clean distclean
+.PHONY: all verify build gui run-gui fmt fmt-check clippy test test-gui-rs proptest alloctest accept accept-write corpus diff scale ref ref-large musl corpus-musl accept-musl examples examples-write appimage metadata deb rpm packages publish-crate cargo-sources cargo-sources-check clean distclean
 
 all: verify
 
@@ -206,13 +209,13 @@ ref-large:
 # Generates one packaging/cargo-sources-<crate>.json per crate, from that
 # crate's Cargo.lock. The manifest's two modules each consume their own file:
 # the two lockfiles pin different versions of shared crates (e.g. bit-set), so
-# a single shared file could not satisfy both `--locked` builds. The files are
-# generated rather than committed because they are thousands of lines of
-# vendored crate metadata that only has to agree with a lockfile, and a stale
-# copy is a build failure nobody can read. Requires flatpak-cargo-generator
-# (pip) on PATH; see packaging/README.md for the pip/venv install.
+# a single shared file could not satisfy both `--locked` builds. A checked-in
+# snapshot keeps an offline Flatpak build free of Python, and
+# `cargo-sources-check` fails when a lockfile change left it stale. Requires
+# flatpak-cargo-generator (pip) on PATH; see packaging/README.md.
 CARGO_SOURCES := packaging/cargo-sources-textrill.json \
                  packaging/cargo-sources-textrill-gui.json
+APP_ID := io.github.youtubescholar.Textrill
 
 .PHONY: cargo-sources
 cargo-sources:
@@ -223,6 +226,43 @@ cargo-sources:
 	flatpak-cargo-generator -o packaging/cargo-sources-textrill.json textrill/Cargo.lock
 	flatpak-cargo-generator -o packaging/cargo-sources-textrill-gui.json textrill-gui-rs/Cargo.lock
 	@echo "wrote $(CARGO_SOURCES)"
+
+# The generated files are checked in so a Flatpak build needs no Python. Run
+# this after a lockfile change; the release workflow regenerates them again.
+cargo-sources-check: cargo-sources
+	@git diff --exit-code -- $(CARGO_SOURCES) \
+	  || { echo "ERROR: $(CARGO_SOURCES) were stale; commit the regenerated files" >&2; exit 1; }
+
+# --- desktop metadata ---------------------------------------------------------
+
+# Not part of `verify`: these live in desktop-specific packages, and a gate
+# that fails for a missing tool is the kind people learn to skip. CI and the
+# release preflight install them and run this target.
+metadata:
+	desktop-file-validate packaging/appimage/$(APP_ID).desktop
+	appstreamcli validate --no-net --strict packaging/$(APP_ID).metainfo.xml
+	@test -f packaging/appimage/$(APP_ID).png || { echo "ERROR: missing PNG icon" >&2; exit 1; }
+	@test -f packaging/appimage/$(APP_ID).svg || { echo "ERROR: missing SVG icon" >&2; exit 1; }
+
+# --- native distro packages ---------------------------------------------------
+
+# cargo-deb and cargo-generate-rpm read their metadata from the crate Cargo.toml
+# and write under each crate's target/. `make packages` is the local equivalent
+# of the release workflow's Linux package step, not part of `verify`.
+deb: build gui
+	cd $(RS) && $(CARGO) deb
+	cd $(GUI_RS) && $(CARGO) deb
+
+rpm: build gui
+	cd $(RS) && $(CARGO) generate-rpm
+	cd $(GUI_RS) && $(CARGO) generate-rpm
+
+packages: deb rpm
+
+# Manual and irreversible: publishing a version is one-way. The release
+# workflow does this on a tag only when CARGO_REGISTRY_TOKEN is configured.
+publish-crate:
+	cd $(RS) && $(CARGO) publish --locked
 
 # --- AppImage (see packaging/appimage/build.sh) -------------------------------
 

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata for the desktop-integrated installs (Flatpak, AppImage and
+  the deb/rpm packages). The id must match the desktop file, the icon and the
+  Flatpak app-id. Keep this file CC0 so distributors can reuse it freely.
+-->
+<component type="desktop-application">
+  <id>io.github.youtubescholar.Textrill</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Textrill</name>
+  <summary>Convert plain text into well-formed HTML</summary>
+
+  <developer id="io.github.youtubescholar">
+    <name>Textrill contributors</name>
+  </developer>
+
+  <description>
+    <p>
+      Textrill converts plain text to HTML by inferring the structure authors
+      already write: indentation for lists, blank lines for paragraphs, setext
+      rules and underlines for headings, and trailing punctuation for link
+      labels.
+    </p>
+    <p>
+      No markup language is required. The native editor shows the inferred HTML
+      beside the source, and the output uses templates you control. The tool
+      never uses the network.
+    </p>
+    <ul>
+      <li>Setext headings and explicit heading rules</li>
+      <li>Bullet, ordered and definition lists from layout</li>
+      <li>Links from URLs, mailto: and a user dictionary</li>
+      <li>Templates and offline, file-based template packs</li>
+      <li>Encoding detection and a static command-line binary</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.youtubescholar.Textrill.desktop</launchable>
+
+  <url type="homepage">https://github.com/youtubescholar/textrill</url>
+  <url type="bugtracker">https://github.com/youtubescholar/textrill/issues</url>
+  <url type="vcs-browser">https://github.com/youtubescholar/textrill</url>
+
+  <provides>
+    <binary>textrill-gui</binary>
+    <binary>textrill</binary>
+  </provides>
+
+  <categories>
+    <category>Utility</category>
+    <category>TextTools</category>
+  </categories>
+
+  <keywords>
+    <keyword>text</keyword>
+    <keyword>html</keyword>
+    <keyword>convert</keyword>
+    <keyword>markup</keyword>
+    <keyword>txt2html</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-10-23">
+      <description>
+        <p>First release of the fork.</p>
+      </description>
+    </release>
+  </releases>
+</component>
