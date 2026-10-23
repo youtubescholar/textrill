@@ -38,12 +38,11 @@ What is **done**:
   target ids are checked by a permanent test, as are the `href`s built by
   `--toc`, `--section` and `--chunk`.
 
-What is **not** done yet:
-
-- No Flatpak or distro packaging is published yet. `packaging/` holds a manifest
-  that builds end to end, but the `.desktop` file, AppStream metainfo and icon
-  that Flathub and desktop-integrated installs require are not in the tree; see
-  `packaging/README.md`.
+Packaging is in the tree for Flatpak, AppImage, deb, rpm and the Windows/macOS
+binaries, with a tag-triggered release workflow in `.github/workflows/`.
+What is **not** done yet is the external part: the Flathub submission (and its
+store screenshot), code signing on Windows, and notarisation on macOS. See
+`packaging/README.md`.
 
 The GUI is the native `egui`/`eframe` front end in `textrill-gui-rs/`. A
 link-pass fix puts textrill ahead of the reference on the link-dense
@@ -130,10 +129,10 @@ toc = true
 ### The CLI
 
 ```sh
-cargo install --git https://github.com/youtubescholar/textrill
+cargo install textrill
 ```
 
-Or build from a checkout:
+Or install from git, or build from a checkout:
 
 ```sh
 cd textrill
@@ -151,7 +150,9 @@ cd textrill-gui-rs
 cargo run --release
 ```
 
-The window is a live preview: an editor on the left, the converted HTML5 body
+Tagged releases also ship a Flatpak bundle, an AppImage, deb/rpm packages and
+Windows/macOS binaries; the release workflow is the canonical build. The window
+is a live preview: an editor on the left, the converted HTML5 body
 on the right, an option panel along the bottom, and a toolbar between them.
 Preview pane, zoom and window geometry are remembered across runs in the same
 settings file as the options. The display control strip is an accessibility

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-musl
+
+      # eframe/glow builds against the desktop libraries; the metadata checks
+      # are deliberately in `make metadata`, not `make verify`, so the gate
+      # itself does not depend on these tools being installed.
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            appstream desktop-file-utils \
+            libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev
+
+      - name: make verify
+        run: make verify
+
+      - name: static musl acceptance
+        run: make accept-musl
+
+      - name: desktop metadata
+        run: make metadata

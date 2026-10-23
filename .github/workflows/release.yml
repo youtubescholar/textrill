@@ -1,0 +1,238 @@
+name: Release
+
+# A tag is the release switch: v0.1.0 must match both crate versions. The gate
+# runs again on the tagged commit, then each platform publishes the same files
+# under the GitHub release. Signing and notarisation are deliberately separate
+# follow-ups; see packaging/README.md.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  preflight:
+    name: preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches both crate versions
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          engine="$(sed -n 's/^version = "\(.*\)"$/\1/p' textrill/Cargo.toml | head -n1)"
+          gui="$(sed -n 's/^version = "\(.*\)"$/\1/p' textrill-gui-rs/Cargo.toml | head -n1)"
+          echo "tag=$tag engine=$engine gui=$gui"
+          test "$tag" = "$engine"
+          test "$tag" = "$gui"
+
+      - name: Desktop metadata is valid
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y appstream desktop-file-utils
+          make metadata
+
+  linux:
+    name: linux artifacts
+    needs: preflight
+    # The AppImage inherits the runner's glibc. Building on the older LTS keeps
+    # the floor lower than a 24.04 build; it is still not a fully portable
+    # AppImage (that needs a pinned old-glibc container).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-musl
+
+      - name: System and packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            appstream desktop-file-utils dpkg-dev \
+            libxkbcommon-dev libwayland-dev libgl1-mesa-dev libegl1-mesa-dev
+          cargo install --locked cargo-deb cargo-generate-rpm
+
+      - name: Gate
+        run: make verify
+
+      - name: Static musl acceptance
+        run: make accept-musl
+
+      - name: AppImage
+        run: make appimage
+
+      - name: deb and rpm packages
+        run: make packages
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp build/appimage/textrill-gui-x86_64.AppImage dist/
+          cp textrill/target/x86_64-unknown-linux-musl/release/textrill \
+             dist/textrill-x86_64-unknown-linux-musl
+          cp textrill/target/debian/*.deb dist/
+          cp textrill-gui-rs/target/debian/*.deb dist/
+          cp textrill/target/generate-rpm/*.rpm dist/
+          cp textrill-gui-rs/target/generate-rpm/*.rpm dist/
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  flatpak:
+    name: flatpak
+    needs: preflight
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Flatpak builder and cargo source generator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder python3-venv
+          flatpak remote-add --if-not-exists flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --noninteractive flathub \
+            org.freedesktop.Platform//26.08 \
+            org.freedesktop.Sdk//26.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//26.08
+          python3 -m venv .venv
+          .venv/bin/pip install flatpak-cargo-generator
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      # Regenerate rather than trusting the checked-in snapshot; the generator
+      # is reproducible, so this also catches a lockfile change that was not
+      # accompanied by a recapture.
+      - name: Regenerate cargo sources
+        run: make cargo-sources
+
+      - name: Build and bundle
+        run: |
+          set -euo pipefail
+          flatpak-builder --disable-rofiles-fuse --force-clean \
+            --repo=build/flatpak-repo build/flatpak \
+            packaging/io.github.youtubescholar.Textrill.yml
+          mkdir -p dist
+          flatpak build-bundle build/flatpak-repo \
+            dist/textrill-gui-x86_64.flatpak \
+            io.github.youtubescholar.Textrill
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: dist/*.flatpak
+          if-no-files-found: error
+
+  windows:
+    name: windows binary
+    needs: preflight
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: |
+          cargo build --release --locked --manifest-path textrill/Cargo.toml
+          cargo build --release --locked --manifest-path textrill-gui-rs/Cargo.toml
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item textrill\target\release\textrill.exe dist\
+          Copy-Item textrill-gui-rs\target\release\textrill-gui.exe dist\
+          Compress-Archive -Path dist\* -DestinationPath textrill-windows-x86_64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: textrill-windows-x86_64.zip
+          if-no-files-found: error
+
+  macos:
+    name: macos binary
+    needs: preflight
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --manifest-path textrill/Cargo.toml
+          cargo build --release --locked --manifest-path textrill-gui-rs/Cargo.toml
+          arch="$(uname -m)"
+          mkdir -p dist
+          cp textrill/target/release/textrill dist/
+          cp textrill-gui-rs/target/release/textrill-gui dist/
+          (cd dist && zip "../textrill-macos-${arch}.zip" textrill textrill-gui)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: textrill-macos-*.zip
+          if-no-files-found: error
+
+  crates-io:
+    name: crates.io
+    needs: preflight
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # The token is optional: without it the release still publishes binaries.
+      # Publishing is one-way, so it happens only from a tag.
+      - name: Publish the engine crate when a token is configured
+        run: |
+          set -euo pipefail
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN is not configured; skipping crates.io publish."
+            exit 0
+          fi
+          cargo publish --locked --manifest-path textrill/Cargo.toml
+
+  publish:
+    name: GitHub release
+    needs: [linux, flatpak, windows, macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          ls -l
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

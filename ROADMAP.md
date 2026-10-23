@@ -549,6 +549,28 @@ asset for auditing), **isolate** it:
    acceptance), plus release artifacts per tag. Keep `make verify` the single
    source of truth so CI cannot drift from local.
 
+### Built (repository side)
+
+The metadata now exists and is installed by every desktop path: AppStream
+`io.github.youtubescholar.Textrill.metainfo.xml`, the `.desktop` file (with `%f`
+and `text/plain`) and PNG/SVG icons, wired into the Flatpak's separate
+`textrill-metadata` module and into the AppImage AppDir. `make metadata`
+validates them; CI and the release preflight run it.
+
+`make deb` / `make rpm` build native packages with `cargo-deb` and
+`cargo-generate-rpm` from metadata in each crate's `Cargo.toml`; the GUI
+package carries the same launcher/metainfo/icons as the Flatpak. The engine
+crate gained the crates.io metadata (`readme`, keywords, categories) and is
+published by the release workflow when `CARGO_REGISTRY_TOKEN` is configured.
+
+`.github/workflows/ci.yml` runs the gate, the musl acceptance and the metadata
+check. `.github/workflows/release.yml` runs on `v*`: preflight checks both crate
+versions against the tag, then builds the AppImage, Flatpak bundle, deb/rpm,
+static musl CLI and Windows/macOS binaries, and attaches them with checksums.
+The AppImage release build uses Ubuntu 22.04 for a lower glibc floor; a truly
+portable AppImage still needs a pinned old-glibc container. Signing,
+notarisation and the Flathub submission remain external follow-ups.
+
 ### Acceptance criteria
 - A Flathub-style install runs the GUI and CLI with the same output as the musl
   binary.
@@ -586,7 +608,7 @@ asset for auditing), **isolate** it:
 ```
 Phase 0 (done) ──► Phase 1 (UI shell) (done) ──┬─► Phase 2 (template delivery v1) (done) ──► Phase 3 (sharing/catalog) (done)
                                         ├─► Phase 4 (preview/editing) (done)
-                                        └─► Phase 5 (options/presets) ──► Phase 6 (distribution) ──► Phase 7 (hardening)
+                                        └─► Phase 5 (options/presets) (done) ──► Phase 6 (distribution; repo side done) ──► Phase 7 (hardening)
 ```
 
 - Phases 2 and 4 both need Phase 1's shell.
@@ -709,3 +731,22 @@ no network anywhere in the tool (not just the conversion path). See
   document produces no output and a Problems panel with clickable `line N`
   entries. `File → Recent files`, palette rows and opt-in session restore
   (off by default) round out §7.
+
+- v6 — Phase 5 built. User presets read
+  `$XDG_CONFIG_HOME/textrill/presets.toml` as a whole-state bundle, offered as
+  `--preset` and in the GUI strip with the same precedence and "Modified"
+  marker; `{{textrill:lang}}` reaches the shipped templates; pack `vars` gained
+  defaults; the options panel gained changed badges, per-option reset and value
+  search. `convert.rs` remains one module for now — the split was deferred to
+  keep that change separate from the option work.
+
+- v7 — Phase 6 built (repository side). AppStream metainfo, launcher and icons
+  now exist and are installed by the Flatpak, AppImage and deb/rpm packages;
+  `make metadata` validates them. The engine crate is crates.io-ready and the
+  release workflow publishes it when a token is configured. CI gained the
+  musl acceptance and metadata check; a tag builds AppImage, Flatpak bundle,
+  deb/rpm, static musl CLI and Windows/macOS binaries with checksums. Publishing
+  decisions: deb/rpm via cargo-deb/cargo-generate-rpm (no `debian/` tree),
+  AppImage built on Ubuntu 22.04 but still not fully portable, and only the
+  engine crate goes to crates.io. Flathub submission, store screenshot, Windows
+  signing and macOS notarisation remain external.

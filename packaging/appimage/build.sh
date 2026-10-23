@@ -34,8 +34,15 @@ install -Dm755 "$root/textrill/target/release/textrill" "$appdir/usr/bin/textril
 # appimagetool reads; the same pair is copied into the hicolor theme so a
 # desktop that integrates the AppImage can find the icon.
 install -Dm644 "$here/$app_id.desktop" "$appdir/$app_id.desktop"
-mkdir -p "$appdir/usr/share/applications" "$appdir/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "$appdir/usr/share/applications" "$appdir/usr/share/metainfo" \
+    "$appdir/usr/share/icons/hicolor/256x256/apps" \
+    "$appdir/usr/share/icons/hicolor/scalable/apps"
 install -Dm644 "$here/$app_id.desktop" "$appdir/usr/share/applications/$app_id.desktop"
+install -Dm644 "$here/../$app_id.metainfo.xml" "$appdir/usr/share/metainfo/$app_id.metainfo.xml"
+# appimagetool still looks for the legacy `.appdata.xml` name when deciding
+# whether AppStream metadata is present. A symlink keeps one component file.
+ln -sf "$app_id.metainfo.xml" "$appdir/usr/share/metainfo/$app_id.appdata.xml"
+install -Dm644 "$here/$app_id.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/$app_id.svg"
 
 icon_png="$here/$app_id.png"
 if [ ! -f "$icon_png" ]; then
@@ -51,6 +58,7 @@ if [ ! -f "$icon_png" ]; then
     fi
 fi
 install -Dm644 "$icon_png" "$appdir/$app_id.png"
+install -Dm644 "$icon_png" "$appdir/.DirIcon"
 install -Dm644 "$icon_png" "$appdir/usr/share/icons/hicolor/256x256/apps/$app_id.png"
 
 install -Dm755 "$here/AppRun" "$appdir/AppRun"

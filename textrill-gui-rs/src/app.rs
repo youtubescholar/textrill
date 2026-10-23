@@ -2442,7 +2442,7 @@ impl TextrillApp {
     /// path exists in this process; the browser is a separate local program.
     pub fn open_in_browser(&mut self) {
         match self.write_preview_file(&std::env::temp_dir()) {
-            Ok(path) => match std::process::Command::new("xdg-open").arg(&path).spawn() {
+            Ok(path) => match crate::opener::open_target(&path) {
                 Ok(_) => self.status = format!("opened {} in the browser", path.display()),
                 Err(e) => self.status = format!("open in browser: {e}"),
             },
@@ -2457,7 +2457,7 @@ impl TextrillApp {
         if href.starts_with('#') {
             return;
         }
-        match std::process::Command::new("xdg-open").arg(href).spawn() {
+        match crate::opener::open_target(href) {
             Ok(_) => self.status = format!("opened {href}"),
             Err(e) => self.status = format!("open link: {e}"),
         }

@@ -38,6 +38,8 @@ make verify      # fmt, clippy (-D warnings), engine + GUI tests, proptest,
                  #   alloctest, acceptance
 make accept-write / make examples-write   # recapture
 make diff        # optional: the Perl differential corpus, as a cross-check
+make metadata    # optional: desktop-file-validate + AppStream validation
+make packages    # optional: deb/rpm (needs cargo-deb, cargo-generate-rpm)
 ```
 
 `make verify` needs no Perl and passes with the `parity/` directory absent:
