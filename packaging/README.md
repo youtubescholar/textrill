@@ -172,6 +172,17 @@ This builds the release binaries, assembles an AppDir, and packages
 The AppDir carries the `.desktop` file, metainfo and both icons, so a desktop
 that integrates the AppImage can find them.
 
+**Running a downloaded AppImage:** Most browsers/download managers do not
+preserve the executable bit. Make it executable before running it:
+
+```sh
+chmod +x textrill-gui-x86_64.AppImage
+./textrill-gui-x86_64.AppImage
+```
+
+If your system uses FUSE, run it directly; if not, set
+`APPIMAGE_EXTRACT_AND_RUN=1`.
+
 It is a convenience for running the app on this host, **not** a substitute for
 the Flatpak. The AppImage inherits the build host's glibc: a local build on
 Ubuntu 24.04 has a glibc 2.39 floor. The release workflow builds on Ubuntu
