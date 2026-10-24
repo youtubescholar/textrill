@@ -923,8 +923,9 @@ fn int(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> bool {
         if let Some((low, high)) = numeric_range(opt.canonical()) {
             widget = widget.range(low as i64..=high as i64);
         }
-        ui.add_enabled(enabled, widget);
-        ui.label(help);
+        let response = ui.add_enabled(enabled, widget);
+        let label = ui.label(help);
+        response.labelled_by(label.id);
         reset = option_reset(ui, opts, opt);
     });
     let moved = value != current;
@@ -941,10 +942,11 @@ fn string(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> bool {
         .horizontal(|ui| {
             let response = ui.add_enabled(enabled, egui::TextEdit::singleline(&mut text));
             let changed = response.changed();
+            let label = ui.label(help);
+            let response = response.labelled_by(label.id);
             if let Some(reason) = disabled_reason(opt, opts) {
                 response.on_hover_text(reason);
             }
-            let label = ui.label(help);
             if let Some(reason) = disabled_reason(opt, opts) {
                 label.on_hover_text(reason);
             }
@@ -968,6 +970,7 @@ fn string_array(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> boo
     let help = opt.help();
     let mut text = cli::get_opt(opts, opt);
     let label = ui.label(help);
+    let label_id = label.id;
     if let Some(reason) = disabled_reason(opt, opts) {
         label.on_hover_text(reason);
     }
@@ -975,6 +978,7 @@ fn string_array(ui: &mut Ui, opts: &mut Options, opt: Opt, enabled: bool) -> boo
         enabled,
         egui::TextEdit::multiline(&mut text).desired_rows(3),
     );
+    let response = response.labelled_by(label_id);
     let changed = response.changed();
     if let Some(reason) = disabled_reason(opt, opts) {
         response.on_hover_text(reason);
