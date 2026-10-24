@@ -287,6 +287,26 @@ impl Default for TextrillApp {
     }
 }
 
+/// Lay out a menu's contents inside a viewport-height scroll area.
+///
+/// Menus used to size themselves to their contents. At a high zoom or in a
+/// short window the lower entries (the whole display section in View) were
+/// placed below the screen edge, with no way to reach them. A menu is a popup
+/// at a known screen position, so the remaining space below it is the honest
+/// limit: fit the items that fit, and scroll the rest.
+fn scrollable_menu<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+    let screen = ui.ctx().content_rect();
+    let max_height = (screen.bottom() - ui.cursor().top() - 8.0).max(80.0);
+    // A popup's Ui starts with egui's default area size (400 points tall), and
+    // a ScrollArea cannot grow past its parent. Expand the menu to the real
+    // screen room first, or the menu is simply clipped at that default.
+    ui.set_max_height(max_height);
+    egui::ScrollArea::vertical()
+        .max_height(max_height)
+        .show(ui, add_contents)
+        .inner
+}
+
 impl TextrillApp {
     /// Build an app backed by `settings`, applying the stored `auto` choice.
     ///
@@ -710,6 +730,26 @@ impl TextrillApp {
         self.store_window_state();
     }
 
+    /// Set the whole-UI zoom, clamped and rounded to the 10% steps the
+    /// shortcuts and menu use. Centralised so the menu, keyboard and persisted
+    /// value all speak the same range ([`crate::window_state::MIN_ZOOM`] to
+    /// [`crate::window_state::MAX_ZOOM`]) rather than egui's wider defaults.
+    pub fn set_zoom(&mut self, ctx: &egui::Context, zoom: f32) {
+        let zoom = crate::window_state::clamp_zoom((zoom * 10.0).round() / 10.0);
+        self.zoom = zoom;
+        ctx.set_zoom_factor(zoom);
+    }
+
+    /// One step larger, stopping at [`crate::window_state::MAX_ZOOM`].
+    pub fn zoom_in(&mut self, ctx: &egui::Context) {
+        self.set_zoom(ctx, ctx.zoom_factor() + crate::window_state::ZOOM_STEP);
+    }
+
+    /// One step smaller, stopping at [`crate::window_state::MIN_ZOOM`].
+    pub fn zoom_out(&mut self, ctx: &egui::Context) {
+        self.set_zoom(ctx, ctx.zoom_factor() - crate::window_state::ZOOM_STEP);
+    }
+
     /// `View → Reset window size and zoom`: return to the size a first run
     /// opens at, at 100%, and forget the stored geometry so the reset survives
     /// a restart too. This is the one action that always undoes a geometry the
@@ -717,8 +757,7 @@ impl TextrillApp {
     pub fn reset_window_state(&mut self, ctx: &egui::Context) {
         self.window_size = crate::window_state::DEFAULT_SIZE;
         self.window_maximized = false;
-        self.zoom = 1.0;
-        ctx.set_zoom_factor(1.0);
+        self.set_zoom(ctx, 1.0);
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
             crate::window_state::DEFAULT_SIZE[0],
@@ -1246,6 +1285,34 @@ impl TextrillApp {
         }
     }
 
+    /// Act on the browser-style zoom chords. Kept apart from the other
+    /// shortcuts because zoom stays available while a prompt owns the document
+    /// commands, and because egui's built-in handler must not see the keys: it
+    /// steps to its own wider 20%-500% range, which this app would clamp on
+    /// save and reload.
+    fn handle_zoom_shortcuts(&mut self, ctx: &egui::Context) {
+        let (zoom_in, zoom_in_secondary, zoom_out, zoom_reset) = ctx.input_mut(|input| {
+            (
+                input.consume_shortcut(&egui::gui_zoom::kb_shortcuts::ZOOM_IN),
+                input.consume_shortcut(&egui::gui_zoom::kb_shortcuts::ZOOM_IN_SECONDARY),
+                input.consume_shortcut(&egui::gui_zoom::kb_shortcuts::ZOOM_OUT),
+                input.consume_shortcut(&egui::gui_zoom::kb_shortcuts::ZOOM_RESET),
+            )
+        });
+        // Ctrl/Cmd+0 resets only the zoom; the window geometry has its own
+        // Ctrl+Alt+0 escape hatch in `RESET_WINDOW_SHORTCUT`.
+        if zoom_reset {
+            self.set_zoom(ctx, 1.0);
+        } else {
+            if zoom_in || zoom_in_secondary {
+                self.zoom_in(ctx);
+            }
+            if zoom_out {
+                self.zoom_out(ctx);
+            }
+        }
+    }
+
     /// Act on the keyboard shortcuts the menu advertises.
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         let (
@@ -1383,303 +1450,315 @@ impl TextrillApp {
     fn menu_bar(&mut self, ui: &mut Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui.button("New").clicked() {
-                    self.new_document();
-                    ui.close();
-                }
-                if ui.button("Open…").clicked() {
-                    self.open_document();
-                    ui.close();
-                }
-                let mut chosen = None;
-                ui.menu_button("Recent files", |ui| {
-                    if self.recent.is_empty() {
-                        ui.weak("No recent files yet.");
-                    }
-                    for (index, path) in self.recent.iter().enumerate() {
-                        let label = format!("{}", path.display());
-                        if ui.button(label).clicked() {
-                            chosen = Some(index);
-                            ui.close();
-                        }
-                    }
-                    if !self.recent.is_empty() {
-                        ui.separator();
-                        if ui.button("Clear recent files").clicked() {
-                            self.recent.clear();
-                            if let Err(error) = self.settings.set_recent_files(&self.recent) {
-                                self.status = format!("could not save settings: {error}");
-                            }
-                            ui.close();
-                        }
-                    }
-                });
-                if let Some(index) = chosen {
-                    self.open_recent(index);
-                    ui.close();
-                }
-                let mut restore = self.restore_session;
-                if ui
-                    .checkbox(&mut restore, "Restore the last document on launch")
-                    .on_hover_text(
-                        "Opt-in. On the next launch the last opened file is reopened                          before there is any unsaved text to overwrite.",
-                    )
-                    .changed()
-                {
-                    self.restore_session = restore;
-                    if let Err(error) = self.settings.set_restore_session(restore) {
-                        self.status = format!("could not save settings: {error}");
-                    }
-                }
-                if ui.button("Save").clicked() {
-                    self.save_document_command();
-                    ui.close();
-                }
-                if ui.button("Save As…").clicked() {
-                    self.save_document_as_command();
-                    ui.close();
-                }
-                if ui.button("Save text…").clicked() {
-                    self.save_text_command();
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Load example").clicked() {
-                    self.load_sample();
-                    ui.close();
-                }
-                if ui.button("Manage templates…").clicked() {
-                    self.open_templates();
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Quit").clicked() {
-                    self.quit(ui.ctx());
-                    ui.close();
-                }
-            });
-            ui.menu_button("Edit", |ui| {
-                if ui
-                    .button("Command palette…")
-                    .on_hover_text("Ctrl+K")
-                    .clicked()
-                {
-                    self.toggle_palette();
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Copy HTML").clicked() {
-                    self.copy_html(ui.ctx());
-                    ui.close();
-                }
-                if ui.button("Convert now").clicked() {
-                    self.convert_now();
-                    ui.close();
-                }
-                if ui.button("Reset options").clicked() {
-                    self.reset_options();
-                    ui.close();
-                }
-            });
-            ui.menu_button("Templates", |ui| {
-                if ui
-                    .button("Manage templates…")
-                    .on_hover_text("Browse, filter, preview and apply template packs")
-                    .clicked()
-                {
-                    self.open_templates();
-                    ui.close();
-                }
-                if ui
-                    .button("Refresh")
-                    .on_hover_text("Re-discover packs under the search path")
-                    .clicked()
-                {
-                    self.open_templates();
-                    ui.close();
-                }
-            });
-            ui.menu_button("View", |ui| {
-                ui.checkbox(&mut self.show_options, "Show options");
-                ui.separator();
-                // Which view the working area shows: side by side, or the
-                // whole area given to one pane. Ctrl+1/2/3 reach the same
-                // choices without the menu.
-                ui.label("Layout");
-                let mode = self.view_mode;
-                for (label, want) in [
-                    ("Source and HTML", crate::settings::ViewMode::Split),
-                    ("Source only", crate::settings::ViewMode::Source),
-                    ("HTML only", crate::settings::ViewMode::Html),
-                    ("Preview (rendered)", crate::settings::ViewMode::Preview),
-                    ("Outline", crate::settings::ViewMode::Outline),
-                    ("Diff (rendered vs. previous)", crate::settings::ViewMode::Diff),
-                ] {
-                    if ui
-                        .selectable_label(mode == want, label)
-                        .clicked()
-                    {
-                        self.set_view_mode(want);
+                scrollable_menu(ui, |ui| {
+                    if ui.button("New").clicked() {
+                        self.new_document();
                         ui.close();
                     }
-                }
-                ui.separator();
-                // The built-in browser is not offered in a Flatpak: with no
-                // home filesystem access it could show only an empty tree, and
-                // the FileChooser portal is always present there instead.
-                if self.builtin_browser_available() {
-                    let mut builtin = self.use_builtin_browser;
+                    if ui.button("Open…").clicked() {
+                        self.open_document();
+                        ui.close();
+                    }
+                    let mut chosen = None;
+                    ui.menu_button("Recent files", |ui| {
+                        scrollable_menu(ui, |ui| {
+                            if self.recent.is_empty() {
+                                ui.weak("No recent files yet.");
+                            }
+                            for (index, path) in self.recent.iter().enumerate() {
+                                let label = format!("{}", path.display());
+                                if ui.button(label).clicked() {
+                                    chosen = Some(index);
+                                    ui.close();
+                                }
+                            }
+                            if !self.recent.is_empty() {
+                                ui.separator();
+                                if ui.button("Clear recent files").clicked() {
+                                    self.recent.clear();
+                                    if let Err(error) = self.settings.set_recent_files(&self.recent) {
+                                        self.status = format!("could not save settings: {error}");
+                                    }
+                                    ui.close();
+                                }
+                            }
+                        });
+                    });
+                    if let Some(index) = chosen {
+                        self.open_recent(index);
+                        ui.close();
+                    }
+                    let mut restore = self.restore_session;
                     if ui
-                        .checkbox(&mut builtin, "Use built-in file browser")
+                        .checkbox(&mut restore, "Restore the last document on launch")
                         .on_hover_text(
-                            "Pick files with the in-app browser instead of the \
-                             desktop's dialog. Useful where no file dialog exists \
-                             (for example Sway without xdg-desktop-portal-gtk).",
+                            "Opt-in. On the next launch the last opened file is reopened                          before there is any unsaved text to overwrite.",
                         )
                         .changed()
                     {
-                        self.set_builtin_browser(builtin);
+                        self.restore_session = restore;
+                        if let Err(error) = self.settings.set_restore_session(restore) {
+                            self.status = format!("could not save settings: {error}");
+                        }
+                    }
+                    if ui.button("Save").clicked() {
+                        self.save_document_command();
+                        ui.close();
+                    }
+                    if ui.button("Save As…").clicked() {
+                        self.save_document_as_command();
+                        ui.close();
+                    }
+                    if ui.button("Save text…").clicked() {
+                        self.save_text_command();
+                        ui.close();
                     }
                     ui.separator();
-                }
-                ui.checkbox(&mut self.focus_mode, "Focus mode")
-                    .on_hover_text("Hide the menus and toolbar, keep the text and a slim action bar (Ctrl+Shift+F)");
-                if ui
-                    .checkbox(&mut self.reduce_motion, "Reduce motion")
-                    .changed()
-                {
-                    self.apply_ui_style(ui.ctx());
-                    self.store_display_settings();
-                }
-                // How tightly the controls are packed. Compact gives a denser
-                // layout for a small screen; Comfortable is the default.
-                ui.separator();
-                ui.label(egui::RichText::new("Density").small());
-                let density = self.density;
-                for (label, want) in [
-                    ("Comfortable", crate::settings::Density::Comfortable),
-                    ("Compact", crate::settings::Density::Compact),
-                ] {
-                    if ui.selectable_label(density == want, label).clicked() {
-                        self.density = want;
-                        self.store_layout_settings();
+                    if ui.button("Load example").clicked() {
+                        self.load_sample();
+                        ui.close();
                     }
-                }
-                // Whole-UI zoom, for the same reason a browser has it: a 4K
-                // laptop and a 96 DPI desktop should not dictate the same
-                // physical text size. The keyboard shortcuts (Ctrl/⌘ + / - / 0)
-                // work too; these buttons make the feature discoverable. They
-                // live in the menu rather than the toolbar, which keeps the
-                // toolbar short. `zoom_factor` multiplies the OS's own scale
-                // factor, so a HiDPI screen is already handled.
-                ui.separator();
-                ui.label(egui::RichText::new("Display").small());
-                ui.horizontal(|ui| {
-                    if ui
-                        .button("Zoom out")
-                        .on_hover_text("Zoom out (Ctrl+-)")
-                        .clicked()
-                    {
-                        egui::gui_zoom::zoom_out(ui.ctx());
+                    if ui.button("Manage templates…").clicked() {
+                        self.open_templates();
+                        ui.close();
                     }
-                    ui.label(format!("{:.0}%", ui.ctx().zoom_factor() * 100.0));
-                    if ui
-                        .button("Zoom in")
-                        .on_hover_text("Zoom in (Ctrl+=)")
-                        .clicked()
-                    {
-                        egui::gui_zoom::zoom_in(ui.ctx());
-                    }
-                    if ui
-                        .button("Reset zoom")
-                        .on_hover_text("Reset to 100% (Ctrl+0)")
-                        .clicked()
-                    {
-                        ui.ctx().set_zoom_factor(1.0);
+                    ui.separator();
+                    if ui.button("Quit").clicked() {
+                        self.quit(ui.ctx());
+                        ui.close();
                     }
                 });
-
-                // Plain-text size, in the spirit of a browser's font-size
-                // control: it scales the type and therefore the resting size of
-                // controls with it, but leaves the whole-window zoom above
-                // alone.
-                ui.separator();
-                ui.label(egui::RichText::new("Text").small());
-                let sizes = theme::TEXT_SIZES;
-                let step = sizes
-                    .iter()
-                    .enumerate()
-                    .min_by(|(_, (a, _)), (_, (b, _))| {
-                        (a - self.text_size)
-                            .abs()
-                            .partial_cmp(&(b - self.text_size).abs())
-                            .unwrap()
-                    })
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                ui.horizontal(|ui| {
+            });
+            ui.menu_button("Edit", |ui| {
+                scrollable_menu(ui, |ui| {
                     if ui
-                        .add_enabled(step > 0, egui::Button::new("A−"))
-                        .on_hover_text("Smaller text")
+                        .button("Command palette…")
+                        .on_hover_text("Ctrl+K")
                         .clicked()
                     {
-                        self.text_size = sizes[step - 1].0;
-                        self.apply_ui_style(ui.ctx());
-                        self.store_display_settings();
+                        self.toggle_palette();
+                        ui.close();
                     }
-                    ui.label(format!("{:.0}%", self.text_size * 100.0));
-                    if ui
-                        .add_enabled(step + 1 < sizes.len(), egui::Button::new("A+"))
-                        .on_hover_text("Larger text")
-                        .clicked()
-                    {
-                        self.text_size = sizes[step + 1].0;
-                        self.apply_ui_style(ui.ctx());
-                        self.store_display_settings();
+                    ui.separator();
+                    if ui.button("Copy HTML").clicked() {
+                        self.copy_html(ui.ctx());
+                        ui.close();
                     }
-                    if ui
-                        .button("Reset text size")
-                        .on_hover_text("Back to the default size (100%)")
-                        .clicked()
-                    {
-                        self.text_size = theme::DEFAULT_TEXT_SIZE;
-                        self.apply_ui_style(ui.ctx());
-                        self.store_display_settings();
+                    if ui.button("Convert now").clicked() {
+                        self.convert_now();
+                        ui.close();
+                    }
+                    if ui.button("Reset options").clicked() {
+                        self.reset_options();
+                        ui.close();
                     }
                 });
-
-                // The theme picker. Both of egui's internal themes were
-                // replaced with this theme's full style, so switching is one
-                // row. Rows rather than a combo: an interactive popup cannot
-                // live inside a menu, which closes on the click.
-                ui.separator();
-                ui.label(egui::RichText::new("Theme").small());
-                for theme in Theme::ALL {
+            });
+            ui.menu_button("Templates", |ui| {
+                scrollable_menu(ui, |ui| {
                     if ui
-                        .selectable_label(self.theme == theme, theme.name())
+                        .button("Manage templates…")
+                        .on_hover_text("Browse, filter, preview and apply template packs")
                         .clicked()
                     {
-                        self.theme = theme;
+                        self.open_templates();
+                        ui.close();
+                    }
+                    if ui
+                        .button("Refresh")
+                        .on_hover_text("Re-discover packs under the search path")
+                        .clicked()
+                    {
+                        self.open_templates();
+                        ui.close();
+                    }
+                });
+            });
+            ui.menu_button("View", |ui| {
+                scrollable_menu(ui, |ui| {
+                    ui.checkbox(&mut self.show_options, "Show options");
+                    ui.separator();
+                    // Which view the working area shows: side by side, or the
+                    // whole area given to one pane. Ctrl+1/2/3 reach the same
+                    // choices without the menu.
+                    ui.label("Layout");
+                    let mode = self.view_mode;
+                    for (label, want) in [
+                        ("Source and HTML", crate::settings::ViewMode::Split),
+                        ("Source only", crate::settings::ViewMode::Source),
+                        ("HTML only", crate::settings::ViewMode::Html),
+                        ("Preview (rendered)", crate::settings::ViewMode::Preview),
+                        ("Outline", crate::settings::ViewMode::Outline),
+                        ("Diff (rendered vs. previous)", crate::settings::ViewMode::Diff),
+                    ] {
+                        if ui
+                            .selectable_label(mode == want, label)
+                            .clicked()
+                        {
+                            self.set_view_mode(want);
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    // The built-in browser is not offered in a Flatpak: with no
+                    // home filesystem access it could show only an empty tree, and
+                    // the FileChooser portal is always present there instead.
+                    if self.builtin_browser_available() {
+                        let mut builtin = self.use_builtin_browser;
+                        if ui
+                            .checkbox(&mut builtin, "Use built-in file browser")
+                            .on_hover_text(
+                                "Pick files with the in-app browser instead of the \
+                                 desktop's dialog. Useful where no file dialog exists \
+                                 (for example Sway without xdg-desktop-portal-gtk).",
+                            )
+                            .changed()
+                        {
+                            self.set_builtin_browser(builtin);
+                        }
+                        ui.separator();
+                    }
+                    ui.checkbox(&mut self.focus_mode, "Focus mode")
+                        .on_hover_text("Hide the menus and toolbar, keep the text and a slim action bar (Ctrl+Shift+F)");
+                    if ui
+                        .checkbox(&mut self.reduce_motion, "Reduce motion")
+                        .changed()
+                    {
                         self.apply_ui_style(ui.ctx());
                         self.store_display_settings();
                     }
-                }
+                    // How tightly the controls are packed. Compact gives a denser
+                    // layout for a small screen; Comfortable is the default.
+                    ui.separator();
+                    ui.label(egui::RichText::new("Density").small());
+                    let density = self.density;
+                    for (label, want) in [
+                        ("Comfortable", crate::settings::Density::Comfortable),
+                        ("Compact", crate::settings::Density::Compact),
+                    ] {
+                        if ui.selectable_label(density == want, label).clicked() {
+                            self.density = want;
+                            self.store_layout_settings();
+                        }
+                    }
+                    // Whole-UI zoom, for the same reason a browser has it: a 4K
+                    // laptop and a 96 DPI desktop should not dictate the same
+                    // physical text size. The keyboard shortcuts (Ctrl/⌘ + / - / 0)
+                    // work too; these buttons make the feature discoverable. They
+                    // live in the menu rather than the toolbar, which keeps the
+                    // toolbar short. `zoom_factor` multiplies the OS's own scale
+                    // factor, so a HiDPI screen is already handled.
+                    ui.separator();
+                    ui.label(egui::RichText::new("Display").small());
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button("Zoom out")
+                            .on_hover_text("Zoom out (Ctrl+-)")
+                            .clicked()
+                        {
+                            self.zoom_out(ui.ctx());
+                        }
+                        ui.label(format!("{:.0}%", ui.ctx().zoom_factor() * 100.0));
+                        if ui
+                            .button("Zoom in")
+                            .on_hover_text("Zoom in (Ctrl+=)")
+                            .clicked()
+                        {
+                            self.zoom_in(ui.ctx());
+                        }
+                        if ui
+                            .button("Reset zoom")
+                            .on_hover_text("Reset to 100% (Ctrl+0)")
+                            .clicked()
+                        {
+                            self.set_zoom(ui.ctx(), 1.0);
+                        }
+                    });
 
-                ui.separator();
-                if ui
-                    .button("Reset window size and zoom")
-                    .on_hover_text("Ctrl+Alt+0")
-                    .clicked()
-                {
-                    self.reset_window_state(ui.ctx());
-                    ui.close();
-                }
+                    // Plain-text size, in the spirit of a browser's font-size
+                    // control: it scales the type and therefore the resting size of
+                    // controls with it, but leaves the whole-window zoom above
+                    // alone.
+                    ui.separator();
+                    ui.label(egui::RichText::new("Text").small());
+                    let sizes = theme::TEXT_SIZES;
+                    let step = sizes
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, (a, _)), (_, (b, _))| {
+                            (a - self.text_size)
+                                .abs()
+                                .partial_cmp(&(b - self.text_size).abs())
+                                .unwrap()
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(step > 0, egui::Button::new("A−"))
+                            .on_hover_text("Smaller text")
+                            .clicked()
+                        {
+                            self.text_size = sizes[step - 1].0;
+                            self.apply_ui_style(ui.ctx());
+                            self.store_display_settings();
+                        }
+                        ui.label(format!("{:.0}%", self.text_size * 100.0));
+                        if ui
+                            .add_enabled(step + 1 < sizes.len(), egui::Button::new("A+"))
+                            .on_hover_text("Larger text")
+                            .clicked()
+                        {
+                            self.text_size = sizes[step + 1].0;
+                            self.apply_ui_style(ui.ctx());
+                            self.store_display_settings();
+                        }
+                        if ui
+                            .button("Reset text size")
+                            .on_hover_text("Back to the default size (100%)")
+                            .clicked()
+                        {
+                            self.text_size = theme::DEFAULT_TEXT_SIZE;
+                            self.apply_ui_style(ui.ctx());
+                            self.store_display_settings();
+                        }
+                    });
+
+                    // The theme picker. Both of egui's internal themes were
+                    // replaced with this theme's full style, so switching is one
+                    // row. Rows rather than a combo: an interactive popup cannot
+                    // live inside a menu, which closes on the click.
+                    ui.separator();
+                    ui.label(egui::RichText::new("Theme").small());
+                    for theme in Theme::ALL {
+                        if ui
+                            .selectable_label(self.theme == theme, theme.name())
+                            .clicked()
+                        {
+                            self.theme = theme;
+                            self.apply_ui_style(ui.ctx());
+                            self.store_display_settings();
+                        }
+                    }
+
+                    ui.separator();
+                    if ui
+                        .button("Reset window size and zoom")
+                        .on_hover_text("Ctrl+Alt+0")
+                        .clicked()
+                    {
+                        self.reset_window_state(ui.ctx());
+                        ui.close();
+                    }
+                });
             });
             ui.menu_button("Help", |ui| {
-                if ui.button("About…").clicked() {
-                    self.about_open = true;
-                    ui.close_menu();
-                }
+                scrollable_menu(ui, |ui| {
+                    if ui.button("About…").clicked() {
+                        self.about_open = true;
+                        ui.close();
+                    }
+                });
             });
         });
     }
@@ -1814,24 +1893,52 @@ impl TextrillApp {
     /// The options dialog, qBittorrent-style: a category list beside a
     /// scrolling page. Opened from the toolbar's `Options` button or the View
     /// menu, and closed with its own title-bar `x`.
+    ///
+    /// On desktop this is a real OS window, not a panel pinned inside the main
+    /// one, so it can be moved beside the text it is configuring. egui's
+    /// immediate viewports render it through the same backend; integrations
+    /// without multi-viewport support (egui_kittest, web) fall back to an
+    /// embedded window automatically.
     fn options_window(&mut self, ctx: &egui::Context) {
         if !self.show_options {
             return;
         }
         let mut open = self.show_options;
-        egui::Window::new("Textrill options")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_size([780.0, 560.0])
-            .min_width(560.0)
-            .min_height(360.0)
-            .show(ctx, |ui| {
-                ui.set_min_width(540.0);
-                if self.panel.draw(ui, &mut self.opts) {
-                    self.schedule_convert(Instant::now());
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("textrill-options"),
+            egui::ViewportBuilder::default()
+                .with_title("Textrill options")
+                .with_inner_size([780.0, 560.0])
+                .with_min_inner_size([560.0, 360.0])
+                .with_resizable(true),
+            |ui, class| {
+                if ui.input(|input| input.viewport().close_requested()) {
+                    open = false;
                 }
-            });
+                let mut draw = |ui: &mut egui::Ui| {
+                    ui.set_min_width(540.0);
+                    if self.panel.draw(ui, &mut self.opts) {
+                        self.schedule_convert(Instant::now());
+                    }
+                };
+                if class == egui::ViewportClass::EmbeddedWindow {
+                    // The fallback Window has no `.open`, so it gets no
+                    // title-bar close button. Give the backend without
+                    // multi-viewport support an explicit way out.
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Close options").clicked() {
+                            open = false;
+                        }
+                    });
+                    draw(ui);
+                } else {
+                    // A native viewport is a bare canvas, like eframe's root
+                    // window. Give it the theme's paper and the same breathing
+                    // room the old in-window dialog had.
+                    egui::Frame::central_panel(ui.style()).show(ui, draw);
+                }
+            },
+        );
         self.show_options = open;
     }
 
@@ -1943,8 +2050,15 @@ impl TextrillApp {
                 }
 
                 ui.separator();
+                // The floating scroll bar is drawn over the content, so keep a
+                // gutter on the right. Without it the weak category labels sit
+                // under the bar and read as struck through.
                 egui::ScrollArea::vertical()
                     .max_height(320.0)
+                    .content_margin(egui::Margin {
+                        right: 12,
+                        ..Default::default()
+                    })
                     .show(ui, |ui| {
                         for (index, command) in commands.iter().enumerate() {
                             let selected = index == self.palette_selected;
@@ -2076,6 +2190,10 @@ impl TextrillApp {
         // drawing at the wrong appearance unless it knew to call this first.
         if !self.applied_style {
             self.apply_ui_style(ui.ctx());
+            // The app owns the zoom chords (see `handle_zoom_shortcuts`), so
+            // egui's wider-range built-in handler must stay out of the way.
+            ui.ctx()
+                .options_mut(|options| options.zoom_with_keyboard = false);
             self.applied_style = true;
         }
         // Pack the whole interface according to the chosen density. The three
@@ -2103,6 +2221,7 @@ impl TextrillApp {
         }
         self.set_title(ui.ctx());
         self.note_window_state(ui.ctx());
+        self.handle_zoom_shortcuts(ui.ctx());
 
         // The window's own close button goes through the unsaved-changes prompt
         // too, unless we are already closing.

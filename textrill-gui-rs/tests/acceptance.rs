@@ -16,7 +16,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use textrill::options::Options;
+use textrill::cli::{self, Kind, Opt};
+use textrill::options::{numeric_range, Options};
 use textrill_gui::options_panel::OptionsPanel;
 use textrill_gui::theme::Theme;
 use textrill_gui::{Chooser, SaveAnswer, Settings, TextrillApp};
@@ -62,6 +63,70 @@ fn help_for(name: &str) -> &'static str {
         .find(|spec| spec.names.contains(&name))
         .map(|spec| spec.help)
         .unwrap_or_else(|| panic!("no engine option named {name}"))
+}
+
+/// A value that differs from `opt`'s default and that `cli::set_opt` accepts,
+/// so a sweep can move every option off its default one at a time.
+fn alternate_value(opt: Opt) -> String {
+    let defaults = Options::default();
+    match opt.kind() {
+        Kind::Flag => {
+            if cli::get_opt(&defaults, opt) == "true" {
+                "false".to_string()
+            } else {
+                "true".to_string()
+            }
+        }
+        Kind::Int => {
+            let current: i64 = cli::get_opt(&defaults, opt)
+                .parse()
+                .expect("an int default");
+            let (low, high) = numeric_range(opt.canonical()).unwrap_or((0, usize::MAX));
+            let next = current + 1;
+            if next < 0 || next as usize > high {
+                (current - 1).max(low as i64).to_string()
+            } else {
+                next.to_string()
+            }
+        }
+        Kind::Str => match opt {
+            Opt::Encoding => "utf-16le".to_string(),
+            Opt::AllowedUrlSchemes => "https,mailto".to_string(),
+            Opt::ListTemplates => "text".to_string(),
+            _ => "probe".to_string(),
+        },
+        Kind::StrArray => {
+            if opt == Opt::Var {
+                "probe=1".to_string()
+            } else {
+                "probe".to_string()
+            }
+        }
+        Kind::TableType => "ALIGN=0".to_string(),
+    }
+}
+
+/// Every option value, in `Opt::ALL` order, so a redraw can be compared against
+/// the complete state rather than only the option a test happened to edit.
+fn snapshot(opts: &Options) -> Vec<(Opt, String)> {
+    Opt::ALL
+        .iter()
+        .map(|&opt| (opt, cli::get_opt(opts, opt)))
+        .collect()
+}
+
+/// Fail with the names of every option a redraw rewrote.
+fn assert_snapshot(actual: &[(Opt, String)], expected: &[(Opt, String)], context: &str) {
+    let changed: Vec<String> = actual
+        .iter()
+        .zip(expected)
+        .filter(|(a, e)| a != e)
+        .map(|(a, e)| format!("{}: {:?} -> {:?}", a.0.canonical(), e.1, a.1))
+        .collect();
+    assert!(
+        changed.is_empty(),
+        "{context} rewrote options nobody edited: {changed:#?}"
+    );
 }
 
 /// The help string is the panel's label for every kind, so a duplicated help
@@ -119,6 +184,496 @@ fn clicking_a_checkbox_writes_through_to_options() {
         !harness.state().1.demoronize,
         "the click did not reach `Options.demoronize`"
     );
+}
+
+/// Every option can be moved off its default and survives a panel redraw.
+/// This is the individual half of the "no widget clobbers another" contract:
+/// a group that resets a sibling, or a widget that writes its old value back,
+/// shows up as a changed value on an option nobody clicked.
+#[test]
+fn every_option_survives_a_panel_redraw_individually() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    for &opt in Opt::ALL {
+        // A fresh panel and option set per option, so remembered radio state
+        // from the previous pass cannot hide a collision.
+        *harness.state_mut() = (OptionsPanel::default(), Options::default());
+        let value = alternate_value(opt);
+        cli::set_opt(&mut harness.state_mut().1, opt, &value)
+            .unwrap_or_else(|error| panic!("{}: {error}", opt.canonical()));
+        assert_ne!(
+            cli::get_opt(&harness.state().1, opt),
+            cli::get_opt(&Options::default(), opt),
+            "{}: the probe must move the option",
+            opt.canonical()
+        );
+
+        let expected = snapshot(&harness.state().1);
+        harness.run();
+
+        assert_snapshot(
+            &snapshot(&harness.state().1),
+            &expected,
+            &format!("{}: a panel redraw", opt.canonical()),
+        );
+    }
+}
+
+/// Every enabled flag is a working checkbox, not only a labelled row. Grouped
+/// flags (document type, link mode, title source) are covered by their own
+/// tests, and disabled flags must reject edits.
+#[test]
+fn every_enabled_flag_can_be_toggled_from_the_panel() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    for &opt in Opt::ALL {
+        if opt.kind() != Kind::Flag
+            || matches!(
+                opt,
+                Opt::Html5 | Opt::Xhtml | Opt::MakeLinks | Opt::LinkOnly | Opt::Titlefirst
+            )
+        {
+            continue;
+        }
+        *harness.state_mut() = (OptionsPanel::default(), Options::default());
+        harness.run();
+        let before = cli::get_opt(&harness.state().1, opt);
+        let node = harness.get_by_label(opt.help());
+        if node.accesskit_node().is_disabled() {
+            continue;
+        }
+        node.click();
+        harness.run();
+        let after = cli::get_opt(&harness.state().1, opt);
+        assert_ne!(
+            after,
+            before,
+            "{}: checkbox did not toggle",
+            opt.canonical()
+        );
+    }
+}
+
+/// Every integer option is a working `DragValue`: focusing it and pressing an
+/// arrow key writes through to the engine, not only into a local copy.
+#[test]
+fn every_int_option_accepts_a_keyboard_edit() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    for &opt in Opt::ALL {
+        if opt.kind() != Kind::Int {
+            continue;
+        }
+        *harness.state_mut() = (OptionsPanel::default(), Options::default());
+        harness.run();
+        let before = cli::get_opt(&harness.state().1, opt);
+        let node = harness.get_by_role_and_label(egui::accesskit::Role::SpinButton, opt.help());
+        node.focus();
+        harness.run();
+        harness.key_press(egui::Key::ArrowUp);
+        harness.run();
+        assert_ne!(
+            cli::get_opt(&harness.state().1, opt),
+            before,
+            "{}: the arrow key did not edit the number",
+            opt.canonical()
+        );
+    }
+}
+
+/// Every enabled single-line string option is a working text field. The grouped
+/// fields (encoding, templates, title) get their own tests; pipeline-only fields
+/// are disabled and must not accept input.
+#[test]
+fn every_string_option_accepts_typed_text() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    for &opt in Opt::ALL {
+        if opt.kind() != Kind::Str
+            || matches!(
+                opt,
+                Opt::Encoding
+                    | Opt::BodyTemplate
+                    | Opt::DocumentTemplate
+                    | Opt::TemplateLibrary
+                    | Opt::Title
+            )
+        {
+            continue;
+        }
+        *harness.state_mut() = (OptionsPanel::default(), Options::default());
+        harness.run();
+        let disabled = harness
+            .get_by_role_and_label(egui::accesskit::Role::TextInput, opt.help())
+            .accesskit_node()
+            .is_disabled();
+        if disabled {
+            continue;
+        }
+        let before = cli::get_opt(&harness.state().1, opt);
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::TextInput, opt.help())
+            .focus();
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::TextInput, opt.help())
+            .type_text(&alternate_value(opt));
+        harness.run();
+        assert_ne!(
+            cli::get_opt(&harness.state().1, opt),
+            before,
+            "{}: typed text did not reach the option",
+            opt.canonical()
+        );
+    }
+}
+
+/// Every enabled list option is a working multi-line field. Disabled pipeline
+/// lists (`infile`, `instring`, `outfile`) must not accept input.
+#[test]
+fn every_enabled_list_option_accepts_typed_text() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    for &opt in Opt::ALL {
+        if opt.kind() != Kind::StrArray {
+            continue;
+        }
+        *harness.state_mut() = (OptionsPanel::default(), Options::default());
+        harness.run();
+        let disabled = harness
+            .get_by_role_and_label(egui::accesskit::Role::MultilineTextInput, opt.help())
+            .accesskit_node()
+            .is_disabled();
+        if disabled {
+            continue;
+        }
+        let before = cli::get_opt(&harness.state().1, opt);
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::MultilineTextInput, opt.help())
+            .focus();
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::MultilineTextInput, opt.help())
+            .type_text(&alternate_value(opt));
+        harness.run();
+        assert_ne!(
+            cli::get_opt(&harness.state().1, opt),
+            before,
+            "{}: typed text did not reach the list",
+            opt.canonical()
+        );
+    }
+}
+
+/// Every table column type is an independent checkbox once tables are on.
+#[test]
+fn every_table_type_checkbox_can_be_toggled() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    harness.state_mut().1.make_tables = true;
+    harness.run();
+
+    for label in ["ALIGN", "PGSQL", "BORDER", "DELIM"] {
+        let node = harness.get_by_label(label);
+        assert!(!node.accesskit_node().is_disabled(), "{label} is disabled");
+        node.click();
+        harness.run();
+        let flags = harness.state().1.table_type;
+        let on = match label {
+            "ALIGN" => flags.align,
+            "PGSQL" => flags.pgsql,
+            "BORDER" => flags.border,
+            "DELIM" => flags.delim,
+            _ => unreachable!(),
+        };
+        assert!(!on, "{label}: the checkbox did not toggle");
+    }
+}
+
+/// Every encoding radio is live, not only the two the older test sampled.
+#[test]
+fn every_encoding_radio_sets_the_encoding() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    for (label, name) in [
+        ("UTF-8", "utf-8"),
+        ("UTF-16 LE", "utf-16le"),
+        ("UTF-16 BE", "utf-16be"),
+        ("UTF-32 LE", "utf-32le"),
+        ("UTF-32 BE", "utf-32be"),
+        ("Windows-1252", "cp1252"),
+        ("Latin-1", "iso-8859-1"),
+        ("Windows-1251", "cp1251"),
+        ("Windows-1253", "cp1253"),
+        ("KOI8-R", "koi8-r"),
+        ("Auto", "auto"),
+    ] {
+        harness.get_by_label(label).click();
+        harness.run();
+        assert_eq!(
+            harness.state().1.encoding.name(),
+            name,
+            "{label}: the radio did not set the encoding"
+        );
+    }
+}
+
+/// A deliberate chain of changes across every group and dependency is stable:
+/// selecting XHTML, a body template, links-only, an explicit title, a table
+/// type and array values, then redrawing the whole panel, leaves each choice
+/// as the user left it.
+#[test]
+fn a_chained_option_set_survives_a_panel_redraw() {
+    let mut opts = Options::default();
+    for (name, value) in [
+        ("tab_width", "7"),
+        ("indent_width", "3"),
+        ("hrule_min", "4"),
+        ("preformat_trigger_lines", "3"),
+        ("underline_length_tolerance", "4"),
+        ("underline_offset_tolerance", "2"),
+        ("par_indent", "3"),
+        ("lang", "ja"),
+        ("doctype", "HTML 4.01 Transitional"),
+        ("xhtml", "true"),
+        ("title", "Doc"),
+        ("titlefirst", "false"),
+        ("body_template", "body.html"),
+        ("make_links", "true"),
+        ("link_only", "true"),
+        ("default_link_dict", "links.dict"),
+        ("links_dictionaries", "extra.dict"),
+        ("allowed_url_schemes", "https,mailto"),
+        ("encoding", "cp1251"),
+        ("make_tables", "true"),
+        ("table_type", "ALIGN=0"),
+        ("custom_heading_regexp", "^H"),
+        ("explicit_headings", "true"),
+        ("bullets", "*"),
+        ("bullets_ordered", "#"),
+        ("preformat_start_marker", "{{{"),
+        ("preformat_end_marker", "}}}"),
+        ("var", "greeting=hi"),
+        ("template_dir", "templates"),
+        ("catalog_dir", "catalogs"),
+        ("demoronize", "false"),
+        ("citations", "true"),
+        ("toc", "true"),
+        ("number_headings", "true"),
+        ("section", "true"),
+        ("glossary", "true"),
+        ("no_referrer", "true"),
+        ("use_mosaic_header", "true"),
+        ("mailmode", "true"),
+        ("indent_par_break", "true"),
+        ("preserve_indent", "true"),
+        ("use_preformat_marker", "true"),
+        ("lang_runs", "true"),
+        ("escape_HTML_chars", "false"),
+        ("close_optional_tags", "false"),
+    ] {
+        cli::set_value(&mut opts, name, value).unwrap_or_else(|error| panic!("{name}: {error}"));
+    }
+    let expected: Vec<(Opt, String)> = Opt::ALL
+        .iter()
+        .map(|&opt| (opt, cli::get_opt(&opts, opt)))
+        .collect();
+
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), opts),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    harness.run();
+
+    for (opt, value) in expected {
+        assert_eq!(
+            cli::get_opt(&harness.state().1, opt),
+            value,
+            "{}: the chain was rewritten by another widget",
+            opt.canonical()
+        );
+    }
+}
+
+/// Every pair of options can be changed together and survives a redraw. The
+/// individual sweep exercises one option at a time; this catches a widget that
+/// only misbehaves when a sibling is also non-default.
+#[test]
+fn every_option_pair_survives_a_panel_redraw() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    for (i, &first) in Opt::ALL.iter().enumerate() {
+        for &second in &Opt::ALL[i + 1..] {
+            *harness.state_mut() = (OptionsPanel::default(), Options::default());
+            for opt in [first, second] {
+                let value = alternate_value(opt);
+                cli::set_opt(&mut harness.state_mut().1, opt, &value).unwrap_or_else(|error| {
+                    panic!("{} + {}: {error}", first.canonical(), second.canonical())
+                });
+            }
+            let expected = snapshot(&harness.state().1);
+            harness.run();
+            assert_snapshot(
+                &snapshot(&harness.state().1),
+                &expected,
+                &format!(
+                    "{} + {}: a panel redraw",
+                    first.canonical(),
+                    second.canonical()
+                ),
+            );
+        }
+    }
+}
+
+/// Deterministic randomized chains: each option is applied one at a time, with
+/// a redraw after every edit, so a later widget cannot quietly undo an earlier
+/// choice. The seed is fixed so a failure reproduces.
+#[test]
+fn randomized_option_chains_survive_a_panel_redraw() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    let mut seed = 0x5eed_1234_abcd_9876_u64;
+    let mut next_index = || {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((seed >> 33) as usize) % Opt::ALL.len()
+    };
+
+    for round in 0..32 {
+        *harness.state_mut() = (OptionsPanel::default(), Options::default());
+        let mut chain: Vec<Opt> = Vec::new();
+        while chain.len() < 6 {
+            let opt = Opt::ALL[next_index()];
+            if !chain.contains(&opt) {
+                chain.push(opt);
+            }
+        }
+        for opt in chain {
+            let value = alternate_value(opt);
+            cli::set_opt(&mut harness.state_mut().1, opt, &value)
+                .unwrap_or_else(|error| panic!("round {round}, {}: {error}", opt.canonical()));
+            let expected = snapshot(&harness.state().1);
+            harness.run();
+            assert_snapshot(
+                &snapshot(&harness.state().1),
+                &expected,
+                &format!("round {round}, after {}: a panel redraw", opt.canonical()),
+            );
+        }
+    }
+}
+
+/// The string fields drawn by grouped controls still write through: the
+/// template sources and the explicit title are text edits once their radio is
+/// selected.
+#[test]
+fn the_grouped_string_fields_accept_typed_text() {
+    let mut harness = Harness::new_ui_state(
+        |ui, state: &mut (OptionsPanel, Options)| {
+            state.0.draw(ui, &mut state.1);
+        },
+        (OptionsPanel::default(), Options::default()),
+    );
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+
+    harness.get_by_label("Body wrapper").click();
+    harness.run();
+    let field =
+        harness.get_by_role_and_label(egui::accesskit::Role::TextInput, help_for("body_template"));
+    field.focus();
+    field.type_text("body.html");
+    harness.run();
+    assert_eq!(harness.state().1.template, "body.html");
+
+    harness.get_by_label("Whole document").click();
+    harness.run();
+    let field = harness.get_by_role_and_label(
+        egui::accesskit::Role::TextInput,
+        help_for("document_template"),
+    );
+    field.focus();
+    field.type_text("whole.html");
+    harness.run();
+    assert_eq!(harness.state().1.document_template, "whole.html");
+
+    harness.get_by_label("Shipped").click();
+    harness.run();
+    let field = harness.get_by_role_and_label(
+        egui::accesskit::Role::TextInput,
+        help_for("template_library"),
+    );
+    field.focus();
+    field.type_text("article");
+    harness.run();
+    assert_eq!(harness.state().1.template_library, "article");
+
+    harness.get_by_label("Explicit title").click();
+    harness.run();
+    let field = harness.get_by_role_and_label(egui::accesskit::Role::TextInput, help_for("title"));
+    field.focus();
+    field.type_text("The Book");
+    harness.run();
+    assert_eq!(harness.state().1.title, "The Book");
 }
 
 /// The Document type choice is one control over the engine's mutually
@@ -644,6 +1199,31 @@ fn the_app_exposes_its_controls() {
     harness.get_by_label("Help");
 }
 
+/// A backend without native viewports embeds the options in a Window; that
+/// fallback has no title-bar close button, so the dialog supplies its own.
+#[test]
+fn the_options_window_closes_in_an_embedded_viewport_backend() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.run();
+
+    harness.get_by_label("Options").click();
+    harness.run();
+    assert!(harness.state().show_options);
+    harness.get_by_label("Reset all options");
+
+    harness.get_by_label("Close options").click();
+    harness.run();
+    assert!(!harness.state().show_options, "Close options left it open");
+    assert_eq!(
+        harness.query_all_by_label("Reset all options").count(),
+        0,
+        "the options dialog is still drawn after closing"
+    );
+}
+
 /// The filter box hides the options it does not match, and clearing it brings
 /// them back. Ported from `test_filter_hides_rows`.
 #[test]
@@ -776,6 +1356,49 @@ fn the_ui_zooms_with_the_keyboard() {
     assert_eq!(harness.ctx.zoom_factor(), 1.0, "Ctrl+0 did not reset");
 }
 
+/// The shortcuts use the app's 10% steps and stop at its persisted range, not
+/// egui's wider built-in 20%-500% range. Otherwise a zoom the menu cannot undo
+/// would silently shrink on the next launch when the stored value is clamped.
+#[test]
+fn the_zoom_shortcuts_step_and_stop_at_the_supported_range() {
+    let min = textrill_gui::window_state::MIN_ZOOM;
+    let max = textrill_gui::window_state::MAX_ZOOM;
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.run();
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Plus);
+    harness.run();
+    assert!(
+        (harness.ctx.zoom_factor() - 1.1).abs() < 0.001,
+        "Ctrl+Plus should step by 10%, got {}",
+        harness.ctx.zoom_factor()
+    );
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Equals);
+    harness.run();
+    assert!(
+        (harness.ctx.zoom_factor() - 1.2).abs() < 0.001,
+        "Ctrl+= should also zoom in"
+    );
+
+    harness.ctx.set_zoom_factor(max);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Plus);
+    harness.run();
+    assert_eq!(harness.ctx.zoom_factor(), max, "zoom in passed the ceiling");
+
+    harness.ctx.set_zoom_factor(min);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Minus);
+    harness.run();
+    assert_eq!(harness.ctx.zoom_factor(), min, "zoom out passed the floor");
+
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num0);
+    harness.run();
+    assert_eq!(harness.ctx.zoom_factor(), 1.0, "Ctrl+0 did not reset");
+}
+
 /// Zoom is also a visible control in the View menu, not only a shortcut.
 #[test]
 fn the_display_controls_are_exposed() {
@@ -791,12 +1414,58 @@ fn the_display_controls_are_exposed() {
     harness.get_by_label("Zoom in");
     harness.get_by_label("Reset zoom");
 
+    // The View menu is taller than the window: scroll the lower rows into
+    // view before clicking, exactly as a user would.
+    harness.get_by_label("Zoom in").scroll_to_me();
+    harness.run();
     harness.get_by_label("Zoom in").click();
     harness.run();
     harness.run();
     assert!(
         harness.ctx.zoom_factor() > 1.0,
         "the Zoom in button did not scale the UI"
+    );
+}
+
+/// A window too short for the View menu must not hide the lower commands past
+/// the bottom edge: the menu scrolls, and the escape hatch is still operable.
+#[test]
+fn the_view_menu_scrolls_in_a_short_window() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.set_size(egui::vec2(360.0, 300.0));
+    harness.ctx.set_zoom_factor(2.0);
+    harness.run();
+
+    harness.get_by_label("View").click();
+    harness.run();
+    harness
+        .get_by_label("Reset window size and zoom")
+        .scroll_to_me();
+    harness.run();
+
+    let reset = harness.get_by_label("Reset window size and zoom");
+    let screen = harness.ctx.content_rect();
+    let rect = reset.rect();
+    assert!(
+        rect.top() >= screen.top() - 1.0 && rect.bottom() <= screen.bottom() + 1.0,
+        "the last View item is outside the window after scrolling: {rect:?} in {screen:?}"
+    );
+    reset.click();
+    harness.run();
+    harness.run();
+
+    assert_eq!(
+        harness.ctx.zoom_factor(),
+        1.0,
+        "the scrolled-to reset command did not run"
+    );
+    assert_eq!(
+        harness.query_all_by_label("Zoom out").count(),
+        0,
+        "the menu should close after the command runs"
     );
 }
 
@@ -1147,6 +1816,8 @@ fn the_theme_picker_switches_and_remembers_the_theme() {
     // The theme rows are in the View menu (the toolbar stays short).
     harness.get_by_label("View").click();
     harness.run();
+    harness.get_by_label(Theme::Dark.name()).scroll_to_me();
+    harness.run();
     harness.get_by_label(Theme::Dark.name()).click();
     harness.run();
 
@@ -1204,10 +1875,14 @@ fn the_text_size_buttons_scale_the_type_and_are_remembered() {
     harness.run();
 
     assert_eq!(harness.state().text_size, 1.0);
+    harness.get_by_label("A+").scroll_to_me();
+    harness.run();
     harness.get_by_label("A+").click();
     harness.run();
     // A click on a menu row closes the menu, so reopen it for the second step.
     harness.get_by_label("View").click();
+    harness.run();
+    harness.get_by_label("A+").scroll_to_me();
     harness.run();
     harness.get_by_label("A+").click();
     harness.run();
@@ -2112,6 +2787,39 @@ fn the_command_palette_opens_and_closes_with_the_shortcut() {
         0,
         "Escape should close the palette"
     );
+}
+
+/// The floating scroll bar is an overlay; the palette must reserve a gutter so
+/// it never sits on the right-aligned category labels ("file", "view", ...).
+#[test]
+fn the_palette_scrollbar_does_not_cover_category_labels() {
+    let mut harness = Harness::new_ui_state(
+        |ui, app: &mut TextrillApp| app.draw(ui),
+        TextrillApp::default(),
+    );
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::K);
+    harness.run();
+
+    let search = harness
+        .get_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|node| node.is_focused())
+        .expect("the palette search box should hold focus when it opens");
+    let content_right = search.rect().right();
+
+    for category in ["file", "convert", "window", "view"] {
+        let labels: Vec<_> = harness.get_all_by_label(category).collect();
+        assert!(!labels.is_empty(), "no {category} rows were listed");
+        for label in labels {
+            assert!(
+                label.rect().right() <= content_right - 8.0,
+                "the {category} label ends at {} but the content edge is {}; \
+                 the floating scroll bar can cover it",
+                label.rect().right(),
+                content_right
+            );
+        }
+    }
 }
 
 /// Typing narrows the list to what matches, and Enter runs the highlighted

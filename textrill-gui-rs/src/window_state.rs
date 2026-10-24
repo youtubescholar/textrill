@@ -39,6 +39,9 @@ pub const MAX_SIZE: [f32; 2] = [16384.0, 16384.0];
 pub const MIN_ZOOM: f32 = 0.5;
 pub const MAX_ZOOM: f32 = 4.0;
 
+/// One zoom button or shortcut step: 10%, like a browser.
+pub const ZOOM_STEP: f32 = 0.1;
+
 /// Parse a stored `WIDTHxHEIGHT` size, clamped to a usable range.
 ///
 /// Text that cannot be read as two numbers yields `None`, so the caller falls
