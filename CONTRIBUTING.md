@@ -62,3 +62,12 @@ author goldens against it, non-gating.
 
 Code: GPL-3.0-or-later (`LICENSE`). Example corpus: CC0 / public domain. No CLA;
 contributions are under the same terms as the project.
+
+
+## Commit Message Style
+
+Keep commit messages short and scannable:
+
+- **Subject line**: 50 characters or less, imperative mood (e.g., "fix: resolve crash on startup")
+- **Body**: Only add details if necessary. Put longer explanations in PR descriptions, not commit bodies
+- **Avoid phase dumps**: Don't copy entire roadmaps/specs into commit messages. Link to issues/PRs or reference `CHANGELOG.md` instead
