@@ -1,6 +1,6 @@
 [package]
 name = "textrill"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Convert plain text to HTML. A Rust reimplementation of HTML::TextToHTML / txt2html."
 license = "GPL-3.0-or-later"
