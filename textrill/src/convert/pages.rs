@@ -401,7 +401,6 @@ impl Converter {
     }
 }
 
-
 /// Find the best split point near or before `max_chars` (counting raw chars).
 /// Prefer sentence/phrase boundaries: punctuation like . , ; : ! ? and CJK
 /// punctuation like 。、；：！？．， etc.
@@ -415,11 +414,22 @@ fn find_split_point(text: &str, max_chars: usize) -> usize {
     }
     // Look backwards from max_chars for punctuation boundaries
     let mut best = None;
-    let search_start = if max_chars > 200 { max_chars - 200 } else { 0 };
+    let search_start = max_chars.saturating_sub(200);
     for i in (search_start..max_chars).rev() {
         let c = chars[i];
         // Check for punctuation that typically ends sentences/clauses
-        if c == '.' || c == '!' || c == '?' || c == ';' || c == ':' || c == '。' || c == '！' || c == '？' || c == '；' || c == '：' || c == '．' {
+        if c == '.'
+            || c == '!'
+            || c == '?'
+            || c == ';'
+            || c == ':'
+            || c == '。'
+            || c == '！'
+            || c == '？'
+            || c == '；'
+            || c == '：'
+            || c == '．'
+        {
             // Include the punctuation
             best = Some(i + 1);
             break;
@@ -458,18 +468,23 @@ fn split_text_by_chars(text: &str, max_chars: usize) -> Vec<String> {
         }
         let split_at_chars = find_split_point(&remaining, max_chars);
         // Convert char count back to byte index
-        let byte_pos: usize = remaining.char_indices().nth(split_at_chars).map(|(i, _)| i).unwrap_or(remaining.len());
+        let byte_pos: usize = remaining
+            .char_indices()
+            .nth(split_at_chars)
+            .map(|(i, _)| i)
+            .unwrap_or(remaining.len());
         let chunk = remaining[..byte_pos].to_string();
         remaining = remaining[byte_pos..].to_string();
         // Trim leading whitespace from next chunk
-        remaining = remaining.trim_start_matches(|c: char| c.is_whitespace() && c != '\n').to_string();
+        remaining = remaining
+            .trim_start_matches(|c: char| c.is_whitespace() && c != '\n')
+            .to_string();
         chunks.push(chunk);
     }
     chunks
 }
 
 impl Converter {
-
     /// Convert and split the body into character-limited chunks.
     pub fn try_convert_chunk_chars(&mut self) -> (Vec<(String, String)>, Vec<String>) {
         let mut sources: Vec<String> = Vec::new();
@@ -501,7 +516,7 @@ impl Converter {
         let combined = sources.join("\n\n");
         let max_chars = self.opts.chunk_chars;
         let text_chunks = split_text_by_chars(&combined, max_chars);
-        
+
         let mut files = Vec::new();
         for (i, chunk_text) in text_chunks.iter().enumerate() {
             let chunk_num = i + 1;

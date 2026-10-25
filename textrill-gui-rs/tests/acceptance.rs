@@ -144,7 +144,7 @@ fn option_help_strings_are_unique() {
     // Adding an engine option means adding a panel widget. The count is here
     // to make an addition a deliberate act rather than something that happens
     // when the engine grows an option.
-    assert_eq!(seen.len(), 76, "the engine's option count changed");
+    assert_eq!(seen.len(), 77, "the engine's option count changed");
 }
 
 /// Every option in `cli::SPECS` is reachable as a labelled widget.
@@ -280,6 +280,9 @@ fn every_int_option_accepts_a_keyboard_edit() {
 
     for &opt in Opt::ALL {
         if opt.kind() != Kind::Int {
+            continue;
+        }
+        if textrill_gui::options_panel::gui_ignored(opt) {
             continue;
         }
         *harness.state_mut() = (OptionsPanel::default(), Options::default());

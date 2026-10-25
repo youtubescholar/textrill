@@ -198,7 +198,11 @@ fn bounded_options_reject_one_past_the_ceiling() {
             "--{opt}={v} should be rejected: {r:?}",
             r = r.stderr
         );
-        let low = if *opt == "tab_width" || *opt == "chunk_chars" { 1 } else { 0 };
+        let low = if *opt == "tab_width" || *opt == "chunk_chars" {
+            1
+        } else {
+            0
+        };
         let want = format!("{opt} must be between {low} and {NUMERIC_OPTION_MAX}");
         assert!(
             r.stderr.contains(&want),

@@ -842,7 +842,7 @@ fn group_reset(ui: &mut Ui, opts: &mut Options, members: &[Opt]) -> bool {
 /// option, but [`crate::options_store`] leaves them out of the saved set: a
 /// stored value could never be acted on, so keeping it would only resurface as
 /// a stale edge.
-pub(crate) fn gui_ignored(opt: Opt) -> bool {
+pub fn gui_ignored(opt: Opt) -> bool {
     matches!(
         opt,
         Opt::Stream

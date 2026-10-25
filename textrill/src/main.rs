@@ -174,7 +174,11 @@ fn main() -> ExitCode {
             );
             return ExitCode::from(1);
         }
-        return if wrote { ExitCode::SUCCESS } else { ExitCode::from(1) };
+        return if wrote {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        };
     }
 
     if opts.chunk {
