@@ -277,6 +277,13 @@ pub struct Options {
     /// Requires a file `--outfile`; not valid with `--extract` or stdout.
     /// Default **off**.
     pub chunk: bool,
+    /// Split output into chunks of at most this many characters (raw plain text).
+    /// Splits are rounded down to the nearest sentence/phrase boundary
+    /// (punctuation like .,;:!? and CJK punctuation). Requires a file
+    /// `--outfile`; mutually exclusive with `--chunk`, `--section`, `--toc`,
+    /// `--stream`, `--citations`, `--glossary`, `--instring`, and `--extract`.
+    /// Default **off** (0).
+    pub chunk_chars: usize,
     /// Prefix each heading with its hierarchical number (`1`, `1.1`, …).
     /// Composes with `--toc`, whose labels then carry the numbers. Default
     /// **off**.
@@ -284,7 +291,7 @@ pub struct Options {
     /// Read the input and write the output a paragraph at a time, so a very large
     /// UTF-8 file can be piped without holding the whole document in memory.
     /// Refused with `--instring` and the whole-body passes `--number_headings`,
-    /// `--section`, `--toc` and `--chunk`. Default **off**.
+    /// `--section`, `--toc`, `--chunk` and `--chunk_chars`. Default **off**.
     pub stream: bool,
     pub hrule_min: usize,
     /// Emit an HTML5 document: `<!DOCTYPE html>`, an `<html>` element without the
@@ -403,6 +410,7 @@ impl Default for Options {
             toc: false,
             citations: false,
             chunk: false,
+            chunk_chars: 0,
             number_headings: false,
             stream: false,
             hrule_min: 4,
@@ -493,6 +501,9 @@ impl Options {
     pub fn validate(&self) -> Result<(), String> {
         for (name, value) in self.numeric_values() {
             if let Some((low, high)) = numeric_range(name) {
+                if name == "chunk_chars" && value == 0 {
+                    continue;
+                }
                 if value < low || value > high {
                     return Err(format!(
                         "{name} must be between {low} and {high}, got {value}"
@@ -508,6 +519,29 @@ impl Options {
         self.validate_language_options()?;
         self.validate_template_options()?;
         self.validate_notes_options()?;
+        if self.chunk_chars > 0 {
+            if self.extract {
+                return Err("--chunk_chars is not valid with --extract".to_string());
+            }
+            if self.chunk {
+                return Err("--chunk_chars is not valid with --chunk".to_string());
+            }
+            if self.section {
+                return Err("--chunk_chars is not valid with --section".to_string());
+            }
+            if self.toc {
+                return Err("--chunk_chars is not valid with --toc".to_string());
+            }
+            if self.stream {
+                return Err("--chunk_chars is not valid with --stream".to_string());
+            }
+            if !self.instring.is_empty() {
+                return Err("--chunk_chars is not valid with --instring".to_string());
+            }
+            if self.outfile.is_empty() || self.outfile == "-" {
+                return Err("--chunk_chars requires --outfile".to_string());
+            }
+        }
         Ok(())
     }
 
@@ -560,6 +594,9 @@ impl Options {
         if self.lang_runs && self.stream {
             return Err("--lang_runs is not valid with --stream".to_string());
         }
+        if self.lang_runs && self.chunk_chars > 0 {
+            return Err("--lang_runs is not valid with --chunk_chars".to_string());
+        }
         Ok(())
     }
 
@@ -578,6 +615,9 @@ impl Options {
             }
             if self.chunk {
                 return Err(format!("{flag} is not valid with --chunk"));
+            }
+            if self.chunk_chars > 0 {
+                return Err(format!("{flag} is not valid with --chunk_chars"));
             }
             if self.stream {
                 return Err(format!("{flag} is not valid with --stream"));

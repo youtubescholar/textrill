@@ -105,6 +105,7 @@ fn category(opt: Opt) -> &'static str {
         | Opt::MetaCharset
         | Opt::Extract
         | Opt::Chunk
+        | Opt::ChunkChars
         | Opt::Section
         | Opt::StyleUrl
         | Opt::DocumentTemplate
@@ -846,6 +847,7 @@ pub(crate) fn gui_ignored(opt: Opt) -> bool {
         opt,
         Opt::Stream
             | Opt::Chunk
+            | Opt::ChunkChars
             | Opt::Report
             | Opt::Preset
             | Opt::ListTemplates
@@ -1189,6 +1191,7 @@ mod tests {
         for opt in [
             Opt::Stream,
             Opt::Chunk,
+            Opt::ChunkChars,
             Opt::Report,
             Opt::Infile,
             Opt::Instring,

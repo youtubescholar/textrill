@@ -138,6 +138,45 @@ fn main() -> ExitCode {
     }
 
     // --chunk requires output file and no extract; not compatible with instring.
+    if opts.chunk_chars > 0 {
+        if opts.extract {
+            eprintln!("{PROG}: --chunk_chars is not valid with --extract");
+            return ExitCode::from(1);
+        }
+        if !opts.instring.is_empty() {
+            eprintln!("{PROG}: --chunk_chars is not valid with --instring");
+            return ExitCode::from(1);
+        }
+        if opts.outfile.is_empty() || opts.outfile == "-" {
+            eprintln!("{PROG}: --chunk_chars requires --outfile");
+            return ExitCode::from(1);
+        }
+        let mut conv = Converter::new(opts.clone());
+        let (files, unreadable) = conv.try_convert_chunk_chars();
+        let mut wrote = true;
+        for (name, html) in &files {
+            if let Err(e) = std::fs::write(name, html) {
+                eprintln!("Error: unable to open {name}: {e}");
+                wrote = false;
+            }
+        }
+        if opts.report && wrote {
+            let mut total = Counts::default();
+            for (_, html) in &files {
+                total.add(&Counts::of(html));
+            }
+            eprintln!("{PROG}: report {total}");
+        }
+        if !unreadable.is_empty() {
+            eprintln!(
+                "{PROG}: could not read {} input file(s), exiting non-zero",
+                unreadable.len()
+            );
+            return ExitCode::from(1);
+        }
+        return if wrote { ExitCode::SUCCESS } else { ExitCode::from(1) };
+    }
+
     if opts.chunk {
         if opts.extract {
             eprintln!("{PROG}: --chunk is not valid with --extract");

@@ -143,7 +143,13 @@ fn no_numeric_option_can_crash_the_process() {
     for opt in NUMERIC_OPTIONS {
         for v in VALUES {
             let what = format!("--{opt}={v}");
-            let r = run(&[&arg(opt, v)]);
+            let args = if *opt == "chunk_chars" {
+                vec![arg(opt, v), "--outfile=-".to_string()]
+            } else {
+                vec![arg(opt, v)]
+            };
+            let arg_refs: Vec<&str> = args.iter().map(|x| x.as_str()).collect();
+            let r = run(&arg_refs);
             assert_not_crash(&r, &what);
         }
     }
@@ -192,7 +198,7 @@ fn bounded_options_reject_one_past_the_ceiling() {
             "--{opt}={v} should be rejected: {r:?}",
             r = r.stderr
         );
-        let low = if *opt == "tab_width" { 1 } else { 0 };
+        let low = if *opt == "tab_width" || *opt == "chunk_chars" { 1 } else { 0 };
         let want = format!("{opt} must be between {low} and {NUMERIC_OPTION_MAX}");
         assert!(
             r.stderr.contains(&want),
@@ -237,7 +243,13 @@ fn bounded_options_accept_their_range() {
 fn comparison_only_options_are_not_bounded() {
     for opt in COMPARISON_ONLY {
         for v in ["0", "999", "65536", "9223372036854775807"] {
-            let r = run(&[&arg(opt, v)]);
+            let args = if *opt == "chunk_chars" {
+                vec![arg(opt, v), "--outfile=-".to_string()]
+            } else {
+                vec![arg(opt, v)]
+            };
+            let arg_refs: Vec<&str> = args.iter().map(|x| x.as_str()).collect();
+            let r = run(&arg_refs);
             assert_eq!(
                 r.code,
                 0,

@@ -401,7 +401,135 @@ impl Converter {
     }
 }
 
+
+/// Find the best split point near or before `max_chars` (counting raw chars).
+/// Prefer sentence/phrase boundaries: punctuation like . , ; : ! ? and CJK
+/// punctuation like 。、；：！？．， etc.
+fn find_split_point(text: &str, max_chars: usize) -> usize {
+    if max_chars == 0 {
+        return 0;
+    }
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_chars {
+        return chars.len();
+    }
+    // Look backwards from max_chars for punctuation boundaries
+    let mut best = None;
+    let search_start = if max_chars > 200 { max_chars - 200 } else { 0 };
+    for i in (search_start..max_chars).rev() {
+        let c = chars[i];
+        // Check for punctuation that typically ends sentences/clauses
+        if c == '.' || c == '!' || c == '?' || c == ';' || c == ':' || c == '。' || c == '！' || c == '？' || c == '；' || c == '：' || c == '．' {
+            // Include the punctuation
+            best = Some(i + 1);
+            break;
+        }
+        if c == ',' || c == '、' || c == '，' {
+            // Also acceptable as clause boundary
+            if best.is_none() {
+                best = Some(i + 1);
+            }
+        }
+    }
+    if let Some(b) = best {
+        return b;
+    }
+    // Fall back to whitespace
+    for i in (search_start..max_chars).rev() {
+        if chars[i].is_whitespace() {
+            return i + 1;
+        }
+    }
+    max_chars
+}
+
+/// Split raw plain text into chunks by character count with smart boundaries.
+fn split_text_by_chars(text: &str, max_chars: usize) -> Vec<String> {
+    if max_chars == 0 {
+        return vec![text.to_string()];
+    }
+    let mut chunks = Vec::new();
+    let mut remaining = text.to_string();
+    while !remaining.is_empty() {
+        let chars: Vec<char> = remaining.chars().collect();
+        if chars.len() <= max_chars {
+            chunks.push(remaining);
+            break;
+        }
+        let split_at_chars = find_split_point(&remaining, max_chars);
+        // Convert char count back to byte index
+        let byte_pos: usize = remaining.char_indices().nth(split_at_chars).map(|(i, _)| i).unwrap_or(remaining.len());
+        let chunk = remaining[..byte_pos].to_string();
+        remaining = remaining[byte_pos..].to_string();
+        // Trim leading whitespace from next chunk
+        remaining = remaining.trim_start_matches(|c: char| c.is_whitespace() && c != '\n').to_string();
+        chunks.push(chunk);
+    }
+    chunks
+}
+
 impl Converter {
+
+    /// Convert and split the body into character-limited chunks.
+    pub fn try_convert_chunk_chars(&mut self) -> (Vec<(String, String)>, Vec<String>) {
+        let mut sources: Vec<String> = Vec::new();
+        let mut unreadable: Vec<String> = Vec::new();
+        let mut worst = Resolved::Utf8;
+        for f in &self.opts.infile {
+            if f == "-" {
+                let mut buf = String::new();
+                use std::io::Read;
+                let _ = std::io::stdin().read_to_string(&mut buf);
+                sources.push(buf);
+            } else {
+                match read_with(f, self.opts.encoding) {
+                    Some((c, resolved)) => {
+                        if resolved.notice_rank() > worst.notice_rank() {
+                            worst = resolved;
+                        }
+                        sources.push(c);
+                    }
+                    None => {
+                        eprintln!("Could not open {f}\n");
+                        unreadable.push(f.clone());
+                    }
+                }
+            }
+        }
+        self.resolved = worst;
+        // Concatenate all sources
+        let combined = sources.join("\n\n");
+        let max_chars = self.opts.chunk_chars;
+        let text_chunks = split_text_by_chars(&combined, max_chars);
+        
+        let mut files = Vec::new();
+        for (i, chunk_text) in text_chunks.iter().enumerate() {
+            let chunk_num = i + 1;
+            let mut conv = Converter::new(self.opts.clone());
+            let out = conv.convert_text(chunk_text);
+            let name = self.chunk_filename_chars(chunk_num);
+            files.push((name, out));
+        }
+        (files, unreadable)
+    }
+
+    /// Base file name for char-chunked page `n`.
+    pub(super) fn chunk_filename_chars(&self, n: usize) -> String {
+        let path = std::path::Path::new(&self.opts.outfile);
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "output".to_string());
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("html");
+        let name = format!("{stem}-chunk-{n:02}.{ext}");
+        match std::path::Path::new(&self.opts.outfile).parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => {
+                dir.join(name).to_string_lossy().into_owned()
+            }
+            _ => name,
+        }
+    }
+
     /// Convert and split the body into one full document per top-level section,
     /// for `--chunk`. "Top-level" is the shallowest heading level present; its
     /// subsections stay in the same page, and content before the first heading

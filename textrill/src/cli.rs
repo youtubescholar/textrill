@@ -89,6 +89,7 @@ option_table![
     BulletsOrdered, Str, "Characters that start an ordered list item.", ["bullets_ordered"];
     CapsTag, Str, "HTML tag wrapped around runs of capitals.", ["caps_tag", "capstag", "ct"];
     Chunk, Flag, "Write one HTML file per top-level section.", ["chunk"];
+    ChunkChars, Int, "Split into chunks of at most this many characters (raw plain text), rounded down to nearest sentence boundary (.,;:!? and CJK punctuation).", ["chunk_chars"];
     Citations, Flag, "Collect {{textrill:cite:key}} references into a numbered endnotes list.", ["citations", "notes"];
     CloseOptionalTags, Flag, "Emit the end tags HTML allows to be omitted (</p>, </li>, </dt>, </dd>).", ["close_optional_tags"];
     CustomHeadingRegexp, StrArray, "Regexp matching lines that become headings.", ["custom_heading_regexp", "heading", "H"];
@@ -161,7 +162,7 @@ option_table![
 /// The README quotes the option count; binding it here makes an addition a
 /// deliberate, compile-time act rather than a silent prose drift.
 const _: () = assert!(
-    Opt::ALL.len() == 76,
+    Opt::ALL.len() == 77,
     "option count changed; update this assertion and README.md"
 );
 
@@ -239,6 +240,7 @@ pub fn set_opt(opts: &mut Options, opt: Opt, value: &str) -> Result<(), String> 
     match opt {
         // --- flags ---
         Opt::Chunk => opts.chunk = parse_flag(value)?,
+        Opt::ChunkChars => opts.chunk_chars = parse_int(opt, value)?.max(0) as usize,
         Opt::Citations => opts.citations = parse_flag(value)?,
         Opt::CloseOptionalTags => opts.close_optional_tags = parse_flag(value)?,
         Opt::Demoronize => opts.demoronize = parse_flag(value)?,
@@ -411,6 +413,7 @@ pub fn clear_array(opts: &mut Options, opt: Opt) {
 pub fn get_opt(opts: &Options, opt: Opt) -> String {
     match opt {
         Opt::Chunk => opts.chunk.to_string(),
+        Opt::ChunkChars => opts.chunk_chars.to_string(),
         Opt::Citations => opts.citations.to_string(),
         Opt::CloseOptionalTags => opts.close_optional_tags.to_string(),
         Opt::Demoronize => opts.demoronize.to_string(),

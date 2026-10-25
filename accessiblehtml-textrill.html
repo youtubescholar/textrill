@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="{{textrill:lang}}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{textrill:title}}</title>
+    <link rel="stylesheet" href="{{textrill:var:css_href}}">
+    {{textrill:head}}
+</head>
+<body>
+    <!-- Hidden controls for CSS-only interactivity -->
+    <input type="radio" name="theme" id="theme-light" value="theme-light" checked>
+    <input type="radio" name="theme" id="theme-dark" value="theme-dark">
+    <input type="radio" name="theme" id="theme-sepia" value="theme-sepia">
+    <input type="radio" name="theme" id="theme-high-contrast" value="theme-high-contrast">
+    
+    <input type="radio" name="font-family" id="font-serif" value="font-serif">
+    <input type="radio" name="font-family" id="font-sans" value="font-sans" checked>
+    <input type="radio" name="font-family" id="font-dyslexic" value="font-dyslexic">
+    <input type="radio" name="font-family" id="font-mono" value="font-mono">
+    
+    <input type="radio" name="font-size" id="size-s" value="size-s">
+    <input type="radio" name="font-size" id="size-m" value="size-m" checked>
+    <input type="radio" name="font-size" id="size-l" value="size-l">
+    <input type="radio" name="font-size" id="size-xl" value="size-xl">
+    
+    <input type="radio" name="line-height" id="line-compact" value="line-compact">
+    <input type="radio" name="line-height" id="line-normal" value="line-normal" checked>
+    <input type="radio" name="line-height" id="line-loose" value="line-loose">
+    
+    <input type="radio" name="width" id="width-narrow" value="width-narrow">
+    <input type="radio" name="width" id="width-medium" value="width-medium" checked>
+    <input type="radio" name="width" id="width-wide" value="width-wide">
+    
+    <input type="radio" name="align" id="align-left" value="align-left" checked>
+    <input type="radio" name="align" id="align-justify" value="align-justify">
+    
+    <input type="radio" name="note-size" id="note-s" value="note-size-s">
+    <input type="radio" name="note-size" id="note-m" value="note-size-m" checked>
+    <input type="radio" name="note-size" id="note-l" value="note-size-l">
+    
+    <input type="checkbox" id="hamburger-toggle">
+    <input type="checkbox" id="settings-toggle">
+    <input type="checkbox" id="focus-toggle">
+    <input type="checkbox" id="motion-toggle">
+    <input type="checkbox" id="shadow-toggle">
+    <input type="checkbox" id="hyphens-toggle">
+
+    <!--=== TOP BAR ===-->
+    <header class="top-bar">
+        <div class="top-bar-left">
+            <label for="hamburger-toggle" class="hamburger-icon" aria-label="Toggle navigation">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+            </label>
+            <span class="bar-title">Quiet Reader</span>
+        </div>
+        <div class="top-bar-right">
+            <label for="settings-toggle" class="settings-icon" aria-label="Open settings">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M12 1v6m0 6v6m11-7h-6m-6 0H1"></path>
+                </svg>
+            </label>
+        </div>
+    </header>
+
+    <!--=== LEFT SIDEBAR (Navigation) ===-->
+    <aside class="left-sidebar">
+        <nav>
+            <div class="nav-section">
+                <h3>Navigation</h3>
+                <ul>
+                    <li><a href="#">Table of Contents</a></li>
+                    <li><a href="#">Library</a></li>
+                </ul>
+            </div>
+        </nav>
+    </aside>
+
+    <!--=== RIGHT SIDEBAR (Settings) ===-->
+    <aside class="right-sidebar">
+        <form>
+            <!-- THEME -->
+            <div class="accordion-group">
+                <input type="checkbox" id="acc-theme" class="accordion-input" checked>
+                <label for="acc-theme" class="accordion-label">Theme</label>
+                <div class="accordion-content">
+                    <div class="option-grid">
+                        <input type="radio" name="theme" id="theme-light-opt" value="theme-light">
+                        <label for="theme-light-opt">Light</label>
+                        <input type="radio" name="theme" id="theme-sepia-opt" value="theme-sepia">
+                        <label for="theme-sepia-opt">Sepia</label>
+                        <input type="radio" name="theme" id="theme-dark-opt" value="theme-dark">
+                        <label for="theme-dark-opt">Dark</label>
+                        <input type="radio" name="theme" id="theme-high-contrast-opt" value="theme-high-contrast">
+                        <label for="theme-high-contrast-opt">High Contrast</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TYPOGRAPHY -->
+            <div class="accordion-group">
+                <input type="checkbox" id="acc-type" class="accordion-input">
+                <label for="acc-type" class="accordion-label">Typography</label>
+                <div class="accordion-content">
+                    <div class="sub-label">Font Family</div>
+                    <div class="segmented-control">
+                        <input type="radio" name="font-family" id="font-serif-opt" value="font-serif">
+                        <label for="font-serif-opt">Serif</label>
+                        <input type="radio" name="font-family" id="font-sans-opt" value="font-sans">
+                        <label for="font-sans-opt">Sans</label>
+                        <input type="radio" name="font-family" id="font-dyslexic-opt" value="font-dyslexic">
+                        <label for="font-dyslexic-opt">Dyslexic</label>
+                        <input type="radio" name="font-family" id="font-mono-opt" value="font-mono">
+                        <label for="font-mono-opt">Mono</label>
+                    </div>
+
+                    <div class="sub-label">Font Size</div>
+                    <div class="segmented-control">
+                        <input type="radio" name="font-size" id="size-s-opt" value="size-s">
+                        <label for="size-s-opt">S</label>
+                        <input type="radio" name="font-size" id="size-m-opt" value="size-m">
+                        <label for="size-m-opt">M</label>
+                        <input type="radio" name="font-size" id="size-l-opt" value="size-l">
+                        <label for="size-l-opt">L</label>
+                        <input type="radio" name="font-size" id="size-xl-opt" value="size-xl">
+                        <label for="size-xl-opt">XL</label>
+                    </div>
+
+                    <div class="sub-label">Line Height</div>
+                    <div class="segmented-control">
+                        <input type="radio" name="line-height" id="line-compact-opt" value="line-compact">
+                        <label for="line-compact-opt">Compact</label>
+                        <input type="radio" name="line-height" id="line-normal-opt" value="line-normal">
+                        <label for="line-normal-opt">Normal</label>
+                        <input type="radio" name="line-height" id="line-loose-opt" value="line-loose">
+                        <label for="line-loose-opt">Loose</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LAYOUT -->
+            <div class="accordion-group">
+                <input type="checkbox" id="acc-layout" class="accordion-input">
+                <label for="acc-layout" class="accordion-label">Layout</label>
+                <div class="accordion-content">
+                    <div class="sub-label">Width</div>
+                    <div class="segmented-control">
+                        <input type="radio" name="width" id="width-narrow-opt" value="width-narrow">
+                        <label for="width-narrow-opt">Narrow</label>
+                        <input type="radio" name="width" id="width-medium-opt" value="width-medium">
+                        <label for="width-medium-opt">Medium</label>
+                        <input type="radio" name="width" id="width-wide-opt" value="width-wide">
+                        <label for="width-wide-opt">Wide</label>
+                    </div>
+
+                    <div class="sub-label">Alignment</div>
+                    <div class="segmented-control">
+                        <input type="radio" name="align" id="align-left-opt" value="align-left">
+                        <label for="align-left-opt">Left</label>
+                        <input type="radio" name="align" id="align-justify-opt" value="align-justify">
+                        <label for="align-justify-opt">Justify</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ACCESSIBILITY -->
+            <div class="accordion-group">
+                <input type="checkbox" id="acc-access" class="accordion-input">
+                <label for="acc-access" class="accordion-label">Accessibility</label>
+                <div class="accordion-content">
+                    <div class="toggle-row">
+                        <span class="toggle-desc">Focus Mode</span>
+                        <input type="checkbox" id="toggle-focus">
+                        <label for="toggle-focus" class="switch-label"></label>
+                    </div>
+                    <div class="toggle-row">
+                        <span class="toggle-desc">Reduce Motion</span>
+                        <input type="checkbox" id="toggle-motion" checked>
+                        <label for="toggle-motion" class="switch-label"></label>
+                    </div>
+                    <div class="toggle-row">
+                        <span class="toggle-desc">Text Shadow</span>
+                        <input type="checkbox" id="toggle-shadow">
+                        <label for="toggle-shadow" class="switch-label"></label>
+                    </div>
+                    <div class="toggle-row">
+                        <span class="toggle-desc">Hyphenation</span>
+                        <input type="checkbox" id="toggle-hyphens">
+                        <label for="toggle-hyphens" class="switch-label"></label>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </aside>
+
+    <!--=== MAIN CONTENT ===-->
+    <main>
+        <nav class="breadcrumb-nav" aria-label="Breadcrumb">
+            <ol class="breadcrumb-list">
+                <li class="breadcrumb-item"><a href="#">Library</a></li>
+                <li class="breadcrumb-item"><a href="#">Document</a></li>
+                <li class="breadcrumb-item" aria-current="page">{{textrill:title}}</li>
+            </ol>
+        </nav>
+
+        <!-- Textrill converted content with chunk functionality preserved -->
+        <article class="chunk-wrapper" id="textrill-content">
+            <div class="chunk-header">
+                <span>{{textrill:title}}</span>
+            </div>
+            <div class="chunk-content">
+                {{textrill:content}}
+            </div>
+        </article>
+
+        {{textrill:toc}}
+        {{textrill:citations}}
+        {{textrill:glossary}}
+    </main>
+</body>
+</html>
