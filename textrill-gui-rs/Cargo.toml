@@ -8,7 +8,7 @@ repository = "https://github.com/youtubescholar/textrill"
 homepage = "https://github.com/youtubescholar/textrill"
 
 [dependencies]
-textrill = { version = "0.1.1", path = "../textrill" }
+textrill = { version = "0.1.2", path = "../textrill" }
 egui = "0.36"
 # `glow` (OpenGL) rather than the default `wgpu`: it is the smaller tree, and
 # it is what was validated on this host. `default_fonts` bundles a font so the
