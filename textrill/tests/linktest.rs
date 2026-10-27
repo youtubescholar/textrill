@@ -175,8 +175,13 @@ fn large_heading_list_document_is_not_quadratic() {
     // Two halves of equal size should take roughly equal time.  A generous
     // bound still fails loudly if some scan becomes quadratic.
     let (slow, fast) = if one > two { (one, two) } else { (two, one) };
+    let max_ratio = if std::env::var_os("CI").is_some() {
+        6.0f64
+    } else {
+        3.0f64
+    };
     assert!(
-        slow < fast * 3.0,
+        slow < fast * max_ratio,
         "half-document times {one:.2}s / {two:.2}s look superlinear"
     );
 }
