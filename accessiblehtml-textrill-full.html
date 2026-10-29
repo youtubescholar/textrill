@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="{{textrill:lang}}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{textrill:title}}</title>
+    <link rel="stylesheet" href="{{textrill:var:css_href}}">
+    {{textrill:head}}
+</head>
+<body>
+
+<a href="text-version.html" class="sr-only">Accessible Text-Only Version</a>
+
+<!--=== GLOBAL UI CONTROLLERS ===-->
+<input type="checkbox" id="hamburger-toggle">
+<input type="checkbox" id="settings-toggle">
+<input type="radio" name="layout-mode" id="layout-mobile" value="layout-mobile" checked>
+
+<!--=== TOP BAR ===-->
+<nav class="top-bar">
+    <label for="hamburger-toggle" class="menu-btn-label"></label>
+    <span style="font-weight: bold; letter-spacing: 1px;">靜讀</span>
+    <label for="settings-toggle" class="settings-btn-label"></label>
+</nav>
+
+<!--=== LEFT PANEL (Navigation) ===-->
+<aside class="left-panel panel-base">
+    <h2 class="toc-title">Contents</h2>
+    {{textrill:toc}}
+</aside>
+
+<!--=== RIGHT PANEL (Accordion Settings) ===-->
+<aside class="right-panel panel-base">
+    <form autocomplete="off">
+
+        <!-- THEMES -->
+        <div class="accordion-group">
+            <input type="checkbox" id="acc-theme" class="accordion-input" checked>
+            <label for="acc-theme" class="accordion-label">Themes</label>
+            <div class="accordion-content">
+                <div class="option-grid">
+                    <input type="radio" name="color" id="val-light" value="theme-light" checked>
+                    <label for="val-light">Light</label>
+                    <input type="radio" name="color" id="val-dark" value="theme-dark">
+                    <label for="val-dark">Dark</label>
+                    <input type="radio" name="color" id="val-sepia" value="theme-sepia">
+                    <label for="val-sepia">Sepia</label>
+                    <input type="radio" name="color" id="val-onion" value="theme-onion">
+                    <label for="val-onion">Onion</label>
+                    <input type="radio" name="color" id="val-hc" value="theme-hc">
+                    <label for="val-hc">Contrast A</label>
+                    <input type="radio" name="color" id="val-ch" value="theme-ch">
+                    <label for="val-ch">Contrast B</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- TYPOGRAPHY -->
+        <div class="accordion-group">
+            <input type="checkbox" id="acc-type" class="accordion-input">
+            <label for="acc-type" class="accordion-label">Typography</label>
+            <div class="accordion-content">
+                <span class="sub-label">Font Face</span>
+                <div class="option-grid">
+                    <input type="radio" name="font" id="val-mono" value="font-mono" checked>
+                    <label for="val-mono">Mono</label>
+                    <input type="radio" name="font" id="val-sans" value="font-sans">
+                    <label for="val-sans">Sans</label>
+                    <input type="radio" name="font" id="val-serif" value="font-serif">
+                    <label for="val-serif">Serif</label>
+                    <input type="radio" name="font" id="val-cursive" value="font-cursive">
+                    <label for="val-cursive">Cursive</label>
+                </div>
+                <span class="sub-label">Font Size</span>
+                <div class="option-grid">
+                    <input type="radio" name="size" id="val-s-mini" value="size-mini">
+                    <label for="val-s-mini">Mini</label>
+                    <input type="radio" name="size" id="val-s-centi" value="size-centi">
+                    <label for="val-s-centi">Centi</label>
+                    <input type="radio" name="size" id="val-s-small" value="size-small">
+                    <label for="val-s-small">Small</label>
+                    <input type="radio" name="size" id="val-s-standard" value="size-standard" checked>
+                    <label for="val-s-standard">Standard</label>
+                    <input type="radio" name="size" id="val-s-deka" value="size-deka">
+                    <label for="val-s-deka">Deka</label>
+                    <input type="radio" name="size" id="val-s-large" value="size-large">
+                    <label for="val-s-large">Large</label>
+                    <input type="radio" name="size" id="val-s-xl" value="size-xl">
+                    <label for="val-s-xl">X-Large</label>
+                    <input type="radio" name="size" id="val-s-maxi" value="size-maxi">
+                    <label for="val-s-maxi">Maxi</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- SPACING & WIDTH -->
+        <div class="accordion-group">
+            <input type="checkbox" id="acc-space" class="accordion-input">
+            <label for="acc-space" class="accordion-label">Spacing &amp; Width</label>
+            <div class="accordion-content">
+                <span class="sub-label">Line Height</span>
+                <div class="option-grid">
+                    <input type="radio" name="height" id="val-h-condense" value="height-condense">
+                    <label for="val-h-condense">Condense</label>
+                    <input type="radio" name="height" id="val-h-standard" value="height-standard" checked>
+                    <label for="val-h-standard">Standard</label>
+                    <input type="radio" name="height" id="val-h-enlarge" value="height-enlarge">
+                    <label for="val-h-enlarge">Enlarge</label>
+                    <input type="radio" name="height" id="val-h-expand" value="height-expand">
+                    <label for="val-h-expand">Expand</label>
+                </div>
+                <span class="sub-label">Word Spacing</span>
+                <div class="option-grid">
+                    <input type="radio" name="spacing" id="val-sp-basic" value="word-basic" checked>
+                    <label for="val-sp-basic">Basic</label>
+                    <input type="radio" name="spacing" id="val-sp-wider" value="word-wider">
+                    <label for="val-sp-wider">Wider</label>
+                    <input type="radio" name="spacing" id="val-sp-wide" value="word-wide">
+                    <label for="val-sp-wide">Wide</label>
+                    <input type="radio" name="spacing" id="val-sp-xwide" value="word-xwide">
+                    <label for="val-sp-xwide">X-Wide</label>
+                </div>
+                <span class="sub-label">Content Width</span>
+                <div class="option-grid">
+                    <input type="radio" name="width" id="val-w-narrow" value="width-narrow">
+                    <label for="val-w-narrow">Narrow</label>
+                    <input type="radio" name="width" id="val-w-trim" value="width-trim">
+                    <label for="val-w-trim">Trim</label>
+                    <input type="radio" name="width" id="val-w-68" value="width-68" checked>
+                    <label for="val-w-68">68</label>
+                    <input type="radio" name="width" id="val-w-full" value="width-full">
+                    <label for="val-w-full">Full</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- ALIGNMENT -->
+        <div class="accordion-group">
+            <input type="checkbox" id="acc-align" class="accordion-input">
+            <label for="acc-align" class="accordion-label">Alignment</label>
+            <div class="accordion-content">
+                <div class="option-grid">
+                    <input type="radio" name="align" id="val-a-l" value="align-left" checked>
+                    <label for="val-a-l">Left</label>
+                    <input type="radio" name="align" id="val-a-c" value="align-center">
+                    <label for="val-a-c">Center</label>
+                    <input type="radio" name="align" id="val-a-r" value="align-right">
+                    <label for="val-a-r">Right</label>
+                    <input type="radio" name="align" id="val-a-j" value="align-justify">
+                    <label for="val-a-j">Justify</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- NOTES -->
+        <div class="accordion-group">
+            <input type="checkbox" id="acc-notes" class="accordion-input">
+            <label for="acc-notes" class="accordion-label">Notes</label>
+            <div class="accordion-content">
+                <div class="toggle-row">
+                    <span class="toggle-desc">Match Main Font</span>
+                    <input type="checkbox" id="note-font-match" checked>
+                    <label for="note-font-match" class="switch-label"></label>
+                </div>
+                <div style="font-size: 0.8em; color: var(--ui-hint-text); margin-bottom: 15px; margin-top: -5px;">
+                    (Off uses clean Sans-Serif)
+                </div>
+                <span class="sub-label">Note Size</span>
+                <div class="segmented-control">
+                    <input type="radio" name="note-size" id="note-s" value="note-size-s">
+                    <label for="note-s">Small</label>
+                    <input type="radio" name="note-size" id="note-m" value="note-size-m" checked>
+                    <label for="note-m">Text</label>
+                    <input type="radio" name="note-size" id="note-l" value="note-size-l">
+                    <label for="note-l">Large</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- ACCESSIBILITY -->
+        <div class="accordion-group">
+            <input type="checkbox" id="acc-access" class="accordion-input">
+            <label for="acc-access" class="accordion-label">Accessibility</label>
+            <div class="accordion-content">
+                <div class="toggle-row">
+                    <span class="toggle-desc">Focus Mode</span>
+                    <input type="checkbox" id="toggle-focus">
+                    <label for="toggle-focus" class="switch-label"></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-desc">Reduce Motion</span>
+                    <input type="checkbox" id="toggle-motion" checked>
+                    <label for="toggle-motion" class="switch-label"></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-desc">Text Shadow</span>
+                    <input type="checkbox" id="toggle-shadow">
+                    <label for="toggle-shadow" class="switch-label"></label>
+                </div>
+                <div class="toggle-row">
+                    <span class="toggle-desc">Hyphenation</span>
+                    <input type="checkbox" id="toggle-hyphens">
+                    <label for="toggle-hyphens" class="switch-label"></label>
+                </div>
+            </div>
+        </div>
+    </form>
+</aside>
+
+<!--=== MAIN CONTENT ===-->
+<main>
+    <nav class="breadcrumb-nav" aria-label="Breadcrumb">
+        <ol class="breadcrumb-list">
+            <li class="breadcrumb-item"><a href="#">Library</a></li>
+            <li class="breadcrumb-item"><a href="#">Document</a></li>
+            <li class="breadcrumb-item" aria-current="page">{{textrill:title}}</li>
+        </ol>
+    </nav>
+
+    <article class="chunk-wrapper" id="textrill-content">
+        <div class="chunk-header">
+            <span>{{textrill:title}}</span>
+        </div>
+        <div class="chunk-content">
+            {{textrill:content}}
+        </div>
+        <div class="chunk-nav">
+        </div>
+        <div class="notes-section">
+            {{textrill:citations}}
+            {{textrill:glossary}}
+        </div>
+    </article>
+
+    {{textrill:toc}}
+</main>
+</body>
+</html>
