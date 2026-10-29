@@ -103,6 +103,12 @@ pub const PRESETS: &[Preset] = &[
         library: "bare",
         outline: false,
     },
+    Preset {
+        key: "accessible",
+        name: "Accessible",
+        library: "accessible",
+        outline: true,
+    },
 ];
 
 /// The preset stored under `key`, or `None` for an unknown key.
