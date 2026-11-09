@@ -291,7 +291,7 @@ fn the_bare_flag_and_no_flag_behave() {
 #[test]
 fn the_shipped_five_still_resolve_and_convert() {
     let s = Scratch::new("shipped");
-    for name in ["article", "book", "manpage", "slide", "bare"] {
+    for name in ["article", "book", "manpage", "slide", "readable", "bare"] {
         let out = s.run(&["--template_library", name], b"One\n===\n\nText.\n");
         assert_eq!(out.code, 0, "{name}: {}", out.err());
         assert!(!out.out().is_empty(), "{name} produced nothing");

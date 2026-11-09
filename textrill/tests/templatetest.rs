@@ -549,7 +549,7 @@ fn malformed_var_arguments_are_rejected_up_front() {
 
 // ---- the shipped template library ----
 
-/// Every shipped template converts a document out of the box. The four
+/// Every shipped template converts a document out of the box. The
 /// whole-document templates own the page and start with a doctype; `bare`
 /// wraps only the body and is byte-identical to no template at all. Nothing
 /// leaves a literal slot in the output.
@@ -564,6 +564,7 @@ fn every_shipped_template_converts_a_document() {
         ("book", "id=\"book-body\""),
         ("manpage", "id=\"manpage-body\""),
         ("slide", "id=\"deck-body\""),
+        ("readable", "id=\"textrill-content\""),
     ];
     for (name, marker) in document {
         let out = run(&["--template_library", name, &input]);
@@ -697,10 +698,10 @@ fn the_library_refusals_follow_the_model() {
 // The checks run the real binary, so they see exactly what a user gets.
 
 /// The document templates; `bare` is a body wrapper with no head of its own.
-const DOCUMENT_TEMPLATES: [&str; 4] = ["article", "book", "manpage", "slide"];
+const DOCUMENT_TEMPLATES: [&str; 5] = ["article", "book", "manpage", "slide", "readable"];
 
 /// The document templates that carry a `{{textrill:toc}}` slot.
-const TOC_TEMPLATES: [&str; 3] = ["article", "book", "slide"];
+const TOC_TEMPLATES: [&str; 4] = ["article", "book", "slide", "readable"];
 
 /// The inner text of every `<nav ...>...</nav>` in `html`.
 fn nav_bodies(html: &str) -> Vec<String> {

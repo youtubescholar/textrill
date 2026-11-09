@@ -107,6 +107,7 @@ fn category(opt: Opt) -> &'static str {
         | Opt::Chunk
         | Opt::ChunkChars
         | Opt::Section
+        | Opt::SectionChars
         | Opt::StyleUrl
         | Opt::DocumentTemplate
         | Opt::BodyTemplate

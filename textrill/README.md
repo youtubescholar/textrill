@@ -36,7 +36,7 @@ What is **done**:
   endnotes list and a definition list, with no JavaScript and no inference — see
   [Citations and glossary](#citations-and-glossary). Generated `href`s and their
   target ids are checked by a permanent test, as are the `href`s built by
-  `--toc`, `--section` and `--chunk`.
+  `--toc`, `--section`, `--section_chars` and `--chunk`.
 
 Packaging is in the tree for Flatpak, AppImage, deb, rpm and the Windows/macOS
 binaries, with a tag-triggered release workflow in `.github/workflows/`.
@@ -191,7 +191,7 @@ use the GNU long form and can be abbreviated to any unambiguous prefix:
 textrill --bold_delimiter='#' --italic_delimiter='*' --make_links README.md > README.html
 ```
 
-There are **77 options** with **135 accepted spellings** including short
+There are **78 options** with **136 accepted spellings** including short
 aliases; `textrill --help` lists them all with their defaults.
 
 The option names are the upstream ones, unchanged, so a document converts the
@@ -216,6 +216,7 @@ same way under either tool; the one default that differs is the doctype
 | `--lang` | `en` | Declared language of the document, a BCP 47 tag; emitted on the root `<html>` in HTML5 mode, empty disables it (see "Declared language") |
 | `--lang_runs` | off | Wrap runs of a script other than the document language in `<span lang="…">` (disallowed with `--stream`; see "Declared language") |
 | `--section` | off | Wrap each heading section in `<article id="chunk-N">` |
+| `--section_chars` | off | Split one output file into `<article id="chunk-N">` chunks of at most N raw characters |
 | `--toc` | off | Prepend a generated table of contents (implies `--section`) |
 | `--chunk` | off | Write one HTML file per top-level section |
 | `--number_headings` | off | Prefix headings with hierarchical numbers (`1`, `1.1`, …) |
@@ -223,7 +224,7 @@ same way under either tool; the one default that differs is the doctype
 | `--report` | off | Print the inference counts — headings, paragraphs, capitals, breaks, bytes — on standard error |
 | `--body_template` | none | Wrap the body in a template file (slots, see below); the legacy `--template` name still works |
 | `--document_template` | none | Use a whole-document template file |
-| `--template_library` | none | Use a shipped template by name: `article`, `book`, `manpage`, `slide` or `bare` |
+| `--template_library` | none | Use a shipped template by name: `article`, `book`, `manpage`, `slide`, `readable` or `bare` |
 | `--var` | none | Template parameter `name=value`, filled into `{{textrill:var:name}}` (see below); repeat for several |
 | `--preset` | none | Apply the named option bundle from `presets.toml` (see "Presets"); command-line only |
 | `--encoding` | `auto` | How to decode the input (see below) |
@@ -343,8 +344,9 @@ header are the `{{textrill:title}}` and `{{textrill:header}}` slots instead.
 
 ### Sectioning, TOC and multi-file output
 
-These three options are **new in textrill**, not part of the Perl original, and
-all are **off by default** so the reference output never moves.
+The output-shaping options in this section are **new in textrill**, not part of
+the Perl original, and all are **off by default** so the reference output never
+moves.
 
 `--section` wraps each heading-delimited run of the body in
 `<article class="section" id="chunk-N">`. The ids are assigned sequentially in
@@ -352,6 +354,14 @@ the order the sections appear (`chunk-1`, `chunk-2`, …), so they can never
 collide and a link to one can never go stale. `--toc` additionally prepends a
 `<nav class="toc" id="toc">` whose links target those ids; it implies
 `--section`.
+
+`--section_chars N` keeps one output file but splits the body into
+`<article class="section" id="chunk-N">` parts of at most N raw characters,
+preferring a sentence or clause boundary near the limit. The parts are numbered
+`Part 1`, `Part 2`, … in the TOC, so even a heading-less text gets navigable
+chunks; `--toc` is allowed with it. It cannot be combined with heading
+sectioning (`--section`), multi-file output (`--chunk` or `--chunk_chars`),
+`--stream`, or `--extract`.
 
 `--chunk` writes one file per heading at the shallowest level present — for a
 document with `h1` chapters, one file per chapter, with any `h2` subsections
@@ -496,6 +506,7 @@ it and make it your own:
 | `book` | whole document | Front matter with title, TOC, then the body as chapters |
 | `manpage` | whole document | A man-style page: title, body, glossaries |
 | `slide` | whole document | A deck skeleton: title, TOC, body as slides (`--section` gives one slide per heading) |
+| `readable` | whole document | A self-contained reading page: embedded CSS, reader controls, TOC, and one chunk at a time |
 | `bare` | body wrapper | Just `{{textrill:content}}`: converts byte-identically to no template at all |
 
 ```sh
@@ -619,7 +630,7 @@ HTML5 mode the engine emits no inline `style=`, so a strict
 | --- | --- | --- |
 | `id="toc"`, `class="toc"`, `class="toc-list"` | the table-of-contents `<nav>` and its `<ol>` | `--toc` |
 | `class="toc-hN"` (`toc-h1` … `toc-h6`) | each TOC entry; the level lets CSS indent | `--toc` |
-| `class="section"`, `id="chunk-N"` | each section wrapper | `--section`, `--toc`, `--chunk` |
+| `class="section"`, `id="chunk-N"` | each section wrapper | `--section`, `--section_chars`, `--toc`, `--chunk` |
 | `class="document-header"` | the `<header>` wrapping the title `<h1>` | `--title` in the untemplated HTML5 body, and `{{textrill:header}}` in a template |
 | `class="pager"` | the prev/next `<nav>` on a chunked page | `--chunk` |
 | `class="align-right"`, `class="align-center"` | a right/centre-aligned table cell | `--make_tables` (HTML5) |

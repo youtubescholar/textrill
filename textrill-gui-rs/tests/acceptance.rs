@@ -144,7 +144,7 @@ fn option_help_strings_are_unique() {
     // Adding an engine option means adding a panel widget. The count is here
     // to make an addition a deliberate act rather than something that happens
     // when the engine grows an option.
-    assert_eq!(seen.len(), 77, "the engine's option count changed");
+    assert_eq!(seen.len(), 78, "the engine's option count changed");
 }
 
 /// Every option in `cli::SPECS` is reachable as a labelled widget.
@@ -966,6 +966,49 @@ fn the_preview_pane_renders_the_document() {
     harness.get_by_label("Hello preview");
     harness.get_by_label("one");
     harness.get_by_label("two");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Character-chunked output is shown one part at a time in the native preview,
+/// with a selector for the parts. The browser build gets the same behaviour
+/// from the readable template's CSS; egui ignores CSS, so the app supplies it.
+#[test]
+#[allow(clippy::field_reassign_with_default)]
+fn the_preview_shows_one_character_chunk_at_a_time() {
+    let dir = scratch_dir("preview-chunks");
+    let mut app = TextrillApp::with_settings(Settings::with_path(dir.join("textrill.conf")));
+    app.doc.text = "Alpha beta gamma. Delta epsilon zeta. Eta theta iota. \
+                    Kappa lambda mu. Nu xi omicron.\n\n\
+                    Pi rho sigma. Tau upsilon phi. Chi psi omega.\n"
+        .to_string();
+    app.opts.template_library = "readable".to_string();
+    app.opts.section_chars = 60;
+    app.opts.toc = true;
+    app.set_view_mode(textrill_gui::settings::ViewMode::Preview);
+    app.request_conversion();
+    wait_for_conversion(&mut app, Duration::from_secs(10));
+
+    assert!(
+        app.output.matches("class=\"section\"").count() >= 2,
+        "the test document should split:\n{}",
+        app.output
+    );
+
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.set_size(egui::vec2(1000.0, 1400.0));
+    harness.run();
+
+    assert!(
+        harness.query_by_label_contains("omega").is_none(),
+        "the last chunk should not be on screen with the first"
+    );
+    harness.get_by_label("Part 3").click();
+    harness.run();
+    assert!(
+        harness.query_by_label_contains("omega").is_some(),
+        "the selector did not switch to the last chunk"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -2373,7 +2416,7 @@ fn applying_a_preset_sets_the_options_and_is_remembered() {
 fn editing_away_from_a_preset_marks_it_modified() {
     let path = temp_settings_path("preset-modified");
     let mut app = TextrillApp::with_settings(Settings::with_path(&path));
-    app.apply_preset(textrill_gui::presets::get("article").expect("article preset"));
+    app.apply_preset(textrill_gui::presets::get("contents").expect("contents preset"));
     assert!(!app.preset_is_modified());
 
     app.opts.toc = false;
@@ -2382,7 +2425,7 @@ fn editing_away_from_a_preset_marks_it_modified() {
         "editing `toc` should mark Modified"
     );
 
-    app.apply_preset(textrill_gui::presets::get("article").expect("article preset"));
+    app.apply_preset(textrill_gui::presets::get("contents").expect("contents preset"));
     assert!(
         !app.preset_is_modified(),
         "re-applying the preset should clear Modified"
@@ -2593,6 +2636,42 @@ fn the_preset_bar_applies_presets_and_shows_modified() {
         harness.query_by_label("Modified").is_some(),
         "editing away from the preset should show Modified"
     );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The sectioning choices are first-class buttons, so a reader can pick
+/// "Contents" for a generated TOC or "Sections" for chunk ids without hunting
+/// through two different options categories.
+#[test]
+fn the_preset_bar_offers_sections_and_contents() {
+    let path = temp_settings_path("preset-outline-ui");
+    let app = TextrillApp::with_settings(Settings::with_path(&path));
+    let mut harness = Harness::new_ui_state(|ui, app: &mut TextrillApp| app.draw(ui), app);
+    harness.run();
+
+    assert!(harness.query_by_label("Sections").is_some());
+    assert!(harness.query_by_label("Contents").is_some());
+    assert!(harness.query_by_label("Readable 20k").is_some());
+
+    harness.get_by_label("Contents").click();
+    harness.run();
+    assert_eq!(harness.state().preset_key(), "contents");
+    assert_eq!(harness.state().opts.template_library, "article");
+    assert!(harness.state().opts.section && harness.state().opts.toc);
+
+    harness.get_by_label("Sections").click();
+    harness.run();
+    assert_eq!(harness.state().preset_key(), "sections");
+    assert!(harness.state().opts.section);
+    assert!(!harness.state().opts.toc);
+
+    harness.get_by_label("Readable 20k").click();
+    harness.run();
+    assert_eq!(harness.state().preset_key(), "readable");
+    assert_eq!(harness.state().opts.template_library, "readable");
+    assert_eq!(harness.state().opts.section_chars, 20_000);
+    assert!(harness.state().opts.toc && !harness.state().opts.section);
 
     let _ = std::fs::remove_file(&path);
 }

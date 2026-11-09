@@ -491,6 +491,80 @@ pub fn show(ui: &mut Ui, html: &str) -> Option<Action> {
     action
 }
 
+/// The number of `article.section` chunks in `html`, however deeply the
+/// template nests them. Zero means the document is not chunked.
+pub fn section_count(ui: &Ui, html: &str) -> usize {
+    count_chunks(&parsed(ui, html))
+}
+
+fn is_chunk(element: &Element) -> bool {
+    element.tag == "article" && element.class_has("section")
+}
+
+fn count_chunks(items: &[Item]) -> usize {
+    items
+        .iter()
+        .map(|item| match item {
+            Item::Element(element) if is_chunk(element) => 1,
+            Item::Element(element) => count_chunks(&element.children),
+            Item::Text(_) => 0,
+        })
+        .sum()
+}
+
+fn contains_chunks(element: &Element) -> bool {
+    count_chunks(&element.children) > 0
+}
+
+/// Draw only chunk `selected` (zero-based) plus the template's surrounding
+/// content. The TOC nav is omitted in this mode: [`show`] cannot follow an
+/// internal anchor, so the app draws its own chunk selector.
+pub fn show_section(ui: &mut Ui, html: &str, selected: usize) -> Option<Action> {
+    let items = parsed(ui, html);
+    let total = count_chunks(&items);
+    if total == 0 {
+        return show(ui, html);
+    }
+    let mut action = None;
+    let mut seen = 0usize;
+    render_chunk_blocks(ui, &items, selected.min(total - 1), &mut seen, &mut action);
+    action
+}
+
+fn render_chunk_blocks(
+    ui: &mut Ui,
+    items: &[Item],
+    selected: usize,
+    seen: &mut usize,
+    action: &mut Option<Action>,
+) {
+    for item in items {
+        match item {
+            Item::Text(_) => render_blocks(ui, std::slice::from_ref(item), action),
+            Item::Element(element) => {
+                if is_chunk(element) {
+                    if *seen == selected {
+                        render_blocks(ui, &element.children, action);
+                    }
+                    *seen += 1;
+                } else if element.tag == "nav" && element.class_has("toc") {
+                    continue;
+                } else if contains_chunks(element) || element.tag == "aside" {
+                    if element.tag == "blockquote" {
+                        ui.indent("preview-chunk-blockquote", |ui| {
+                            render_chunk_blocks(ui, &element.children, selected, seen, action);
+                        });
+                    } else {
+                        render_chunk_blocks(ui, &element.children, selected, seen, action);
+                    }
+                } else {
+                    render_block(ui, element, action);
+                }
+            }
+        }
+    }
+}
+
 /// Parse once per distinct output. The preview redraws every frame; reparsing
 /// a few hundred kilobytes sixty times a second would be wasteful, and the
 /// produced HTML only changes on a conversion.
@@ -818,7 +892,7 @@ fn render_block(ui: &mut Ui, element: &Element, action: &mut Option<Action>) {
             ui.separator();
             ui.add_space(4.0);
         }
-        "header" | "nav" | "article" | "main" | "section" | "div" | "body" | "figure"
+        "header" | "nav" | "article" | "main" | "section" | "div" | "body" | "aside" | "figure"
         | "figcaption" | "details" | "summary" => {
             render_blocks(ui, &element.children, action);
         }
@@ -1194,5 +1268,16 @@ mod tests {
             panic!("expected p");
         };
         assert_eq!(p.text(), "x");
+    }
+
+    #[test]
+    fn chunks_are_counted_through_wrappers() {
+        let items = parse(
+            "<main><header><h1>T</h1></header>\
+             <article class=\"section\" id=\"chunk-1\"><p>one</p></article>\
+             <article class=\"section\" id=\"chunk-2\"><p>two</p></article></main>",
+        );
+        assert_eq!(count_chunks(&items), 2);
+        assert_eq!(count_chunks(&parse("<main><p>plain</p></main>")), 0);
     }
 }

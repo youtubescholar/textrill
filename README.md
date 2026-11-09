@@ -25,8 +25,8 @@ original is kept as an on-demand cross-check (`make diff`, in the non-gating
 - Tables (`--make_tables`), mail headers (`--mailmode`)
 - Links from URLs, `mailto:` and a user link dictionary
 - Encoding detection: BOM → UTF-16 evidence → UTF-8 → CP1252
-- Output modes: `--toc`, `--section`, `--chunk`, `--extract`, `--stream`
-- Templates: `--template_library article|book|manpage|slide|bare`,
+- Output modes: `--toc`, `--section`, `--section_chars`, `--chunk`, `--extract`, `--stream`
+- Templates: `--template_library article|book|manpage|slide|readable|bare`,
   `--body_template`, `--document_template`, `--var name=value`
 - HTML5 by default; `--xhtml` / `--no-html5` for the older modes
 

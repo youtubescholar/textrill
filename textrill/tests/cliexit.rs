@@ -24,6 +24,7 @@ use std::process::{Command, Stdio};
 const NUMERIC_OPTIONS: &[&str] = &[
     "hrule_min",
     "indent_width",
+    "section_chars",
     "min_caps_length",
     "par_indent",
     "preformat_whitespace_min",
@@ -51,6 +52,7 @@ const BOUNDED: &[(&str, &str)] = &[
 /// unbounded so the port does not diverge from the reference.
 const COMPARISON_ONLY: &[&str] = &[
     "par_indent",
+    "section_chars",
     "short_line_length",
     "underline_length_tolerance",
     "underline_offset_tolerance",

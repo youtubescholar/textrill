@@ -454,7 +454,7 @@ fn find_split_point(text: &str, max_chars: usize) -> usize {
 }
 
 /// Split raw plain text into chunks by character count with smart boundaries.
-fn split_text_by_chars(text: &str, max_chars: usize) -> Vec<String> {
+pub(super) fn split_text_by_chars(text: &str, max_chars: usize) -> Vec<String> {
     if max_chars == 0 {
         return vec![text.to_string()];
     }

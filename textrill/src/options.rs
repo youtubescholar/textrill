@@ -234,9 +234,9 @@ pub struct Options {
     pub template_dir: Vec<String>,
     /// `--catalog_dir` directories containing catalog indexes (`catalog.toml`).
     pub catalog_dir: Vec<String>,
-    /// A template name or `pack-id:name` address: the five shipped names
-    /// (`article`, `book`, `manpage`, `slide`, `bare`) resolve to the
-    /// compiled-in set, and a discovered pack's templates resolve through
+    /// A template name or `pack-id:name` address: the six shipped names
+    /// (`article`, `book`, `manpage`, `slide`, `readable`, `bare`) resolve to
+    /// the compiled-in set, and a discovered pack's templates resolve through
     /// [`crate::pack`]. Exactly one of [`Options::template`],
     /// [`Options::document_template`] and this may be set; its model decides
     /// body vs whole document. Uses only the fixed slots. Empty by default.
@@ -269,6 +269,11 @@ pub struct Options {
     /// `<article class="section" id="chunk-N">` element. Default **off**: the
     /// markup is HTML5-flavoured and would move the reference goldens.
     pub section: bool,
+    /// Split the body into `<article class="section" id="chunk-N">` chunks of
+    /// at most this many raw plain-text characters, rounded down to the nearest
+    /// sentence boundary. Unlike [`Options::chunk_chars`], this keeps one
+    /// document and one output file. Default **off** (0).
+    pub section_chars: usize,
     /// Prepend a generated table of contents linking each section. Implies
     /// sectioning, because the links target the `chunk-N` ids it assigns.
     /// Default **off**.
@@ -407,6 +412,7 @@ impl Default for Options {
             explicit_headings: false,
             extract: false,
             section: false,
+            section_chars: 0,
             toc: false,
             citations: false,
             chunk: false,
@@ -540,6 +546,23 @@ impl Options {
             }
             if self.outfile.is_empty() || self.outfile == "-" {
                 return Err("--chunk_chars requires --outfile".to_string());
+            }
+        }
+        if self.section_chars > 0 {
+            if self.chunk {
+                return Err("--section_chars is not valid with --chunk".to_string());
+            }
+            if self.chunk_chars > 0 {
+                return Err("--section_chars is not valid with --chunk_chars".to_string());
+            }
+            if self.section {
+                return Err("--section_chars is not valid with --section".to_string());
+            }
+            if self.stream {
+                return Err("--section_chars is not valid with --stream".to_string());
+            }
+            if self.extract {
+                return Err("--section_chars is not valid with --extract".to_string());
             }
         }
         Ok(())

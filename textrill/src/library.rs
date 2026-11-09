@@ -1,4 +1,4 @@
-//! The shipped template library: five templates selectable by
+//! The shipped template library: six templates selectable by
 //! `--template_library`, each treated like the matching `--body_template` or
 //! `--document_template` file.
 //!
@@ -54,6 +54,11 @@ pub const LIBRARY: &[Shipped] = &[
         html: include_str!("../templates/slide.html"),
     },
     Shipped {
+        name: "readable",
+        model: Model::Document,
+        html: include_str!("../templates/readable.html"),
+    },
+    Shipped {
         name: "bare",
         model: Model::Body,
         html: include_str!("../templates/bare.html"),
@@ -94,9 +99,9 @@ mod tests {
         }
     }
 
-    /// Pins the library to the documented five, in a stable order and models.
+    /// Pins the library to the documented six, in a stable order and models.
     #[test]
-    fn the_library_is_the_documented_five() {
+    fn the_library_is_the_documented_six() {
         let got: Vec<(&str, Model)> = LIBRARY.iter().map(|s| (s.name, s.model)).collect();
         assert_eq!(
             got,
@@ -105,6 +110,7 @@ mod tests {
                 ("book", Model::Document),
                 ("manpage", Model::Document),
                 ("slide", Model::Document),
+                ("readable", Model::Document),
                 ("bare", Model::Body),
             ]
         );

@@ -30,9 +30,16 @@ pub struct Preset {
     pub name: &'static str,
     /// The shipped template this preset selects (`""` for none).
     library: &'static str,
-    /// Also turn on sectioning and a table of contents. Only set for templates
-    /// that carry the `{{textrill:toc}}` slot the engine requires.
-    outline: bool,
+    /// Wrap each heading-delimited section in an `<article id="chunk-N">`.
+    /// Only set for templates that carry the `{{textrill:toc}}` slot when
+    /// [`Self::toc`] is also set.
+    section: bool,
+    /// Generate a table of contents. Implies [`Self::section`] unless
+    /// [`Self::section_chars`] supplies the wrappers instead.
+    toc: bool,
+    /// Split one document into parts of at most this many raw characters.
+    /// Non-zero replaces heading sectioning with chunk wrappers.
+    section_chars: usize,
 }
 
 impl Preset {
@@ -40,26 +47,45 @@ impl Preset {
     /// preset's own changes applied. Comparing live options against this is
     /// what drives the "Modified" marker.
     pub fn options(&self) -> Options {
-        // `toc` implies sectioning in the engine; setting `section` alongside
-        // it keeps the panel's two checkboxes agreeing with what is produced,
-        // so a preset never shows one checked and the other clear.
+        // `toc` implies heading sectioning unless character chunks provide the
+        // wrappers. Keeping the flags explicit makes the panel agree with what
+        // the engine produces, and avoids the `--section --section_chars`
+        // refusal.
         Options {
             template_library: self.library.to_string(),
-            section: self.outline,
-            toc: self.outline,
+            section: self.section || (self.toc && self.section_chars == 0),
+            section_chars: self.section_chars,
+            toc: self.toc,
             ..Options::default()
         }
     }
 
     /// The one-line explanation shown when the button is hovered.
     pub fn description(&self) -> String {
-        match (self.library.is_empty(), self.outline) {
-            (true, _) => "The engine's own defaults, with no template.".to_string(),
-            (false, true) => format!(
-                "The shipped {:?} template, sectioned with a table of contents.",
+        if self.library.is_empty() {
+            return "The engine's own defaults, with no template.".to_string();
+        }
+        if self.section_chars > 0 {
+            return format!(
+                "The shipped {:?} template in parts of about {} characters with a table of contents.",
+                self.library, self.section_chars
+            );
+        }
+        match (self.section || self.toc, self.toc) {
+            (true, true) => format!(
+                "The shipped {:?} template, split into sections with a table of contents.",
                 self.library
             ),
-            (false, false) => format!("The shipped {:?} template.", self.library),
+            (true, false) => format!(
+                "The shipped {:?} template, split into sections without a table of contents.",
+                self.library
+            ),
+            (false, _) => {
+                format!(
+                    "The shipped {:?} template as one continuous document.",
+                    self.library
+                )
+            }
         }
     }
 }
@@ -71,43 +97,73 @@ pub const PRESETS: &[Preset] = &[
         key: "plain",
         name: "Plain",
         library: "",
-        outline: false,
+        section: false,
+        toc: false,
+        section_chars: 0,
     },
     Preset {
         key: "article",
         name: "Article",
         library: "article",
-        outline: true,
+        section: false,
+        toc: false,
+        section_chars: 0,
+    },
+    Preset {
+        key: "sections",
+        name: "Sections",
+        library: "article",
+        section: true,
+        toc: false,
+        section_chars: 0,
+    },
+    Preset {
+        key: "contents",
+        name: "Contents",
+        library: "article",
+        section: true,
+        toc: true,
+        section_chars: 0,
     },
     Preset {
         key: "book",
         name: "Book",
         library: "book",
-        outline: true,
+        section: true,
+        toc: true,
+        section_chars: 0,
     },
     Preset {
         key: "manpage",
         name: "Man page",
         library: "manpage",
-        outline: false,
+        section: false,
+        toc: false,
+        section_chars: 0,
     },
     Preset {
         key: "slide",
         name: "Slides",
         library: "slide",
-        outline: false,
+        section: true,
+        toc: true,
+        section_chars: 0,
+    },
+    Preset {
+        key: "readable",
+        name: "Readable 20k",
+        library: "readable",
+        section: false,
+        toc: true,
+        section_chars: 20_000,
     },
     Preset {
         key: "bare",
         name: "Bare",
         library: "bare",
-        outline: false,
-    },
-    Preset {
-        key: "accessible",
-        name: "Accessible",
-        library: "accessible",
-        outline: true,
+        section: false,
+        toc: false,
+        section_chars: 0,
     },
 ];
 
@@ -165,17 +221,40 @@ mod tests {
     fn every_preset_is_a_valid_bundle() {
         for preset in PRESETS {
             if preset.library.is_empty() {
-                assert!(!preset.outline, "{}: no template, no toc slot", preset.key);
+                assert!(
+                    !preset.section && !preset.toc,
+                    "{}: no template, no toc slot",
+                    preset.key
+                );
                 continue;
             }
             let shipped = textrill::library::get(preset.library)
                 .unwrap_or_else(|| panic!("{}: unknown template {}", preset.key, preset.library));
-            if preset.outline {
+            if preset.toc {
                 assert!(
                     shipped.html.contains("{{textrill:toc}}"),
                     "{}: {} has no toc slot",
                     preset.key,
                     preset.library
+                );
+            }
+        }
+    }
+
+    /// A contents list without sectioning would link to ids the engine never
+    /// emitted, so no preset may ask for one without either heading sectioning
+    /// or character chunks.
+    #[test]
+    fn a_contents_list_always_implies_sections() {
+        for preset in PRESETS {
+            if preset.toc && preset.section_chars == 0 {
+                assert!(preset.section, "{}: toc without section", preset.key);
+            }
+            if preset.section_chars > 0 {
+                assert!(
+                    !preset.section,
+                    "{}: char chunks plus heading section",
+                    preset.key
                 );
             }
         }
@@ -187,9 +266,42 @@ mod tests {
         assert!(plain.template_library.is_empty());
         assert!(!plain.toc && !plain.section);
 
+        let article = get("article").unwrap().options();
+        assert_eq!(article.template_library, "article");
+        assert!(!article.toc && !article.section);
+
+        let sections = get("sections").unwrap().options();
+        assert_eq!(sections.template_library, "article");
+        assert!(sections.section && !sections.toc);
+
+        let contents = get("contents").unwrap().options();
+        assert_eq!(contents.template_library, "article");
+        assert!(contents.toc && contents.section);
+
         let book = get("book").unwrap().options();
         assert_eq!(book.template_library, "book");
         assert!(book.toc && book.section);
+
+        let slide = get("slide").unwrap().options();
+        assert_eq!(slide.template_library, "slide");
+        assert!(slide.toc && slide.section);
+
+        let readable = get("readable").unwrap().options();
+        assert_eq!(readable.template_library, "readable");
+        assert_eq!(readable.section_chars, 20_000);
+        assert!(readable.toc && !readable.section);
+    }
+
+    /// The three article presets are a progression, not duplicates: each one
+    /// must produce a different bundle from the others.
+    #[test]
+    fn the_article_presets_are_distinct() {
+        let article = get("article").unwrap().options();
+        let sections = get("sections").unwrap().options();
+        let contents = get("contents").unwrap().options();
+        assert!(!same_options(&article, &sections));
+        assert!(!same_options(&article, &contents));
+        assert!(!same_options(&sections, &contents));
     }
 
     #[test]

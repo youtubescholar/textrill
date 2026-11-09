@@ -716,21 +716,95 @@ impl Converter {
 
     fn convert_sources(&mut self, sources: Vec<String>, string_mode: bool) -> String {
         self.notes_error = None;
-        let (start, body, tail) = self.convert_to_parts(sources, string_mode);
-        // Number before sectioning so the TOC labels carry the numbers.
-        let body = if self.opts.number_headings {
-            crate::section::number_headings(&body)
+        let (start, body, toc, tail) = if self.opts.section_chars > 0 {
+            self.convert_char_sections(sources)
         } else {
-            body
+            let (start, body, tail) = self.convert_to_parts(sources, string_mode);
+            // Number before sectioning so the TOC labels carry the numbers.
+            let body = if self.opts.number_headings {
+                crate::section::number_headings(&body)
+            } else {
+                body
+            };
+            // Sectioning is a pure post-pass over the body, so the reference path is
+            // untouched when the flags are off. The TOC is kept separate so a
+            // template can place it.
+            let (toc, body) = if self.opts.section || self.opts.toc {
+                crate::section::sectionize_parts(&body, self.opts.toc)
+            } else {
+                (String::new(), body)
+            };
+            (start, body, toc, tail)
         };
-        // Sectioning is a pure post-pass over the body, so the reference path is
-        // untouched when the flags are off. The TOC is kept separate so a
-        // template can place it.
-        let (toc, body) = if self.opts.section || self.opts.toc {
-            crate::section::sectionize_parts(&body, self.opts.toc)
-        } else {
-            (String::new(), body)
-        };
+        self.finish_document(start, body, toc, tail)
+    }
+
+    /// Convert one document in raw-text chunks of `--section_chars`, wrapping
+    /// each converted chunk as a section. Heading-based sectioning and
+    /// `--toc` are replaced by the chunk wrappers, so a heading-less document
+    /// still gets navigable parts.
+    fn convert_char_sections(&mut self, sources: Vec<String>) -> (String, String, String, String) {
+        let combined = sources.join("\n\n");
+        let chunks = self::pages::split_text_by_chars(&combined, self.opts.section_chars);
+        let mut start = String::new();
+        let mut tail = String::new();
+        let mut parts = Vec::with_capacity(chunks.len());
+        // Heading detection and `--make_anchors` counters span the whole
+        // document, not each chunk: resetting them would restart anchor names
+        // (`section_1` twice) and change heading levels when a style first
+        // appears in a later chunk.
+        let mut heading_styles = self.heading_styles.clone();
+        let mut num_heading_styles = self.num_heading_styles;
+        let mut heading_count = self.heading_count.clone();
+        let mut non_header_anchor = self.non_header_anchor;
+        for (i, chunk) in chunks.iter().enumerate() {
+            let mut opts = self.opts.clone();
+            opts.section_chars = 0;
+            opts.chunk = false;
+            opts.chunk_chars = 0;
+            opts.section = false;
+            opts.toc = false;
+            // Append once below rather than once per chunk.
+            opts.append_file.clear();
+            let mut conv = Converter::new(opts);
+            conv.heading_styles = heading_styles;
+            conv.num_heading_styles = num_heading_styles;
+            conv.heading_count = heading_count;
+            conv.non_header_anchor = non_header_anchor;
+            let (s, b, t) = conv.convert_to_parts(vec![chunk.clone()], false);
+            heading_styles = conv.heading_styles;
+            num_heading_styles = conv.num_heading_styles;
+            heading_count = conv.heading_count;
+            non_header_anchor = conv.non_header_anchor;
+            if i == 0 {
+                start = s;
+                self.title_text = conv.title_text;
+                self.head_inner = conv.head_inner;
+            }
+            tail = t;
+            parts.push(b);
+        }
+        let (toc, mut body) = crate::section::wrap_parts(&parts, self.opts.toc);
+        if self.opts.number_headings {
+            // Number across the finished document, not once per chunk.
+            body = crate::section::number_headings(&body);
+        }
+        if !self.opts.append_file.is_empty() {
+            if let Some(contents) = read_file_with(&self.opts.append_file, self.opts.encoding) {
+                body.push_str(&contents);
+            }
+        }
+        (start, body, toc, tail)
+    }
+
+    /// Add notes and apply the active template, then arrange the document.
+    fn finish_document(
+        &mut self,
+        start: String,
+        body: String,
+        toc: String,
+        tail: String,
+    ) -> String {
         // Collect the note sets over the finished body, so definition content
         // is rendered markup. On failure the body is left as it was and the
         // error recorded: a refused document produces no output.

@@ -216,6 +216,42 @@ pub fn sectionize_parts(body: &str, toc: bool) -> (String, String) {
     (toc_html, out)
 }
 
+/// Wrap already-converted body chunks in `<article class="section" id="chunk-N">`
+/// and, when `toc`, render a TOC whose labels are `Part 1`, `Part 2`, ….
+///
+/// Unlike [`sectionize_parts`], this does not look for headings: every chunk is
+/// exactly one section, which is what `--section_chars` needs for a heading-less
+/// document. Returns `(toc, body)` in the same order as [`sectionize_parts`].
+pub fn wrap_parts(parts: &[String], toc: bool) -> (String, String) {
+    let sections: Vec<Section> = parts
+        .iter()
+        .enumerate()
+        .map(|(i, html)| Section {
+            level: 1,
+            id: format!("chunk-{}", i + 1),
+            label: format!("Part {}", i + 1),
+            html: html.clone(),
+        })
+        .collect();
+    let toc_html = if toc {
+        render_toc(&sections)
+    } else {
+        String::new()
+    };
+    let mut out = String::new();
+    for s in &sections {
+        out.push_str("<article class=\"section\" id=\"");
+        out.push_str(&s.id);
+        out.push_str("\">\n");
+        out.push_str(&s.html);
+        if !s.html.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("</article>\n");
+    }
+    (toc_html, out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,5 +350,26 @@ mod tests {
             number_headings(input),
             "<h1>1 <a name=\"section_1\">A</a></h1>\n<p>x</p>\n"
         );
+    }
+
+    #[test]
+    fn wrap_parts_numbers_chunks_without_headings() {
+        let parts = vec!["<p>one</p>\n".to_string(), "<p>two</p>\n".to_string()];
+        let (toc, body) = wrap_parts(&parts, true);
+        assert!(toc.contains("<a href=\"#chunk-1\">Part 1</a>"));
+        assert!(toc.contains("<a href=\"#chunk-2\">Part 2</a>"));
+        assert!(
+            body.contains("<article class=\"section\" id=\"chunk-1\">\n<p>one</p>\n</article>\n")
+        );
+        assert!(
+            body.contains("<article class=\"section\" id=\"chunk-2\">\n<p>two</p>\n</article>\n")
+        );
+    }
+
+    #[test]
+    fn wrap_parts_without_toc_has_no_navigation() {
+        let (toc, body) = wrap_parts(&["<p>x</p>".to_string()], false);
+        assert!(toc.is_empty());
+        assert!(body.contains("id=\"chunk-1\""));
     }
 }

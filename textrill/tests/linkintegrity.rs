@@ -6,7 +6,8 @@
 //! upstream equivalent to diff against. Running the link checker over the whole
 //! corpus output finds **zero** engine-generated links, which is the problem
 //! this file exists to fix: the code that invents `href`s and the `id`s they
-//! point at is the least-differentially-covered part of the output.
+//! point at is the least-differentially-covered part of the output. The
+//! `--section_chars` chunk links are checked here too.
 //!
 //! # What is and is not checked
 //!
@@ -134,6 +135,10 @@ fn option_sets() -> Vec<(&'static str, Options)> {
             o.toc = true;
             o.section = true;
             o.make_anchors = true;
+        }),
+        ("toc+section_chars", |o| {
+            o.toc = true;
+            o.section_chars = 50;
         }),
     ];
     flags

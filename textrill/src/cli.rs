@@ -136,6 +136,7 @@ option_table![
     Preset, Str, "Apply the named preset from <config>/textrill/presets.toml. Expanded above the rc files and below the other command-line options.", ["preset"];
     Report, Flag, "Print what the conversion recovered (bytes, headings, paragraphs, capitals, breaks) on standard error.", ["report"];
     Section, Flag, "Wrap each heading section in <article>.", ["section"];
+    SectionChars, Int, "Split one output file into <article> chunks of at most this many raw characters, rounded down to a sentence boundary.", ["section_chars"];
     ShortLineLength, Int, "Lines shorter than this are broken with <br/>.", ["short_line_length", "shortline", "s"];
     Stream, Flag, "Read and write a paragraph at a time.", ["stream"];
     StyleUrl, Str, "URL of a stylesheet linked into the output.", ["style_url"];
@@ -144,7 +145,7 @@ option_table![
     BodyTemplate, Str, "Wrap the body in a template file; the whole-document counterpart is --document_template. The old name --template still works but is deprecated.", ["body_template", "template"];
     TemplateDir, StrArray, "Directory to search for template packs; repeat for several.", ["template_dir"];
     CatalogDir, StrArray, "Directory containing a catalog index (catalog.toml) to search/install from; repeat for several.", ["catalog_dir"];
-    TemplateLibrary, Str, "Use a template by name: article, book, manpage, slide, bare, or pack-id:name from a discovered pack.", ["template_library"];
+    TemplateLibrary, Str, "Use a template by name: article, book, manpage, slide, readable, bare, or pack-id:name from a discovered pack.", ["template_library"];
     Title, Str, "Document title.", ["title", "t"];
     Titlefirst, Flag, "Use the first line of the text as the title.", ["titlefirst", "tf"];
     Toc, Flag, "Prepend a generated table of contents.", ["toc"];
@@ -162,7 +163,7 @@ option_table![
 /// The README quotes the option count; binding it here makes an addition a
 /// deliberate, compile-time act rather than a silent prose drift.
 const _: () = assert!(
-    Opt::ALL.len() == 77,
+    Opt::ALL.len() == 78,
     "option count changed; update this assertion and README.md"
 );
 
@@ -289,6 +290,7 @@ pub fn set_opt(opts: &mut Options, opt: Opt, value: &str) -> Result<(), String> 
         Opt::Preset => opts.preset = value.to_string(),
         Opt::Report => opts.report = parse_flag(value)?,
         Opt::Section => opts.section = parse_flag(value)?,
+        Opt::SectionChars => opts.section_chars = parse_int(opt, value)?.max(0) as usize,
         Opt::Stream => opts.stream = parse_flag(value)?,
         Opt::Titlefirst => opts.titlefirst = parse_flag(value)?,
         Opt::Toc => opts.toc = parse_flag(value)?,
@@ -445,6 +447,7 @@ pub fn get_opt(opts: &Options, opt: Opt) -> String {
         Opt::PreserveIndent => opts.preserve_indent.to_string(),
         Opt::Report => opts.report.to_string(),
         Opt::Section => opts.section.to_string(),
+        Opt::SectionChars => opts.section_chars.to_string(),
         Opt::Stream => opts.stream.to_string(),
         Opt::Titlefirst => opts.titlefirst.to_string(),
         Opt::Toc => opts.toc.to_string(),

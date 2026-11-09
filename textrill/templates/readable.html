@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="{{textrill:lang}}">
+<head>
+{{textrill:head}}
+<style>
+:root {
+  --paper: #fdfcf8;
+  --ink: #1b1b1b;
+  --muted: #4d4d4d;
+  --rule: #c9c5bc;
+  --link: #064f9e;
+  --accent: #8a5a00;
+  --panel: #f2eee5;
+  --focus: #064f9e;
+  --reader-size: 1.125rem;
+  --reader-leading: 1.7;
+  --reader-width: 68ch;
+  color-scheme: light;
+}
+body:has(#theme-sepia:checked) {
+  --paper: #f4ecd8;
+  --ink: #33291f;
+  --muted: #5d4d3b;
+  --rule: #b9a98c;
+  --link: #06417a;
+  --accent: #7a3f00;
+  --panel: #e9dfc8;
+  --focus: #7a3f00;
+  color-scheme: light;
+}
+body:has(#theme-dark:checked) {
+  --paper: #121417;
+  --ink: #ececec;
+  --muted: #c7c7c7;
+  --rule: #555b63;
+  --link: #9cc8ff;
+  --accent: #ffd166;
+  --panel: #1d2025;
+  --focus: #ffd166;
+  color-scheme: dark;
+}
+body:has(#theme-contrast:checked) {
+  --paper: #ffffff;
+  --ink: #000000;
+  --muted: #000000;
+  --rule: #000000;
+  --link: #003f8f;
+  --accent: #5c3d00;
+  --panel: #f2f2f2;
+  --focus: #000000;
+  color-scheme: light;
+}
+body:has(#size-large:checked) { --reader-size: 1.375rem; }
+body:has(#size-larger:checked) { --reader-size: 1.625rem; }
+body:has(#leading-roomy:checked) { --reader-leading: 1.9; }
+body:has(#width-narrow:checked) { --reader-width: 52ch; }
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: var(--reader-size);
+  line-height: var(--reader-leading);
+  text-align: left;
+  hyphens: auto;
+  overflow-wrap: break-word;
+}
+a { color: var(--link); text-underline-offset: 0.16em; }
+a:hover { text-decoration-thickness: 0.16em; }
+a:focus-visible,
+summary:focus-visible,
+label:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 0.2rem;
+}
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -5rem;
+  z-index: 20;
+  padding: 0.7rem 1rem;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 0.35rem;
+}
+.skip-link:focus { top: 1rem; }
+.preferences {
+  max-width: calc(var(--reader-width) + 22rem);
+  margin: 0 auto;
+  padding: 0.75rem 1.25rem 0;
+}
+.preferences details {
+  margin-left: auto;
+  width: fit-content;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.8rem;
+}
+.preferences summary {
+  cursor: pointer;
+  font-weight: 650;
+  min-height: 1.5rem;
+}
+.control-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.7rem 0 0.35rem;
+}
+.control-grid input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.control-grid label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper);
+  cursor: pointer;
+}
+.control-grid input:checked + label {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.control-grid input:focus-visible + label {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+.page {
+  display: grid;
+  grid-template-columns: minmax(13rem, 17rem) minmax(0, var(--reader-width));
+  gap: clamp(1.5rem, 4vw, 4rem);
+  justify-content: center;
+  align-items: start;
+  padding: 1.25rem 1.25rem 5rem;
+}
+.page:not(:has(.toc-panel nav)) {
+  grid-template-columns: minmax(0, var(--reader-width));
+}
+.page:not(:has(.toc-panel nav)) .toc-panel { display: none; }
+.toc-panel {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border-right: 1px solid var(--rule);
+  padding: 0 1rem 1rem 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+.toc-title {
+  margin: 0.2rem 0 0.8rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.toc ol { margin: 0; padding: 0; list-style: none; }
+.toc li { margin: 0.2rem 0; }
+.toc a {
+  display: block;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.55rem;
+  border-left: 3px solid transparent;
+  border-radius: 0 0.3rem 0.3rem 0;
+  text-decoration: none;
+}
+.toc a:hover {
+  background: var(--panel);
+  border-left-color: var(--accent);
+  text-decoration: underline;
+}
+.toc .toc-h2 a { padding-left: 1.4rem; }
+.toc .toc-h3 a { padding-left: 2.3rem; }
+.reader { min-width: 0; }
+.document-header {
+  margin: 0 0 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid var(--rule);
+}
+.document-header h1 {
+  margin: 0;
+  font-size: clamp(1.75rem, 5vw, 2.8rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+p { margin: 0 0 1em; }
+h1, h2, h3, h4, h5, h6 {
+  margin: 1.8em 0 0.55em;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+h1 { font-size: 2rem; }
+h2 { font-size: 1.55rem; }
+h3 { font-size: 1.3rem; }
+ul, ol { padding-left: 1.6em; }
+li { margin: 0.3em 0; }
+blockquote {
+  margin: 1.4em 0;
+  padding: 0.2em 1em;
+  border-left: 0.3rem solid var(--accent);
+  color: var(--muted);
+}
+pre {
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.4rem;
+  background: var(--panel);
+  font-size: 0.92em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+code { font-size: 0.95em; }
+img { max-width: 100%; height: auto; }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
+table { width: 100%; border-collapse: collapse; margin: 1.5em 0; }
+th, td { border: 1px solid var(--rule); padding: 0.55rem 0.7rem; text-align: left; }
+th { background: var(--panel); }
+.citations, .glossary {
+  margin-top: 2.5rem;
+  padding-top: 1rem;
+  border-top: 2px solid var(--rule);
+  font-size: 0.95em;
+}
+.reader > article.section { display: block; }
+.page:has(.toc-panel nav) .reader > article.section { display: none; }
+.page:has(.toc-panel nav) .reader > article.section:first-of-type { display: block; }
+.page:has(.toc-panel nav) .reader:has(> article.section:target) > article.section:first-of-type:not(:target) {
+  display: none;
+}
+.page:has(.toc-panel nav) .reader > article.section:target { display: block; }
+
+@media (max-width: 52rem) {
+  .preferences { padding: 0.6rem 1rem 0; }
+  .page { grid-template-columns: minmax(0, var(--reader-width)); padding-top: 0.8rem; }
+  .toc-panel {
+    position: static;
+    max-height: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+    padding: 0 0 0.8rem;
+  }
+  .toc ol { columns: 2 12rem; column-gap: 1rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; animation: none !important; }
+}
+@media print {
+  .preferences, .skip-link, .toc-panel { display: none; }
+  .page { display: block; padding: 0; }
+  .reader > article.section { display: block !important; }
+  body { font-size: 11pt; }
+  a { color: inherit; }
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#textrill-content">Skip to content</a>
+<div class="preferences">
+<details>
+<summary>Reading options</summary>
+<div class="control-grid">
+<input type="radio" name="theme" id="theme-light" checked>
+<label for="theme-light">Light</label>
+<input type="radio" name="theme" id="theme-sepia">
+<label for="theme-sepia">Sepia</label>
+<input type="radio" name="theme" id="theme-dark">
+<label for="theme-dark">Dark</label>
+<input type="radio" name="theme" id="theme-contrast">
+<label for="theme-contrast">High contrast</label>
+</div>
+<div class="control-grid">
+<input type="radio" name="size" id="size-normal" checked>
+<label for="size-normal">Normal text</label>
+<input type="radio" name="size" id="size-large">
+<label for="size-large">Large text</label>
+<input type="radio" name="size" id="size-larger">
+<label for="size-larger">Larger text</label>
+</div>
+<div class="control-grid">
+<input type="radio" name="leading" id="leading-normal" checked>
+<label for="leading-normal">Normal spacing</label>
+<input type="radio" name="leading" id="leading-roomy">
+<label for="leading-roomy">Roomy spacing</label>
+<input type="radio" name="width" id="width-normal" checked>
+<label for="width-normal">Wide column</label>
+<input type="radio" name="width" id="width-narrow">
+<label for="width-narrow">Narrow column</label>
+</div>
+</details>
+</div>
+<div class="page">
+<aside class="toc-panel" aria-label="Contents">
+<p class="toc-title">Contents</p>
+{{textrill:toc}}
+</aside>
+<main class="reader" id="textrill-content">
+{{textrill:header}}
+{{textrill:content}}
+{{textrill:citations}}
+{{textrill:glossary}}
+</main>
+</div>
+</body>
+</html>

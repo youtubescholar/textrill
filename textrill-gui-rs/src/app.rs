@@ -238,6 +238,9 @@ pub struct TextrillApp {
     /// The source/preview split ratio: the fraction of the working area given
     /// to the source pane, the rest to the preview. Clamped in the UI.
     pub split_ratio: f32,
+    /// The selected `article.section` chunk in the native preview, zero-based.
+    /// Clamped every frame, because a conversion can change the count.
+    preview_chunk: usize,
     /// Which view the main working area shows (split, source-only, …).
     pub view_mode: crate::settings::ViewMode,
     /// How tightly the interface is packed.
@@ -354,6 +357,7 @@ impl TextrillApp {
             file_browser: None,
             last_dir: None,
             split_ratio: 0.5,
+            preview_chunk: 0,
             view_mode: crate::settings::ViewMode::default(),
             density: crate::settings::Density::default(),
             drag_start: None,
@@ -477,8 +481,16 @@ impl TextrillApp {
     /// Read `path` as the user presets file, replacing the current list.
     /// Tests use this to point at a scratch file.
     pub fn load_user_presets(&mut self, path: &std::path::Path) -> Result<(), String> {
-        self.user_presets = textrill::presets::load_from(path)?;
-        Ok(())
+        match textrill::presets::load_from(path) {
+            Ok(list) => {
+                self.user_presets = list;
+                Ok(())
+            }
+            Err(e) => {
+                self.user_presets.clear();
+                Err(e)
+            }
+        }
     }
 
     /// The chosen preset's name: the built-in one, the user preset's own name,
@@ -849,6 +861,7 @@ impl TextrillApp {
                 Some(error) => {
                     self.problems = crate::problems::parse(&error);
                     self.output = error;
+                    self.preview_chunk = 0;
                     self.status = "error".to_string();
                 }
                 None => {
@@ -872,6 +885,7 @@ impl TextrillApp {
                             Some(std::mem::replace(&mut self.output, outcome.html));
                     } else {
                         self.output = outcome.html;
+                        self.preview_chunk = 0;
                     }
                     self.doc.note_converted(&self.output);
                     self.counts = textrill::report::Counts::of(&self.output);
@@ -2527,16 +2541,38 @@ impl TextrillApp {
             ui.colored_label(ui.visuals().error_fg_color, "No output was produced.");
             ui.add_space(2.0);
         }
+        let sections = crate::preview::section_count(ui, &self.output);
+        let mut chosen = self.preview_chunk;
+        if sections > 1 {
+            self.preview_chunk = self.preview_chunk.min(sections - 1);
+            chosen = self.preview_chunk;
+            ui.horizontal_wrapped(|ui| {
+                for index in 0..sections {
+                    if ui
+                        .selectable_label(chosen == index, format!("Part {}", index + 1))
+                        .on_hover_text(format!("Show part {} of {sections}", index + 1))
+                        .clicked()
+                    {
+                        chosen = index;
+                    }
+                }
+            });
+        }
+        self.preview_chunk = chosen;
+        let mut action = None;
         egui::ScrollArea::vertical()
             .id_salt("preview-pane")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                if let Some(crate::preview::Action::Open(link)) =
+                action = if sections > 1 {
+                    crate::preview::show_section(ui, &self.output, chosen)
+                } else {
                     crate::preview::show(ui, &self.output)
-                {
-                    self.open_link(&link);
-                }
+                };
             });
+        if let Some(crate::preview::Action::Open(link)) = action {
+            self.open_link(&link);
+        }
     }
 
     /// Write the exact bytes `Save HTML` would write into `dir`, returning the

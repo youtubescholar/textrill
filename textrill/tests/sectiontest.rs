@@ -195,3 +195,61 @@ fn split_sections_ignores_indented_heading_lookalikes() {
     assert_eq!(secs.len(), 1);
     assert_eq!(secs[0].label, "real");
 }
+
+#[test]
+fn section_chars_wraps_a_headingless_document_without_headings() {
+    let text = "Alpha one. Beta two. Gamma three. Delta four. Epsilon five. \
+                Zeta six. Eta seven. Theta eight. Iota nine. Kappa ten. \
+                Lambda eleven. Mu twelve. Nu thirteen. Xi fourteen.\n";
+    let out = render(
+        text,
+        Options {
+            section_chars: 60,
+            toc: true,
+            ..Options::default()
+        },
+    );
+    assert!(out.contains("<nav class=\"toc\" id=\"toc\">"), "{out:?}");
+    assert!(out.contains("<a href=\"#chunk-1\">Part 1</a>"), "{out:?}");
+    assert!(out.contains("<a href=\"#chunk-2\">Part 2</a>"), "{out:?}");
+    assert!(
+        out.contains("<article class=\"section\" id=\"chunk-1\">"),
+        "{out:?}"
+    );
+    assert!(
+        out.contains("<article class=\"section\" id=\"chunk-2\">"),
+        "{out:?}"
+    );
+    assert!(!out.contains("<h1"), "the source has no headings: {out:?}");
+}
+
+#[test]
+fn section_chars_round_trips_through_the_cli() {
+    let mut opts = Options::default();
+    assert_eq!(cli::get_value(&opts, "section_chars").unwrap(), "0");
+    cli::set_value(&mut opts, "section_chars", "20000").unwrap();
+    assert_eq!(opts.section_chars, 20_000);
+    assert_eq!(cli::get_value(&opts, "section_chars").unwrap(), "20000");
+}
+
+#[test]
+fn section_chars_refuses_heading_sectioning_and_other_pipelines() {
+    for (name, set) in [
+        (
+            "section",
+            (|o: &mut Options| o.section = true) as fn(&mut Options),
+        ),
+        ("chunk", |o: &mut Options| o.chunk = true),
+        ("chunk_chars", |o: &mut Options| o.chunk_chars = 10),
+        ("stream", |o: &mut Options| o.stream = true),
+        ("extract", |o: &mut Options| o.extract = true),
+    ] {
+        let mut opts = Options {
+            section_chars: 20_000,
+            ..Options::default()
+        };
+        set(&mut opts);
+        let err = opts.validate().unwrap_err();
+        assert!(err.contains(name), "{name}: {err}");
+    }
+}
